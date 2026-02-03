@@ -55,13 +55,13 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/bot/:id/events", post(handlers::sync::ingest_events));
     
     // Cedros Pay routes (payments and subscriptions)
-    // These should already have auth integration from Cedros Pay crate
     let cedros_routes = cedros::routes();
     
+    // Mount all routes under /v1/ (not /api/v1/ since domain is api.trawlingtraders.com)
     Router::new()
-        .nest("/api/v1", app_routes)
-        .nest("/api/v1", bot_routes)
-        .nest("/api/v1", cedros_routes)
+        .nest("/v1", app_routes)
+        .nest("/v1", bot_routes)
+        .nest("/v1", cedros_routes)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

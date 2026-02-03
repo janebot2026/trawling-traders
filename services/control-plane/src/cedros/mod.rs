@@ -15,7 +15,7 @@ use crate::AppState;
 
 /// Create Cedros Pay routes
 /// 
-/// These routes are mounted under /api/v1/ by the main app router
+/// These routes are mounted under /v1/ by the main app router
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/discovery/agent", get(discovery_agent))
