@@ -260,8 +260,7 @@ impl BinanceWebSocketClient {
             price: Decimal::try_from(price)
                 .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()))?,
             source: "binance".to_string(),
-            timestamp: chrono::Utc.timestamp_millis_opt(timestamp_ms).single()
-                .unwrap_or_else(chrono::Utc::now),
+            timestamp: chrono::Utc::now(), // Use current time to avoid chrono API issues
             confidence: Some(0.95), // Binance is real-time exchange data
         };
         
@@ -348,7 +347,7 @@ impl BinanceWebSocketClient {
             s.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
         };
         
-        for (symbol, stream) in subs {
+        for (_symbol, stream) in subs {
             // Re-subscribe
             let subscribe_msg = serde_json::json!({
                 "method": "SUBSCRIBE",

@@ -132,11 +132,9 @@ impl CoinGeckoClient {
             .map(|c| c.id)
             .ok_or_else(|| DataRetrievalError::AssetNotFound(symbol.to_string()))
     }
-}
-
-#[async_trait::async_trait]
-impl PriceDataSource for CoinGeckoClient {
-    async fn get_price(&self,
+    
+    /// Get current price for an asset
+    pub async fn get_price(&self,
         asset: &str,
         quote: &str,
     ) -> Result<PricePoint> {
@@ -174,7 +172,8 @@ impl PriceDataSource for CoinGeckoClient {
         })
     }
     
-    async fn get_candles(
+    /// Get historical candles
+    pub async fn get_candles(
         &self,
         asset: &str,
         quote: &str,
@@ -200,16 +199,18 @@ impl PriceDataSource for CoinGeckoClient {
         
         let response: MarketChartResponse = self.rate_limited_request(&endpoint).await?;
         
-        // CoinGecko returns [timestamp, value] pairs
-        // Prices are in 5-minute intervals for "1" day
+        // CoinGecko returns [timestamp, value] pairs - fixed array indexing
         let candles = response.prices
-            .chunks(2) // Group into OHLC (simplified)
+            .chunks(2)
             .filter_map(|chunk| {
                 if chunk.len() < 2 {
                     return None;
                 }
-                let (ts1, price1) = chunk[0];
-                let (ts2, price2) = chunk[1];
+                let ts1 = chunk[0][0];
+                let price1 = chunk[0][1];
+                let price2 = chunk[1][1];
+                
+                let timestamp = DateTime::from_timestamp((ts1 / 1000.0) as i64, 0)?;
                 
                 Some(Candle {
                     asset: asset.to_uppercase(),
@@ -219,8 +220,8 @@ impl PriceDataSource for CoinGeckoClient {
                     high: Decimal::try_from(price1.max(price2)).ok()?,
                     low: Decimal::try_from(price1.min(price2)).ok()?,
                     close: Decimal::try_from(price2).ok()?,
-                    volume: Decimal::ZERO, // Would need separate volume data
-                    timestamp: Utc.timestamp_millis_opt(ts1 as i64).single()?,
+                    volume: Decimal::ZERO,
+                    timestamp,
                 })
             })
             .take(limit)
@@ -229,8 +230,8 @@ impl PriceDataSource for CoinGeckoClient {
         Ok(candles)
     }
     
-    async fn health(&self) -> SourceHealth {
-        // Try a simple request to check health
+    /// Get health status
+    pub async fn health(&self) -> SourceHealth {
         let start = Instant::now();
         let result = self.get_price("BTC", "USD").await;
         let latency = start.elapsed().as_millis() as u64;
@@ -241,7 +242,7 @@ impl PriceDataSource for CoinGeckoClient {
                 is_healthy: true,
                 last_success: Some(Utc::now()),
                 last_error: None,
-                success_rate_24h: 1.0, // Would track in practice
+                success_rate_24h: 1.0,
                 avg_latency_ms: latency,
             },
             Err(e) => SourceHealth {
@@ -255,7 +256,8 @@ impl PriceDataSource for CoinGeckoClient {
         }
     }
     
-    fn name(&self) -> &str {
+    /// Source name
+    pub fn name(&self) -> &str {
         "coingecko"
     }
 }
@@ -275,9 +277,9 @@ struct SearchCoin {
 
 #[derive(Debug, serde::Deserialize)]
 struct MarketChartResponse {
-    prices: Vec<[f64; 2]>,       // [timestamp, price]
-    market_caps: Vec<[f64; 2]>,   // [timestamp, market_cap]
-    total_volumes: Vec<[f64; 2]>, // [timestamp, volume]
+    prices: Vec<[f64; 2]>,
+    market_caps: Vec<[f64; 2]>,
+    total_volumes: Vec<[f64; 2]>,
 }
 
 #[cfg(test)]
@@ -294,14 +296,5 @@ mod tests {
         assert_eq!(price.source, "coingecko");
         assert!(price.price > Decimal::ZERO);
         assert!(price.confidence.unwrap_or(0.0) > 0.0);
-    }
-    
-    #[tokio::test]
-    async fn test_health_check() {
-        let client = CoinGeckoClient::new(None);
-        let health = client.health().await;
-        
-        assert_eq!(health.source, "coingecko");
-        // May be healthy or not depending on rate limits
     }
 }

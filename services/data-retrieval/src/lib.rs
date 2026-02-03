@@ -13,7 +13,6 @@ pub use sources::coingecko::CoinGeckoClient;
 pub use sources::binance_ws::BinanceWebSocketClient;
 pub use sources::pyth::PythClient;
 
-use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
@@ -115,7 +114,8 @@ impl PriceAggregator {
             tokio::spawn(async move {
                 loop {
                     if let Some(price) = source.next_price().await {
-                        let key = format!("{}:{}", price.asset, price.quote);
+                        // Use the symbol field directly
+                        let key = price.symbol.clone();
                         let mut p = prices.write().await;
                         p.insert(key, price);
                     } else {
@@ -133,7 +133,7 @@ impl PriceAggregator {
         asset: &str,
         quote: &str,
     ) -> Result<PricePoint> {
-        let key = format!("{}:{}", asset.to_uppercase(), quote.to_uppercase());
+        let key = format!("{}/{}", asset.to_uppercase(), quote.to_uppercase());
         
         // Check real-time cache first (WebSocket) - only for crypto
         let asset_class = AssetClass::from_symbol(asset);
@@ -222,16 +222,20 @@ impl PriceAggregator {
             .iter()
             .map(|p| {
                 let weight = p.confidence.unwrap_or(0.5);
-                p.price * rust_decimal::Decimal::from_f64(weight).unwrap_or_default()
+                p.price * rust_decimal::Decimal::try_from(weight).unwrap_or_default()
             })
             .sum();
         
-        let aggregated_price = weighted_sum / rust_decimal::Decimal::from_f64(total_weight).unwrap_or_default();
+        let aggregated_price = weighted_sum / rust_decimal::Decimal::try_from(total_weight).unwrap_or_default();
         
         // Calculate spread
         let prices_f64: Vec<f64> = prices
             .iter()
-            .filter_map(|p| p.price.to_f64())
+            .filter_map(|p| {
+                // Convert Decimal to f64 via string parsing
+                let s = p.price.to_string();
+                s.parse::<f64>().ok()
+            })
             .collect();
         
         let min_price = prices_f64.iter().copied().fold(f64::INFINITY, f64::min);
@@ -347,80 +351,4 @@ pub struct SupportedSymbols {
     pub stocks: Vec<&'static str>,
     pub etfs: Vec<&'static str>,
     pub metals: Vec<&'static str>,
-}
-
-#[async_trait]
-impl PriceDataSource for CoinGeckoClient {
-    async fn get_price(&self,
-        asset: &str,
-        quote: &str,
-    ) -> Result<PricePoint> {
-        self.get_price(asset, quote).await
-    }
-    
-    async fn get_candles(
-        &self,
-        asset: &str,
-        quote: &str,
-        timeframe: TimeFrame,
-        limit: usize,
-    ) -> Result<Vec<Candle>> {
-        self.get_candles(asset, quote, timeframe, limit).await
-    }
-    
-    async fn health(&self) -> SourceHealth {
-        self.health().await
-    }
-    
-    fn name(&self) -> &str {
-        "coingecko"
-    }
-}
-
-#[async_trait]
-impl PriceDataSource for PythClient {
-    async fn get_price(
-        &self,
-        asset: &str,
-        _quote: &str,
-    ) -> Result<PricePoint> {
-        // Pyth always returns USD prices
-        self.get_price(asset).await
-    }
-    
-    async fn get_candles(
-        &self,
-        _asset: &str,
-        _quote: &str,
-        _timeframe: TimeFrame,
-        _limit: usize,
-    ) -> Result<Vec<Candle>> {
-        Err(anyhow::anyhow!("Candles not supported by Pyth"))
-    }
-    
-    async fn health(&self) -> SourceHealth {
-        // Quick health check
-        match self.get_price("BTC").await {
-            Ok(_) => SourceHealth {
-                source: "pyth".to_string(),
-                is_healthy: true,
-                last_success: Some(Utc::now()),
-                last_error: None,
-                success_rate_24h: 1.0,
-                avg_latency_ms: 200,
-            },
-            Err(e) => SourceHealth {
-                source: "pyth".to_string(),
-                is_healthy: false,
-                last_success: None,
-                last_error: Some(e.to_string()),
-                success_rate_24h: 0.0,
-                avg_latency_ms: 0,
-            },
-        }
-    }
-    
-    fn name(&self) -> &str {
-        "pyth"
-    }
 }

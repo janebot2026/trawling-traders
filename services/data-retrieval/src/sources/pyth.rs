@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use reqwest::Client;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::SystemTime;
 use tracing::{debug, error, info, warn};
 
 use crate::types::PricePoint;
@@ -11,7 +12,7 @@ const PYTH_HERMES_BASE: &str = "https://hermes.pyth.network/v2";
 
 /// Pyth price feed ID mapping for common stocks/metals
 /// Full list: https://pyth.network/price-feeds
-pub static PYTH_FEED_IDS: phf::Map<'static str, &'static str> = phf::phf_map! {
+pub static PYTH_FEED_IDS: phf::Map<&str, &str> = phf::phf_map! {
     // Stocks
     "AAPL" => "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
     "TSLA" => "c5e0a3cbf1fc4e49bf7fbdc6a5009d8c98a7d9ba2d293b8ab0f0e8a1c4e3d8f9",
@@ -83,7 +84,8 @@ impl PythClient {
     }
 
     /// Get price for a stock/metal symbol
-    pub async fn get_price(&self,
+    pub async fn get_price(
+        &self,
         symbol: &str,
     ) -> Result<PricePoint> {
         let feed_id = PYTH_FEED_IDS
@@ -124,36 +126,36 @@ impl PythClient {
         let price_data = parsed.price;
         
         // Pyth returns price as integer with exponent
-        // e.g., price="122500000", expo=-8 means $1.225
         let price_int: i64 = price_data.price.parse()
             .context("Failed to parse Pyth price")?;
-        let price = (price_int as f64) * 10f64.powi(price_data.expo);
+        let price_f64 = (price_int as f64) * 10f64.powi(price_data.expo);
         
         let confidence: u64 = price_data.conf.parse()
             .context("Failed to parse Pyth confidence")?;
         let confidence_usd = (confidence as f64) * 10f64.powi(price_data.expo);
 
-        let timestamp = SystemTime::UNIX_EPOCH 
-            + std::time::Duration::from_secs(price_data.publish_time as u64);
+        let timestamp = DateTime::from_timestamp(price_data.publish_time, 0)
+            .unwrap_or_else(Utc::now);
 
         info!(
             "Pyth price for {}: ${:.4} (confidence: ${:.4})",
-            symbol, price, confidence_usd
+            symbol, price_f64, confidence_usd
         );
 
         Ok(PricePoint {
             symbol: symbol.to_string(),
-            price,
+            price: Decimal::try_from(price_f64)
+                .map_err(|e| anyhow::anyhow!("Failed to convert price: {}", e))?,
             source: "pyth".to_string(),
             timestamp,
-            confidence: Some(confidence_usd / price), // As ratio
+            confidence: Some(if price_f64 > 0.0 { confidence_usd / price_f64 } else { 0.0 }),
         })
     }
 
     /// Get multiple prices in one request (more efficient)
     pub async fn get_prices_batch(
         &self,
-        symbols: &[\u0026str],
+        symbols: &[&str],
     ) -> Result<HashMap<String, PricePoint>> {
         let feed_ids: Vec<&str> = symbols
             .iter()
@@ -191,16 +193,17 @@ impl PythClient {
         for parsed in update.parsed {
             if let Some(symbol) = id_to_symbol.get(parsed.id.as_str()) {
                 let price_int: i64 = parsed.price.price.parse()?;
-                let price = (price_int as f64) * 10f64.powi(parsed.price.expo);
+                let price_f64 = (price_int as f64) * 10f64.powi(parsed.price.expo);
                 
-                let timestamp = SystemTime::UNIX_EPOCH 
-                    + std::time::Duration::from_secs(parsed.price.publish_time as u64);
+                let timestamp = DateTime::from_timestamp(parsed.price.publish_time, 0)
+                    .unwrap_or_else(Utc::now);
 
                 result.insert(
                     symbol.to_string(),
                     PricePoint {
                         symbol: symbol.to_string(),
-                        price,
+                        price: Decimal::try_from(price_f64)
+                            .map_err(|e| anyhow::anyhow!("Failed to convert price: {}", e))?,
                         source: "pyth".to_string(),
                         timestamp,
                         confidence: None,
