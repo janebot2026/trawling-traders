@@ -53,7 +53,7 @@ aes-gcm = "0.10"
 base64 = "0.21"
 
 # Decimal for prices
-rust_decimal = { version = "1.32", features = ["serde"] }
+rust_decimal = { version = "1.35", features = ["serde", "sqlx-postgres"] }
 
 # Cedros Pay integration
 cedros-pay = "0.1.0"

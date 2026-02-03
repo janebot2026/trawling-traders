@@ -166,8 +166,11 @@ pub enum DataRetrievalError {
     #[error("API request failed: {0}")]
     ApiError(String),
     
-    #[error("Rate limit exceeded for {source}")]
-    RateLimit { source: String, retry_after: Option<u64> },
+    #[error("Rate limit exceeded for {source_name}")]
+    RateLimit { 
+        source_name: String, 
+        retry_after: Option<u64> 
+    },
     
     #[error("Invalid response format: {0}")]
     InvalidResponse(String),

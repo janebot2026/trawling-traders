@@ -5,9 +5,49 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 // Re-export types from shared types package
-pub use data_retrieval::types::{
-    AlgorithmMode, AssetFocus, Persona, Strictness, TimeFrame, TradingMode,
-};
+pub use data_retrieval::types::TimeFrame;
+
+// Trading enums defined locally
+#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]
+#[sqlx(type_name = "persona", rename_all = "snake_case")]
+pub enum Persona {
+    Beginner,
+    Tweaker,
+    QuantLite,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]
+#[sqlx(type_name = "algorithm_mode", rename_all = "snake_case")]
+pub enum AlgorithmMode {
+    Trend,
+    MeanReversion,
+    Breakout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]
+#[sqlx(type_name = "asset_focus", rename_all = "snake_case")]
+pub enum AssetFocus {
+    Majors,
+    TokenizedEquities,
+    TokenizedMetals,
+    Memes,
+    Custom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]
+#[sqlx(type_name = "strictness", rename_all = "snake_case")]
+pub enum Strictness {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]
+#[sqlx(type_name = "trading_mode", rename_all = "snake_case")]
+pub enum TradingMode {
+    Paper,
+    Live,
+}
 
 /// User entity
 #[derive(Debug, Clone, FromRow, Serialize)]
@@ -31,7 +71,7 @@ pub struct Subscription {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, sqlx::Type, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "subscription_status", rename_all = "snake_case")]
 pub enum SubscriptionStatus {
     Active,
@@ -59,7 +99,7 @@ pub struct Bot {
     pub last_heartbeat_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, sqlx::Type, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "bot_status", rename_all = "snake_case")]
 pub enum BotStatus {
     Provisioning,
@@ -70,7 +110,7 @@ pub enum BotStatus {
     Destroying,
 }
 
-#[derive(Debug, Clone, sqlx::Type, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "config_status", rename_all = "snake_case")]
 pub enum ConfigStatus {
     Pending,
@@ -121,7 +161,7 @@ pub struct Event {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, sqlx::Type, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "event_type", rename_all = "snake_case")]
 pub enum EventType {
     TradeOpened,
@@ -135,8 +175,10 @@ pub enum EventType {
 
 // API Request/Response types
 
-#[derive(Debug, Deserialize)]
+/// Request to create a new bot
+#[derive(Debug, Deserialize, validator::Validate)]
 pub struct CreateBotRequest {
+    #[validate(length(min = 1, max = 50))]
     pub name: String,
     pub persona: Persona,
     pub asset_focus: AssetFocus,
@@ -146,9 +188,10 @@ pub struct CreateBotRequest {
     pub trading_mode: TradingMode,
     pub llm_provider: String,
     pub llm_api_key: String,
+    pub custom_assets: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RiskCaps {
     pub max_position_size_percent: i32,
     pub max_daily_loss_usd: i32,
@@ -214,8 +257,49 @@ pub struct WalletReportRequest {
     pub wallet_address: String,
 }
 
-#[derive(Debug, Serialize)]
+/// Bot configuration payload - flat structure for API
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BotConfigPayload {
+    pub name: String,
+    pub persona: Persona,
+    pub asset_focus: AssetFocus,
+    pub custom_assets: Option<Vec<String>>,
+    pub algorithm_mode: AlgorithmMode,
+    pub strictness: Strictness,
+    pub trading_mode: TradingMode,
+    pub risk_caps: RiskCaps,
+    pub llm_provider: String,
+    pub llm_api_key: String,
+}
+
+// Response types
+#[derive(Debug, Serialize)]
+pub struct ListBotsResponse {
+    pub bots: Vec<Bot>,
+    pub total: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BotResponse {
+    pub bot: Bot,
+    pub config: Option<ConfigVersion>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MetricsResponse {
+    pub metrics: Vec<Metric>,
+    pub range: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EventsResponse {
+    pub events: Vec<Event>,
+    pub next_cursor: Option<String>,
+}
+
+// Sync adapter response types
+#[derive(Debug, Serialize)]
+pub struct BotConfigResponse {
     pub version: String,
     pub hash: String,
     pub agent_config: AgentConfig,

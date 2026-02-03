@@ -43,8 +43,8 @@ impl RedisCache {
         let key = format!("price:{}:{}", asset.to_uppercase(), quote.to_uppercase());
         let json = serde_json::to_string(price)?;
         
-        // Cache for 60 seconds
-        self.client.clone()
+        // Cache for 60 seconds - explicit type annotation to avoid never type fallback
+        let _: () = self.client.clone()
             .set_ex(key, json, 60)
             .await?;
         
@@ -58,7 +58,7 @@ impl RedisCache {
         quote: &str,
     ) -> anyhow::Result<()> {
         let key = format!("price:{}:{}", asset.to_uppercase(), quote.to_uppercase());
-        self.client.clone().del(key).await?;
+        let _: () = self.client.clone().del(key).await?;
         Ok(())
     }
 }

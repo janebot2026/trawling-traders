@@ -18,21 +18,21 @@ tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-# Error handling
-anyhow = "1.0"
-thiserror = "1.0"
+# Error handling - match cedros-pay versions
+anyhow = "1.0.86"
+thiserror = "1.0.63"
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
 
-# Decimal for prices
-rust_decimal = { version = "1.32", features = ["serde"] }
+# Decimal for prices - updated for sqlx 0.8 compatibility
+rust_decimal = { version = "1.35", features = ["serde"] }
 
 # Redis for caching
-redis = { version = "0.23", features = ["tokio-comp"] }
+redis = { version = "0.25", features = ["tokio-comp"] }
 
 # WebSocket for real-time feeds
-tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 futures = "0.3"
 
 # URL parsing
@@ -46,7 +46,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 # Configuration
-config = "0.13"
+config = "0.14"
 dotenvy = "0.15"
 
 # Static maps (for Pyth feed IDs)
@@ -54,4 +54,4 @@ phf = { version = "0.11", features = ["macros"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
-wiremock = "0.5"
+wiremock = "0.6"

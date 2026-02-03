@@ -16,7 +16,7 @@ use crate::{
 pub async fn get_bot_config(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
-) -> Result<Json<BotConfigPayload>>, (StatusCode, String)> {
+) -> Result<Json<BotConfigResponse>, (StatusCode, String)> {
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
         .bind(bot_id)
         .fetch_one(&state.db)
@@ -39,7 +39,7 @@ pub async fn get_bot_config(
     let decrypted_key = decrypt_api_key(&config.encrypted_llm_api_key)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     
-    let payload = BotConfigPayload {
+    let payload = BotConfigResponse {
         version: format!("v{}", config.version),
         hash: config_hash,
         agent_config: AgentConfig {
@@ -148,7 +148,7 @@ pub async fn heartbeat(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
     Json(req): Json<HeartbeatRequest>,
-) -> Result<Json<HeartbeatResponse>>, (StatusCode, String)> {
+) -> Result<Json<HeartbeatResponse>, (StatusCode, String)> {
     sqlx::query(
         "UPDATE bots SET status = $1::bot_status, last_heartbeat_at = $2, updated_at = NOW() WHERE id = $3"
     )
@@ -215,7 +215,7 @@ pub async fn ingest_events(
 pub async fn register_bot(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
-) -> Result<Json<RegistrationResponse>>, (StatusCode, String)> {
+) -> Result<Json<RegistrationResponse>, (StatusCode, String)> {
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
         .bind(bot_id)
         .fetch_one(&state.db)

@@ -6,8 +6,10 @@ use axum::{
 use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
+use chrono::Utc;
 
 use crate::{
+    models::User,
     models::*,
     AppState,
 };
@@ -16,7 +18,7 @@ use crate::{
 pub async fn list_bots(
     State(state): State<Arc<AppState>>,
     // TODO: Add auth extractor to get user_id from JWT
-) -> Result<Json<ListBotsResponse>>, (StatusCode, String)> {
+) -> Result<Json<ListBotsResponse>, (StatusCode, String)> {
     // Placeholder: use a mock user_id
     let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
     
@@ -37,7 +39,7 @@ pub async fn list_bots(
 pub async fn create_bot(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateBotRequest>,
-) -> Result<Json<Bot>>, (StatusCode, String)> {
+) -> Result<Json<Bot>, (StatusCode, String)> {
     // Validate request
     if let Err(errors) = req.validate() {
         return Err((StatusCode::BAD_REQUEST, errors.to_string()));
@@ -135,7 +137,7 @@ pub async fn create_bot(
 pub async fn get_bot(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
-) -> Result<Json<BotResponse>>, (StatusCode, String)> {
+) -> Result<Json<BotResponse>, (StatusCode, String)> {
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
         .bind(bot_id)
         .fetch_one(&state.db)
@@ -162,7 +164,7 @@ pub async fn update_bot_config(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
     Json(req): Json<UpdateBotConfigRequest>,
-) -> Result<Json<ConfigVersion>>, (StatusCode, String)> {
+) -> Result<Json<ConfigVersion>, (StatusCode, String)> {
     // Get current version
     let current_version: i32 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(version), 0) FROM config_versions WHERE bot_id = $1"
@@ -261,7 +263,7 @@ pub async fn get_metrics(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
     // TODO: Add query param for range
-) -> Result<Json<MetricsResponse>>, (StatusCode, String)> {
+) -> Result<Json<MetricsResponse>, (StatusCode, String)> {
     let metrics = sqlx::query_as::<_, Metric>(
         r#"
         SELECT * FROM metrics 
@@ -286,7 +288,7 @@ pub async fn get_metrics(
 pub async fn get_events(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
-) -> Result<Json<EventsResponse>>, (StatusCode, String)> {
+) -> Result<Json<EventsResponse>, (StatusCode, String)> {
     let events = sqlx::query_as::<_, Event>(
         "SELECT * FROM events WHERE bot_id = $1 ORDER BY created_at DESC LIMIT 100"
     )
@@ -302,3 +304,18 @@ pub async fn get_events(
 }
 
 use validator::Validate;
+
+/// GET /me - Get current user
+pub async fn get_current_user(
+    State(_state): State<Arc<AppState>>,
+) -> Result<Json<User>, (StatusCode, String)> {
+    // Placeholder: return mock user
+    let user = User {
+        id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+        email: "user@example.com".to_string(),
+        cedros_user_id: "cedros_user_123".to_string(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    Ok(Json(user))
+}

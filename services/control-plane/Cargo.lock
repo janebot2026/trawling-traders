@@ -1425,7 +1425,7 @@ dependencies = [
  "async-trait",
  "axum 0.7.9",
  "chrono",
- "config 0.13.4",
+ "config 0.14.1",
  "dotenvy",
  "futures",
  "phf",
@@ -1436,7 +1436,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite 0.20.1",
+ "tokio-tungstenite 0.21.0",
  "tower-http 0.5.2",
  "tracing",
  "tracing-subscriber",
@@ -3948,9 +3948,9 @@ dependencies = [
 
 [[package]]
 name = "redis"
-version = "0.23.3"
+version = "0.25.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f49cdc0bb3f412bf8e7d1bd90fe1d9eb10bc5c399ba90973c14662a27b3f8ba"
+checksum = "e0d7a6955c7511f60f3ba9e86c6d02b3c3f144f8c24b288d1f4e18074ab8bbec"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3961,7 +3961,7 @@ dependencies = [
  "pin-project-lite",
  "ryu",
  "sha1_smol",
- "socket2 0.4.10",
+ "socket2 0.5.10",
  "tokio",
  "tokio-util",
  "url",
@@ -4859,16 +4859,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "socket2"
-version = "0.4.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f7916fc008ca5542385b89a3d3ce689953c143e9304a9bf8beec1de48994c0d"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]
@@ -8182,10 +8172,8 @@ checksum = "212d5dcb2a1ce06d81107c3d0ffa3121fe974b73f068c8282cb1c32328113b6c"
 dependencies = [
  "futures-util",
  "log",
- "native-tls",
  "rustls 0.21.12",
  "tokio",
- "tokio-native-tls",
  "tokio-rustls 0.24.1",
  "tungstenite 0.20.1",
  "webpki-roots 0.25.4",
@@ -8199,10 +8187,12 @@ checksum = "c83b561d025642014097b66e6c1bb422783339e0909e4429cde4749d1990bc38"
 dependencies = [
  "futures-util",
  "log",
+ "native-tls",
  "rustls 0.22.4",
  "rustls-native-certs 0.7.3",
  "rustls-pki-types",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls 0.25.0",
  "tungstenite 0.21.0",
 ]
@@ -8475,7 +8465,6 @@ dependencies = [
  "http 0.2.12",
  "httparse",
  "log",
- "native-tls",
  "rand 0.8.5",
  "rustls 0.21.12",
  "sha1",
@@ -8497,6 +8486,7 @@ dependencies = [
  "http 1.4.0",
  "httparse",
  "log",
+ "native-tls",
  "rand 0.8.5",
  "rustls 0.22.4",
  "rustls-pki-types",

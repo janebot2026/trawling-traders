@@ -83,7 +83,7 @@ impl CoinGeckoClient {
                 .and_then(|v| v.parse::<u64>().ok());
             
             return Err(DataRetrievalError::RateLimit {
-                source: "coingecko".to_string(),
+                source_name: "coingecko".to_string(),
                 retry_after,
             });
         }
