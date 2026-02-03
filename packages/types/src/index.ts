@@ -77,6 +77,9 @@ export interface Bot {
   region: string;
   ipAddress?: string;
   
+  // Agent wallet - created by bot on VPS via Solana CLI
+  agentWallet?: string; // Solana address
+  
   // Config state
   desiredVersionId: string;
   appliedVersionId?: string;
