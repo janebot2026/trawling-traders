@@ -2,6 +2,7 @@ import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { CedrosLoginProvider } from '@cedros/login-react-native';
+import { CedrosProvider } from '@cedros/pay-react-native';
 import { AppNavigator } from './src/navigation/AppNavigator';
 
 // Control plane API URL - update this to match your deployment
@@ -16,10 +17,18 @@ export default function App() {
         retries: 3,
       }}
     >
-      <SafeAreaProvider>
-        <AppNavigator />
-        <StatusBar style="auto" />
-      </SafeAreaProvider>
+      <CedrosProvider
+        config={{
+          apiUrl: CONTROL_PLANE_URL,
+          stripePublicKey: process.env.STRIPE_PUBLIC_KEY,
+          solanaNetwork: 'mainnet-beta',
+        }}
+      >
+        <SafeAreaProvider>
+          <AppNavigator />
+          <StatusBar style="auto" />
+        </SafeAreaProvider>
+      </CedrosProvider>
     </CedrosLoginProvider>
   );
 }
