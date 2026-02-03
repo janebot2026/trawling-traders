@@ -264,7 +264,8 @@ pub async fn get_metrics(
     Path(bot_id): Path<Uuid>,
     // TODO: Add query param for range
 ) -> Result<Json<MetricsResponse>, (StatusCode, String)> {
-    let metrics = sqlx::query_as::<_, Metric>(
+    // Query using MetricDb (BigDecimal) then convert to Metric (Decimal)
+    let metrics_db = sqlx::query_as::<_, MetricDb>(
         r#"
         SELECT * FROM metrics 
         WHERE bot_id = $1 
@@ -277,6 +278,9 @@ pub async fn get_metrics(
     .fetch_all(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // Convert MetricDb to Metric
+    let metrics: Vec<Metric> = metrics_db.into_iter().map(Metric::from).collect();
     
     Ok(Json(MetricsResponse {
         metrics,

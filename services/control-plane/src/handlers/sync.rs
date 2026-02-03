@@ -161,13 +161,17 @@ pub async fn heartbeat(
     
     if let Some(metrics) = req.metrics {
         for metric in metrics {
+            // Convert Decimal to BigDecimal for database storage
+            let equity_bd = bigdecimal_from_decimal(metric.equity);
+            let pnl_bd = bigdecimal_from_decimal(metric.pnl);
+            
             sqlx::query(
                 "INSERT INTO metrics (bot_id, timestamp, equity, pnl) VALUES ($1, $2, $3, $4)"
             )
             .bind(bot_id)
             .bind(metric.timestamp)
-            .bind(metric.equity)
-            .bind(metric.pnl)
+            .bind(equity_bd)
+            .bind(pnl_bd)
             .execute(&state.db)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;

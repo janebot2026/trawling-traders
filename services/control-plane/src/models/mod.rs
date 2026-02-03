@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use bigdecimal::BigDecimal;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -140,14 +141,47 @@ pub struct ConfigVersion {
     pub created_at: DateTime<Utc>,
 }
 
-/// Metric data point for bot performance
-#[derive(Debug, Clone, FromRow, Serialize)]
+/// Metric data point for bot performance (DB representation using BigDecimal)
+#[derive(Debug, Clone, FromRow)]
+pub struct MetricDb {
+    pub id: Uuid,
+    pub bot_id: Uuid,
+    pub timestamp: DateTime<Utc>,
+    pub equity: BigDecimal,
+    pub pnl: BigDecimal,
+}
+
+/// Metric for API responses (using rust_decimal)
+#[derive(Debug, Clone, Serialize)]
 pub struct Metric {
     pub id: Uuid,
     pub bot_id: Uuid,
     pub timestamp: DateTime<Utc>,
     pub equity: Decimal,
     pub pnl: Decimal,
+}
+
+impl From<MetricDb> for Metric {
+    fn from(db: MetricDb) -> Self {
+        Self {
+            id: db.id,
+            bot_id: db.bot_id,
+            timestamp: db.timestamp,
+            equity: decimal_from_bigdecimal(db.equity),
+            pnl: decimal_from_bigdecimal(db.pnl),
+        }
+    }
+}
+
+/// Convert BigDecimal to Decimal (for API boundaries)
+pub fn decimal_from_bigdecimal(bd: BigDecimal) -> Decimal {
+    // Convert via string to maintain precision
+    bd.to_string().parse().unwrap_or_default()
+}
+
+/// Convert Decimal to BigDecimal (for DB storage)
+pub fn bigdecimal_from_decimal(d: Decimal) -> BigDecimal {
+    d.to_string().parse().unwrap_or_default()
 }
 
 /// Bot event log entry
