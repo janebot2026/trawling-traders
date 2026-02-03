@@ -9,12 +9,16 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import type { Bot, BotEvent, BotConfig } from '@trawling-traders/types';
 import { api } from '@trawling-traders/api-client';
+
+// LOB Avatar - default bot image
+const LOB_AVATAR = require('../../assets/lob-avatar.png');
 
 type BotDetailScreenRouteProp = RouteProp<RootStackParamList, 'BotDetail'>;
 type BotDetailScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'BotDetail'>;
@@ -68,7 +72,7 @@ export function BotDetailScreen() {
 
     if (action === 'destroy') {
       Alert.alert(
-        'Destroy Bot?',
+        'Destroy Trawler?',
         'This will permanently delete the bot and all its data. This cannot be undone.',
         [
           { text: 'Cancel', style: 'cancel' },
@@ -95,7 +99,7 @@ export function BotDetailScreen() {
     try {
       await api.bot.botAction(botId, action);
       await fetchBotDetails();
-      Alert.alert('Success', `Bot ${actionLabels[action]}ed successfully`);
+      Alert.alert('Success', `Trawler ${actionLabels[action]}ed successfully`);
     } catch (error) {
       Alert.alert('Error', `Failed to ${actionLabels[action]} bot`);
     } finally {
@@ -138,23 +142,33 @@ export function BotDetailScreen() {
         <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
       }
     >
-      {/* Header */}
+      {/* Header with LOB Avatar */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <View>
-            <Text style={styles.botName}>{bot.name}</Text>
-            <View style={styles.statusRow}>
-              <View
-                style={[
-                  styles.statusDot,
-                  { backgroundColor: getStatusColor(bot.status) },
-                ]}
-              />
-              <Text style={styles.statusText}>{bot.status.toUpperCase()}</Text>
-              {bot.configStatus === 'pending' && (
-                <View style={styles.pendingBadge}>
-                  <Text style={styles.pendingText}>CONFIG PENDING</Text>
-                </View>
+          <View style={styles.avatarSection}>
+            <View style={styles.avatarContainer}>
+              <Image source={LOB_AVATAR} style={styles.avatar} />
+              <View style={styles.botBadge}>
+                <Text style={styles.botBadgeText}>#{bot.id.slice(-4)}</Text>
+              </View>
+              <View style={[styles.statusDot, { backgroundColor: getStatusColor(bot.status) }]} />
+            </View>
+            
+            <View style={styles.headerInfo}>
+              <Text style={styles.botName}>{bot.name}</Text>
+              <View style={styles.statusRow}>
+                <Text style={styles.statusText}>{bot.status.toUpperCase()}</Text>
+                {bot.configStatus === 'pending' && (
+                  <View style={styles.pendingBadge}>
+                    <Text style={styles.pendingText}>CONFIG PENDING</Text>
+                  </View>
+                )}
+              </View>
+              
+              {bot.lastHeartbeatAt && (
+                <Text style={styles.heartbeat}>
+                  Last seen: {new Date(bot.lastHeartbeatAt).toLocaleString()}
+                </Text>
               )}
             </View>
           </View>
@@ -163,12 +177,6 @@ export function BotDetailScreen() {
             <Text style={styles.settingsText}>⚙️</Text>
           </TouchableOpacity>
         </View>
-
-        {bot.lastHeartbeatAt && (
-          <Text style={styles.heartbeat}>
-            Last seen: {new Date(bot.lastHeartbeatAt).toLocaleString()}
-          </Text>
-        )}
       </View>
 
       {/* Performance */}
@@ -364,7 +372,51 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 8,
+  },
+  avatarSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  avatarContainer: {
+    position: 'relative',
+    marginRight: 16,
+  },
+  avatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 3,
+    borderColor: '#007AFF',
+  },
+  botBadge: {
+    position: 'absolute',
+    bottom: -4,
+    right: -4,
+    backgroundColor: '#22c55e',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  botBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  statusDot: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  headerInfo: {
+    flex: 1,
   },
   botName: {
     fontSize: 24,
@@ -375,11 +427,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 4,
     gap: 8,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    flexWrap: 'wrap',
   },
   statusText: {
     fontSize: 14,
@@ -405,6 +453,7 @@ const styles = StyleSheet.create({
   heartbeat: {
     fontSize: 12,
     color: '#666',
+    marginTop: 4,
   },
   section: {
     backgroundColor: '#fff',

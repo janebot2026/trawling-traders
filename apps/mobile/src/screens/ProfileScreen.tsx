@@ -9,12 +9,16 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import type { User, Subscription } from '@trawling-traders/types';
 import { api } from '@trawling-traders/api-client';
+
+// LOB Avatar - our lobster mascot
+const LOB_AVATAR = require('../../assets/lob-avatar.png');
 
 type ProfileScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
 
@@ -75,7 +79,8 @@ export function ProfileScreen() {
   if (isLoading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" />
+        <Image source={LOB_AVATAR} style={styles.loadingAvatar} />
+        <ActivityIndicator style={styles.loadingIndicator} />
       </View>
     );
   }
@@ -90,11 +95,15 @@ export function ProfileScreen() {
         <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
       }
     >
-      {/* Header */}
+      {/* Header with LOB Avatar */}
       <View style={styles.header}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>🚬</Text>
+        <View style={styles.avatarContainer}>
+          <Image source={LOB_AVATAR} style={styles.avatar} />
+          <View style={styles.idBadge}>
+            <Text style={styles.idBadgeText}>#4821</Text>
+          </View>
         </View>
+        
         <Text style={styles.email}>{user?.email || 'trader@trawlingtraders.com'}</Text>
         <View style={[
           styles.statusBadge,
@@ -102,6 +111,8 @@ export function ProfileScreen() {
         ]}>
           <Text style={styles.statusText}>{(subscription?.status || 'active').toUpperCase()}</Text>
         </View>
+        
+        <Text style={styles.tagline}>🦞 Trawling the markets 24/7</Text>
       </View>
 
       {/* Subscription */}
@@ -140,7 +151,7 @@ export function ProfileScreen() {
         )}
 
         <View style={styles.upgradeBox}>
-          <Text style={styles.upgradeTitle}>Need more bots?</Text>
+          <Text style={styles.upgradeTitle}>Need more trawlers?</Text>
           <Text style={styles.upgradeText}>Upgrade to Enterprise for up to 20 bots</Text>
           <TouchableOpacity style={styles.upgradeButton}>
             <Text style={styles.upgradeButtonText}>Upgrade (via Cedros Pay)</Text>
@@ -234,6 +245,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  loadingAvatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 20,
+  },
+  loadingIndicator: {
+    marginTop: 10,
+  },
   header: {
     backgroundColor: '#fff',
     padding: 32,
@@ -241,17 +261,32 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#f0f0f0',
-    justifyContent: 'center',
-    alignItems: 'center',
+  avatarContainer: {
+    position: 'relative',
     marginBottom: 16,
   },
-  avatarText: {
-    fontSize: 40,
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    borderColor: '#007AFF',
+  },
+  idBadge: {
+    position: 'absolute',
+    bottom: -4,
+    right: -4,
+    backgroundColor: '#22c55e',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 3,
+    borderColor: '#fff',
+  },
+  idBadgeText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
   },
   email: {
     fontSize: 18,
@@ -267,6 +302,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: 'bold',
+  },
+  tagline: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   section: {
     backgroundColor: '#fff',

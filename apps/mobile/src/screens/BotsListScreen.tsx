@@ -8,13 +8,16 @@ import {
   Button,
   ActivityIndicator,
   RefreshControl,
-  Alert,
+  Image,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import type { Bot } from '@trawling-traders/types';
 import { api } from '@trawling-traders/api-client';
+
+// LOB Avatar - default bot image
+const LOB_AVATAR = require('../../assets/lob-avatar.png');
 
 type BotsListScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
 
@@ -36,47 +39,59 @@ function StatusBadge({ status }: { status: Bot['status'] }) {
   );
 }
 
-// Bot card component
+// Bot card component with LOB avatar
 function BotCard({ bot, onPress }: { bot: Bot; onPress: () => void }) {
   const pnl = bot.todayPnl || 0;
   const totalPnl = bot.totalPnl || 0;
   
   return (
     <TouchableOpacity style={styles.card} onPress={onPress}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.botName}>{bot.name}</Text>
-        <StatusBadge status={bot.status} />
-      </View>
-      
-      <View style={styles.cardBody}>
-        <Text style={styles.persona}>{bot.persona}</Text>
-        <View style={styles.pnlRow}>
-          <View style={styles.pnlItem}>
-            <Text style={styles.pnlLabel}>Today</Text>
-            <Text style={[styles.pnlValue, pnl >= 0 ? styles.positive : styles.negative]}>
-              {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
-            </Text>
-          </View>
-          
-          <View style={styles.pnlItem}>
-            <Text style={styles.pnlLabel}>Total</Text>
-            <Text style={[styles.pnlValue, totalPnl >= 0 ? styles.positive : styles.negative]}>
-              {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
-            </Text>
+      <View style={styles.cardContent}>
+        {/* LOB Avatar */}
+        <View style={styles.avatarContainer}>
+          <Image source={LOB_AVATAR} style={styles.avatar} />
+          <View style={styles.botNumberBadge}>
+            <Text style={styles.botNumberText}>#{bot.id.slice(-4)}</Text>
           </View>
         </View>
-        
-        {bot.lastHeartbeatAt && (
-          <Text style={styles.heartbeat}>
-            Last seen: {new Date(bot.lastHeartbeatAt).toLocaleTimeString()}
-          </Text>
-        )}
-        
-        {bot.configStatus === 'pending' && (
-          <View style={styles.pendingBadge}>
-            <Text style={styles.pendingText}>⏳ Config update pending</Text>
+
+        <View style={styles.cardInfo}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.botName}>{bot.name}</Text>
+            <StatusBadge status={bot.status} />
           </View>
-        )}
+          
+          <View style={styles.cardBody}>
+            <Text style={styles.persona}>{bot.persona}</Text>
+            <View style={styles.pnlRow}>
+              <View style={styles.pnlItem}>
+                <Text style={styles.pnlLabel}>Today</Text>
+                <Text style={[styles.pnlValue, pnl >= 0 ? styles.positive : styles.negative]}>
+                  {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
+                </Text>
+              </View>
+              
+              <View style={styles.pnlItem}>
+                <Text style={styles.pnlLabel}>Total</Text>
+                <Text style={[styles.pnlValue, totalPnl >= 0 ? styles.positive : styles.negative]}>
+                  {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
+                </Text>
+              </View>
+            </View>
+            
+            {bot.lastHeartbeatAt && (
+              <Text style={styles.heartbeat}>
+                Last seen: {new Date(bot.lastHeartbeatAt).toLocaleTimeString()}
+              </Text>
+            )}
+            
+            {bot.configStatus === 'pending' && (
+              <View style={styles.pendingBadge}>
+                <Text style={styles.pendingText}>⏳ Config update pending</Text>
+              </View>
+            )}
+          </View>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -146,10 +161,15 @@ export function BotsListScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>My Bots</Text>
-        <Text style={styles.subtitle}>
-          {botCount} / {maxBots} bots
-        </Text>
+        <View style={styles.headerRow}>
+          <Image source={LOB_AVATAR} style={styles.headerAvatar} />
+          <View>
+            <Text style={styles.title}>My Bots</Text>
+            <Text style={styles.subtitle}>
+              {botCount} / {maxBots} trawlers deployed
+            </Text>
+          </View>
+        </View>
       </View>
 
       <View style={styles.progressBar}>
@@ -163,7 +183,7 @@ export function BotsListScreen() {
 
       {botCount < maxBots && (
         <View style={styles.createButton}>
-          <Button title="+ Create New Bot" onPress={handleCreateBot} />
+          <Button title="+ Deploy New Trawler" onPress={handleCreateBot} />
         </View>
       )}
 
@@ -179,12 +199,13 @@ export function BotsListScreen() {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>No bots yet</Text>
+            <Image source={LOB_AVATAR} style={styles.emptyAvatar} />
+            <Text style={styles.emptyText}>No trawlers deployed yet</Text>
             <Text style={styles.emptySubtext}>
-              Create your first trading bot to get started
+              Deploy your first LOB to start trawling the markets
             </Text>
             <View style={styles.emptyButton}>
-              <Button title="Create Bot" onPress={handleCreateBot} />
+              <Button title="Deploy First Trawler" onPress={handleCreateBot} />
             </View>
           </View>
         }
@@ -208,6 +229,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+    borderWidth: 2,
+    borderColor: '#007AFF',
   },
   title: {
     fontSize: 28,
@@ -243,15 +276,49 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  cardContent: {
+    flexDirection: 'row',
+  },
+  avatarContainer: {
+    position: 'relative',
+    marginRight: 16,
+  },
+  avatar: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    borderWidth: 3,
+    borderColor: '#007AFF',
+  },
+  botNumberBadge: {
+    position: 'absolute',
+    bottom: -4,
+    right: -4,
+    backgroundColor: '#22c55e',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  botNumberText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  cardInfo: {
+    flex: 1,
+  },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   botName: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
+    flex: 1,
   },
   badge: {
     paddingHorizontal: 8,
@@ -264,7 +331,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   cardBody: {
-    gap: 4,
+    gap: 2,
   },
   persona: {
     fontSize: 14,
@@ -273,18 +340,17 @@ const styles = StyleSheet.create({
   },
   pnlRow: {
     flexDirection: 'row',
-    marginTop: 8,
-    marginBottom: 4,
+    marginTop: 6,
   },
   pnlItem: {
-    marginRight: 24,
+    marginRight: 20,
   },
   pnlLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#999',
   },
   pnlValue: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
   },
   positive: {
@@ -294,25 +360,33 @@ const styles = StyleSheet.create({
     color: '#F44336',
   },
   heartbeat: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#999',
+    marginTop: 4,
   },
   pendingBadge: {
     backgroundColor: '#FFF3E0',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
-    marginTop: 8,
+    marginTop: 6,
     alignSelf: 'flex-start',
   },
   pendingText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#E65100',
     fontWeight: '500',
   },
   empty: {
     alignItems: 'center',
     padding: 40,
+  },
+  emptyAvatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 16,
+    opacity: 0.5,
   },
   emptyText: {
     fontSize: 18,
