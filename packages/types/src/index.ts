@@ -7,8 +7,9 @@ export type Persona = 'beginner' | 'tweaker' | 'quant-lite';
 // Algorithm modes
 export type AlgorithmMode = 'trend' | 'mean-reversion' | 'breakout';
 
-// Asset focus options
-export type AssetFocus = 'majors' | 'memes' | 'custom';
+// Asset focus options - FOCUSED ON QUALITY ASSETS (xStocks, metals)
+// NOT memes by default - Solana execution for serious assets
+export type AssetFocus = 'majors' | 'tokenized-equities' | 'tokenized-metals' | 'memes' | 'custom';
 
 // Paper vs Live trading
 export type TradingMode = 'paper' | 'live';
@@ -31,7 +32,7 @@ export interface BotConfig {
   persona: Persona;
   iconColor?: string;
   
-  // Trading focus
+  // Trading focus - QUALITY ASSETS FIRST
   assetFocus: AssetFocus;
   customAssets?: string[]; // for 'custom' focus
   
