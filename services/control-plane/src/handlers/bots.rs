@@ -131,10 +131,59 @@ pub async fn create_bot(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    // TODO: Trigger DigitalOcean provisioning
-    info!("Created bot {} for user {}", bot_id, user_id);
+    // Trigger DO provisioning (async, don't wait)
+    tokio::spawn(spawn_bot_droplet(bot_id, req.name.clone(), config_id));
+    
+    info!("Created bot {} for user {}, provisioning queued", bot_id, user_id);
     
     Ok(Json(bot))
+}
+
+/// Spawn bot droplet on DigitalOcean
+/// 
+/// Uses claw-spawn when available (v0.2.0 with sqlx 0.8 support)
+async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, config_id: Uuid) {
+    // TODO: When claw-spawn 0.2.0 is released:
+    // use claw_spawn::{DropletConfig, spawn_droplet};
+    // 
+    // let config = DropletConfig {
+    //     name: format!("trawler-{}", bot_id),
+    //     region: "nyc1",
+    //     size: "s-1vcpu-1gb",
+    //     image: "openclaw-base",
+    //     user_data: format!(
+    //         "#!/bin/bash\n/bin/openclaw-agent --bot-id={} --config-url=https://api.trawlingtraders.com/v1/bot/{}/config",
+    //         bot_id, bot_id
+    //     ),
+    // };
+    // 
+    // match spawn_droplet(config).await {
+    //     Ok(droplet) => {
+    //         // Update bot with droplet info
+    //         sqlx::query(
+    //             "UPDATE bots SET droplet_id = $1, ip_address = $2, status = 'online' WHERE id = $3"
+    //         )
+    //         .bind(droplet.id)
+    //         .bind(droplet.ip_address)
+    //         .bind(bot_id)
+    //         .execute(&state.db)
+    //         .await
+    //         .ok();
+    //     }
+    //     Err(e) => {
+    //         warn!("Failed to spawn droplet for bot {}: {}", bot_id, e);
+    //         sqlx::query("UPDATE bots SET status = 'error' WHERE id = $1")
+    //             .bind(bot_id)
+    //             .execute(&state.db)
+    //             .await
+    //             .ok();
+    //     }
+    // }
+    
+    info!(
+        "Bot {}: DO provisioning queued (claw-spawn 0.2.0 required)",
+        bot_id
+    );
 }
 
 /// GET /bots/:id - Get bot details with config
@@ -303,6 +352,7 @@ pub async fn bot_action(
     info!("Bot {} action: {:?} -> {}", bot_id, req.action, new_status);
     
     // TODO: Trigger actual action (pause container, redeploy droplet, etc.)
+    // This will use claw-spawn for Destroy/Redeploy actions
     
     Ok(StatusCode::OK)
 }
