@@ -1,0 +1,304 @@
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Json,
+};
+use std::sync::Arc;
+use tracing::{info, warn};
+use uuid::Uuid;
+
+use crate::{
+    models::*,
+    AppState,
+};
+
+/// GET /bots - List all bots for authenticated user
+pub async fn list_bots(
+    State(state): State<Arc<AppState>>,
+    // TODO: Add auth extractor to get user_id from JWT
+) -> Result<Json<ListBotsResponse>>, (StatusCode, String)> {
+    // Placeholder: use a mock user_id
+    let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    
+    let bots = sqlx::query_as::<_, Bot>(
+        "SELECT * FROM bots WHERE user_id = $1 ORDER BY created_at DESC"
+    )
+    .bind(user_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    let total = bots.len() as i64;
+    
+    Ok(Json(ListBotsResponse { bots, total }))
+}
+
+/// POST /bots - Create a new bot
+pub async fn create_bot(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateBotRequest>,
+) -> Result<Json<Bot>>, (StatusCode, String)> {
+    // Validate request
+    if let Err(errors) = req.validate() {
+        return Err((StatusCode::BAD_REQUEST, errors.to_string()));
+    }
+    
+    // Placeholder user_id
+    let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    
+    // Check subscription limits
+    let bot_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM bots WHERE user_id = $1 AND status != 'destroying'"
+    )
+    .bind(user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // TODO: Get max_bots from subscription
+    if bot_count >= 4 {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Maximum bot limit reached".to_string()
+        ));
+    }
+    
+    // Create config version first
+    let config_id = Uuid::new_v4();
+    let custom_assets_json = req.custom_assets.map(|a| serde_json::to_value(a).unwrap());
+    
+    sqlx::query(
+        r#"
+        INSERT INTO config_versions (
+            id, bot_id, version, name, persona, asset_focus, custom_assets,
+            algorithm_mode, strictness, max_position_size_percent, max_daily_loss_usd,
+            max_drawdown_percent, max_trades_per_day, trading_mode, llm_provider,
+            encrypted_llm_api_key
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        "#
+    )
+    .bind(config_id)
+    .bind(Uuid::nil()) // Will update after bot creation
+    .bind(1) // version 1
+    .bind(&req.name)
+    .bind(req.persona)
+    .bind(req.asset_focus)
+    .bind(custom_assets_json)
+    .bind(req.algorithm_mode)
+    .bind(req.strictness)
+    .bind(req.risk_caps.max_position_size_percent)
+    .bind(req.risk_caps.max_daily_loss_usd)
+    .bind(req.risk_caps.max_drawdown_percent)
+    .bind(req.risk_caps.max_trades_per_day)
+    .bind(req.trading_mode)
+    .bind(&req.llm_provider)
+    .bind("encrypted_key_placeholder") // TODO: Actually encrypt
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // Create bot
+    let bot_id = Uuid::new_v4();
+    
+    let bot = sqlx::query_as::<_, Bot>(
+        r#"
+        INSERT INTO bots (
+            id, user_id, name, status, persona, region, desired_version_id, config_status
+        ) VALUES ($1, $2, $3, 'provisioning', $4, 'nyc1', $5, 'pending')
+        RETURNING *
+        "#
+    )
+    .bind(bot_id)
+    .bind(user_id)
+    .bind(&req.name)
+    .bind(req.persona)
+    .bind(config_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // Update config version with actual bot_id
+    sqlx::query("UPDATE config_versions SET bot_id = $1 WHERE id = $2")
+        .bind(bot_id)
+        .bind(config_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // TODO: Trigger DigitalOcean provisioning
+    info!("Created bot {} for user {}", bot_id, user_id);
+    
+    Ok(Json(bot))
+}
+
+/// GET /bots/:id - Get bot details with config
+pub async fn get_bot(
+    State(state): State<Arc<AppState>>,
+    Path(bot_id): Path<Uuid>,
+) -> Result<Json<BotResponse>>, (StatusCode, String)> {
+    let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
+        .bind(bot_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+    
+    // Get current config
+    let config = sqlx::query_as::<_, ConfigVersion>(
+        "SELECT * FROM config_versions WHERE id = $1"
+    )
+    .bind(bot.desired_version_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    Ok(Json(BotResponse { bot, config }))
+}
+
+/// PATCH /bots/:id/config - Update bot config
+pub async fn update_bot_config(
+    State(state): State<Arc<AppState>>,
+    Path(bot_id): Path<Uuid>,
+    Json(req): Json<UpdateBotConfigRequest>,
+) -> Result<Json<ConfigVersion>>, (StatusCode, String)> {
+    // Get current version
+    let current_version: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(version), 0) FROM config_versions WHERE bot_id = $1"
+    )
+    .bind(bot_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    let new_version = current_version + 1;
+    let config_id = Uuid::new_v4();
+    
+    // Create new config version
+    let custom_assets_json = req.config.custom_assets.map(|a| serde_json::to_value(a).unwrap());
+    
+    sqlx::query(
+        r#"
+        INSERT INTO config_versions (
+            id, bot_id, version, name, persona, asset_focus, custom_assets,
+            algorithm_mode, strictness, max_position_size_percent, max_daily_loss_usd,
+            max_drawdown_percent, max_trades_per_day, trading_mode, llm_provider,
+            encrypted_llm_api_key
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        "#
+    )
+    .bind(config_id)
+    .bind(bot_id)
+    .bind(new_version)
+    .bind(&req.config.name)
+    .bind(req.config.persona)
+    .bind(req.config.asset_focus)
+    .bind(custom_assets_json)
+    .bind(req.config.algorithm_mode)
+    .bind(req.config.strictness)
+    .bind(req.config.risk_caps.max_position_size_percent)
+    .bind(req.config.risk_caps.max_daily_loss_usd)
+    .bind(req.config.risk_caps.max_drawdown_percent)
+    .bind(req.config.risk_caps.max_trades_per_day)
+    .bind(req.config.trading_mode)
+    .bind(&req.config.llm_provider)
+    .bind("encrypted_key_placeholder")
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    // Update bot to point to new version
+    sqlx::query(
+        "UPDATE bots SET desired_version_id = $1, config_status = 'pending', updated_at = NOW() WHERE id = $2"
+    )
+    .bind(config_id)
+    .bind(bot_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    let config = sqlx::query_as::<_, ConfigVersion>("SELECT * FROM config_versions WHERE id = $1")
+        .bind(config_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    info!("Updated bot {} to config version {}", bot_id, new_version);
+    
+    Ok(Json(config))
+}
+
+/// POST /bots/:id/actions - Perform action on bot
+pub async fn bot_action(
+    State(state): State<Arc<AppState>>,
+    Path(bot_id): Path<Uuid>,
+    Json(req): Json<BotActionRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let (new_status, message) = match req.action {
+        BotAction::Pause => ("paused", "Bot paused"),
+        BotAction::Resume => ("online", "Bot resumed"),
+        BotAction::Redeploy => ("provisioning", "Bot redeploy triggered"),
+        BotAction::Destroy => ("destroying", "Bot destroy triggered"),
+    };
+    
+    sqlx::query("UPDATE bots SET status = $1::bot_status, updated_at = NOW() WHERE id = $2")
+        .bind(new_status)
+        .bind(bot_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    info!("Bot {} action: {:?} -> {}", bot_id, req.action, new_status);
+    
+    // TODO: Trigger actual action (pause container, redeploy droplet, etc.)
+    
+    Ok(StatusCode::OK)
+}
+
+/// GET /bots/:id/metrics - Get bot metrics
+pub async fn get_metrics(
+    State(state): State<Arc<AppState>>,
+    Path(bot_id): Path<Uuid>,
+    // TODO: Add query param for range
+) -> Result<Json<MetricsResponse>>, (StatusCode, String)> {
+    let metrics = sqlx::query_as::<_, Metric>(
+        r#"
+        SELECT * FROM metrics 
+        WHERE bot_id = $1 
+        AND timestamp > NOW() - INTERVAL '7 days'
+        ORDER BY timestamp DESC
+        LIMIT 1000
+        "#
+    )
+    .bind(bot_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    Ok(Json(MetricsResponse {
+        metrics,
+        range: "7d".to_string(),
+    }))
+}
+
+/// GET /bots/:id/events - Get bot events
+pub async fn get_events(
+    State(state): State<Arc<AppState>>,
+    Path(bot_id): Path<Uuid>,
+) -> Result<Json<EventsResponse>>, (StatusCode, String)> {
+    let events = sqlx::query_as::<_, Event>(
+        "SELECT * FROM events WHERE bot_id = $1 ORDER BY created_at DESC LIMIT 100"
+    )
+    .bind(bot_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    Ok(Json(EventsResponse {
+        events,
+        next_cursor: None, // TODO: Implement cursor pagination
+    }))
+}
+
+use validator::Validate;

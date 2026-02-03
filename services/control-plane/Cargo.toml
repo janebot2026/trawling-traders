@@ -1,0 +1,59 @@
+[package]
+name = "control-plane"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web framework
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "migrate", "uuid", "chrono"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Tracing
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Configuration
+config = "0.13"
+
+# Validation
+validator = { version = "0.16", features = ["derive"] }
+
+# Password hashing (for API keys)
+argon2 = "0.5"
+
+# JWT
+jsonwebtoken = "9.2"
+
+# HTTP client (for DigitalOcean API)
+reqwest = { version = "0.11", features = ["json"] }
+
+# Crypto (for secrets)
+aes-gcm = "0.10"
+base64 = "0.21"
+
+# Decimal for prices
+rust_decimal = { version = "1.32", features = ["serde"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
