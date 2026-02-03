@@ -1,14 +1,21 @@
 # Trawling Traders
 
-AI-powered trading bots on Solana. Quality assets only - xStocks, tokenized metals, crypto majors. Not a meme coin casino.
+⚠️ **Work in Progress - Not Ready for Production Use**
+
+This project is actively under development. APIs, schemas, and trading behavior may change without notice.
+
+---
+
+**Deploy Solana OpenClaw traders in minutes.**  
+Trawl markets. Tune strategies. Track performance.
 
 ## Overview
 
-Trawling Traders lets you spin up to 4 AI trading bots on your own DigitalOcean VPS. Each bot runs an OpenClaw agent with:
-- **Quality asset focus**: Tokenized stocks (xStocks), metals (ORO), BTC/ETH/SOL
-- **Professional algorithms**: Trend, mean reversion, breakout
-- **Strict risk management**: Position limits, drawdown stops, paper trading
-- **Full control**: Your VPS, your keys, your profits
+Trawling Traders lets you spin up personalized virtual employee trading agents on your own DigitalOcean VPS. Each agent is an OpenClaw-powered bot that:
+- **Deploys in minutes**: From app tap to live trading
+- **Runs your strategy**: Trend, mean reversion, breakout algorithms
+- **Stays in your control**: Your VPS, your keys, your profits
+- **Reports transparently**: Real-time P&L, trade history, event logs
 
 ## Quick Start
 
@@ -36,7 +43,7 @@ npm run ios  # or android
 ```
 ┌─────────────────┐
 │  React Native   │  Mobile app for bot management
-│     (iOS/Android) │
+│  (iOS/Android)  │
 └────────┬────────┘
          │ HTTPS
          ▼
@@ -50,7 +57,7 @@ npm run ios  # or android
 │  Data Retrieval │  Rust price aggregation
 │    (Rust)       │  - CoinGecko (REST)
 └────────┬────────┘  - Binance (WebSocket)
-         │           - xStocks/Metals (TBD)
+         │           - Pyth (xStocks/Metals)
          ▼
 ┌─────────────────┐
 │  OpenClaw Bots  │  On DigitalOcean VPS
@@ -60,16 +67,9 @@ npm run ios  # or android
 
 ## Features
 
-### Asset Classes
-- **Crypto Majors**: BTC, ETH, SOL, etc.
-- **Tokenized Stocks (xStocks)**: AAPL, TSLA, SPY, etc. on Solana
-- **Tokenized Metals**: Gold, silver (ORO)
-- **Custom baskets**: Build your own selection
-- **Meme coins**: ⚠️ Explicit opt-in only, not recommended
-
 ### Trading Personas
 - **Set & Forget**: Conservative defaults, paper trading, strict safety
-- **Hands-on**: Tune xStocks exposure, risk controls, see trade reasons
+- **Hands-on**: Tune exposure, risk controls, see trade reasons  
 - **Power User**: Signal knobs, custom baskets, full control
 
 ### Algorithms
@@ -90,33 +90,26 @@ npm run ios  # or android
 trawling-traders/
 ├── apps/
 │   └── mobile/              # React Native app
-│       ├── src/
-│       │   ├── screens/     # 6 MVP screens
-│       │   ├── components/  # AnimatedBotCard, etc.
-│       │   ├── navigation/  # React Navigation
-│       │   └── utils/       # Animations
-│       └── package.json
 ├── services/
 │   ├── control-plane/       # Rust API server
-│   │   ├── src/
-│   │   │   ├── handlers/    # HTTP handlers
-│   │   │   ├── models/      # Database models
-│   │   │   └── db/          # PostgreSQL
-│   │   └── Cargo.toml
-│   └── data-retrieval/      # Price aggregation
-│       ├── src/
-│       │   ├── sources/     # CoinGecko, Binance
-│       │   ├── aggregators/ # Multi-source logic
-│       │   └── cache/       # Redis
-│       └── Cargo.toml
+│   └── data-retrieval/      # Price aggregation service
 ├── packages/
 │   ├── types/               # Shared TypeScript types
 │   └── api-client/          # API client
 └── docs/
-    ├── frontend-architecture.md
-    ├── data-sources-research.md
-    └── openclaw-integration.md
 ```
+
+## Known Issues
+
+### `rust_decimal` + `sqlx 0.8` Integration
+
+**Status:** In Progress
+
+The `Decimal` type from `rust_decimal` does not have native `sqlx 0.8` support via the `db-postgres` feature (that feature targets `tokio-postgres`, not sqlx). We're evaluating options:
+- Use `bigdecimal` for database layer with conversion to `rust_decimal` for trading logic
+- Implement custom `sqlx::Type/Encode/Decode` traits for `Decimal`
+
+All price calculations use `Decimal` for precision. Database integration is being finalized.
 
 ## Sync Adapter Pattern
 
@@ -133,7 +126,6 @@ No OpenClaw fork needed. Bots poll the control plane for config updates:
 ```bash
 DATABASE_URL=postgres://user:pass@localhost/trawling_traders
 PORT=3000
-# CEDROS_API_KEY=... (when available)
 ```
 
 ### Data Retrieval
@@ -161,64 +153,33 @@ REDIS_URL=redis://localhost:6379
 - `POST /api/v1/bot/:id/config_ack` - Confirm config applied
 - `POST /api/v1/bot/:id/heartbeat` - Status ping
 - `POST /api/v1/bot/:id/events` - Push events
+- `POST /api/v1/bot/:id/wallet` - Report agent wallet address
 
 ## Roadmap
 
-### MVP (Current)
-- [x] React Native app
-- [x] Control plane API
-- [x] Data retrieval (CoinGecko + Binance)
+### MVP (In Progress)
+- [x] React Native app with ocean theme
+- [x] Control plane API (Rust/Axum)
+- [x] Data retrieval (CoinGecko + Binance + Pyth)
 - [x] Sync adapter pattern
-- [ ] ~~Cedros Login~~ (external dependency)
-- [ ] ~~Cedros Pay~~ (external dependency)
-- [ ] ~~Cedros-open-spawn~~ (external dependency)
+- [x] Agent wallet reporting
+- [ ] Cedros Login integration
+- [ ] Cedros Pay integration
+- [ ] claw-spawn VPS provisioning
 
 ### Post-MVP
-- [ ] xStocks price feeds (Pyth Network)
-- [ ] Tokenized metals (ORO integration)
 - [ ] Algorithm backtesting
-- [ ] Social features (leaderboards)
 - [ ] Multi-exchange execution
+- [ ] Social features (leaderboards)
 
 ## Development
 
-### Adding a New Data Source
-
-1. Create file in `services/data-retrieval/src/sources/`
-2. Implement `PriceDataSource` trait
-3. Add to aggregator in `lib.rs`
-
-Example:
-```rust
-pub struct PythClient { ... }
-
-#[async_trait]
-impl PriceDataSource for PythClient {
-    async fn get_price(&self, asset: &str, quote: &str) -> Result<PricePoint> {
-        // Fetch from Pyth oracle
-    }
-}
-```
-
-### Adding a New Screen
-
-1. Create component in `apps/mobile/src/screens/`
-2. Add to navigation in `navigation/AppNavigator.tsx`
-3. Add route type to `RootStackParamList`
+See `docs/` for architecture details.
 
 ## License
 
 MIT - See LICENSE file
 
-## Credits
-
-Built with:
-- [OpenClaw](https://openclaw.ai) - AI agent framework
-- [React Native](https://reactnative.dev/) - Mobile framework
-- [Axum](https://github.com/tokio-rs/axum) - Rust web framework
-- [CoinGecko](https://coingecko.com) - Price data
-- [Binance](https://binance.com) - Real-time feeds
-
 ---
 
-**Note:** This is a work in progress. MVP features are complete, but some integrations (Cedros Login/Pay, xStocks data) are pending external dependencies.
+**⚠️ Warning:** This project is a work in progress and not ready for production use. APIs, schemas, and trading behavior may change without notice.
