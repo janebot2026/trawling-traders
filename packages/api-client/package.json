@@ -1,0 +1,17 @@
+{
+  "name": "@trawling-traders/api-client",
+  "version": "0.1.0",
+  "description": "API client for Trawling Traders backend",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@trawling-traders/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3"
+  }
+}
