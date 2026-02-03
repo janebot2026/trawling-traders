@@ -1,27 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TextInput,
-  Button,
   TouchableOpacity,
   Switch,
   ActivityIndicator,
   Alert,
+  Animated,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import type { Persona, AlgorithmMode, AssetFocus, TradingMode, Strictness, LlmProvider } from '@trawling-traders/types';
 import { api } from '@trawling-traders/api-client';
+import { OceanBackground } from '../components/OceanBackground';
+import { lightTheme } from '../theme';
 
 type CreateBotScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'CreateBot'>;
 
 const PERSONAS: { value: Persona; label: string; description: string }[] = [
-  { value: 'beginner', label: 'Set & Forget', description: 'Blue-chip crypto + tokenized equities/metals, strict safety' },
-  { value: 'tweaker', label: 'Hands-on', description: 'Tune assets including xStocks, risk controls, see trade reasons' },
+  { value: 'beginner', label: 'Set & Forget', description: 'Blue-chip crypto + xStocks/metals, strict safety' },
+  { value: 'tweaker', label: 'Hands-on', description: 'Tune assets, risk controls, see trade reasons' },
   { value: 'quant-lite', label: 'Power User', description: 'Signal knobs, custom baskets, full control' },
 ];
 
@@ -31,45 +33,30 @@ const ALGORITHMS: { value: AlgorithmMode; label: string; description: string }[]
   { value: 'breakout', label: 'Breakout', description: 'Trade breakouts with volume' },
 ];
 
-// ASSET FOCUS: Quality assets first, memes require explicit opt-in
 const ASSET_FOCUSES: { value: AssetFocus; label: string; description: string; tier: 'core' | 'quality' | 'speculative' }[] = [
-  { 
-    value: 'majors', 
-    label: 'Crypto Majors', 
-    description: 'BTC, ETH, SOL - Blue chip cryptocurrencies',
-    tier: 'core'
-  },
-  { 
-    value: 'tokenized-equities', 
-    label: 'Tokenized Stocks (xStocks)', 
-    description: 'Stock exposures on Solana - AAPL, TSLA, SPY, etc.',
-    tier: 'quality'
-  },
-  { 
-    value: 'tokenized-metals', 
-    label: 'Tokenized Metals', 
-    description: 'Gold, silver - ORO and similar assets',
-    tier: 'quality'
-  },
-  { 
-    value: 'custom', 
-    label: 'Custom Basket', 
-    description: 'Build your own asset selection',
-    tier: 'quality'
-  },
-  { 
-    value: 'memes', 
-    label: 'Meme Coins ⚠️', 
-    description: 'High volatility, high risk - Not recommended for serious capital',
-    tier: 'speculative'
-  },
+  { value: 'majors', label: 'Crypto Majors', description: 'BTC, ETH, SOL', tier: 'core' },
+  { value: 'tokenized-equities', label: 'xStocks', description: 'AAPL, TSLA, SPY on Solana', tier: 'quality' },
+  { value: 'tokenized-metals', label: 'Metals', description: 'Gold, silver (ORO)', tier: 'quality' },
+  { value: 'custom', label: 'Custom', description: 'Build your own basket', tier: 'quality' },
+  { value: 'memes', label: 'Memes ⚠️', description: 'High risk', tier: 'speculative' },
 ];
 
 export function CreateBotScreen() {
   const navigation = useNavigation<CreateBotScreenNavigationProp>();
   const [isLoading, setIsLoading] = useState(false);
 
-  // Form state - DEFAULT to quality assets, not memes
+  // Animation
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  // Form state
   const [name, setName] = useState('');
   const [persona, setPersona] = useState<Persona>('beginner');
   const [assetFocus, setAssetFocus] = useState<AssetFocus>('tokenized-equities');
@@ -78,14 +65,10 @@ export function CreateBotScreen() {
   const [tradingMode, setTradingMode] = useState<TradingMode>('paper');
   const [llmProvider, setLlmProvider] = useState<LlmProvider>('openai');
   const [llmApiKey, setLlmApiKey] = useState('');
-
-  // Risk caps - Conservative defaults
   const [maxPositionSize, setMaxPositionSize] = useState('5');
   const [maxDailyLoss, setMaxDailyLoss] = useState('50');
   const [maxDrawdown, setMaxDrawdown] = useState('10');
   const [maxTradesPerDay, setMaxTradesPerDay] = useState('5');
-
-  // Signal knobs (Quant-lite only)
   const [volumeConfirmation, setVolumeConfirmation] = useState(true);
   const [volatilityBrake, setVolatilityBrake] = useState(true);
   const [liquidityFilter, setLiquidityFilter] = useState<'low' | 'medium' | 'high'>('high');
@@ -119,400 +102,332 @@ export function CreateBotScreen() {
         llmProvider,
         llmApiKey: llmApiKey.trim(),
       });
-
-      Alert.alert('Success', 'Bot created successfully!');
+      Alert.alert('Success', 'Trawler deployed!');
       navigation.navigate('Main');
     } catch (error) {
-      console.error('Failed to create bot:', error);
-      Alert.alert('Error', 'Failed to create bot. Please try again.');
+      Alert.alert('Error', 'Failed to deploy trawler');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const isValid = name.trim() && llmApiKey.trim();
-
-  const coreAssets = ASSET_FOCUSES.filter(a => a.tier === 'core');
-  const qualityAssets = ASSET_FOCUSES.filter(a => a.tier === 'quality');
-  const speculativeAssets = ASSET_FOCUSES.filter(a => a.tier === 'speculative');
+  const renderSection = (title: string, children: React.ReactNode) => (
+    <View style={styles.card}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Bot Identity</Text>
-        
-        <Text style={styles.label}>Name</Text>
-        <TextInput
-          style={styles.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="My Trading Bot"
-          autoCapitalize="words"
-          editable={!isLoading}
-        />
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Trading Persona</Text>
-        
-        {PERSONAS.map((p) => (
-          <TouchableOpacity
-            key={p.value}
-            style={[styles.optionCard, persona === p.value && styles.selectedCard]}
-            onPress={() => !isLoading && setPersona(p.value)}
-            disabled={isLoading}
-          >
-            <Text style={styles.optionTitle}>{p.label}</Text>
-            <Text style={styles.optionDescription}>{p.description}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Asset Focus</Text>
-        <Text style={styles.sectionSubtitle}>Solana-powered trading in quality assets</Text>
-
-        <Text style={styles.tierLabel}>Core Crypto</Text>
-        <View style={styles.optionsRow}>
-          {coreAssets.map((af) => (
-            <TouchableOpacity
-              key={af.value}
-              style={[styles.chip, assetFocus === af.value && styles.selectedChip]}
-              onPress={() => !isLoading && setAssetFocus(af.value)}
-              disabled={isLoading}
-            >
-              <Text style={[styles.chipText, assetFocus === af.value && styles.selectedChipText]}>
-                {af.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+    <OceanBackground>
+      <Animated.ScrollView
+        style={[styles.container, { opacity: fadeAnim }]}
+        contentContainerStyle={{ paddingBottom: 40 }}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Deploy New Trawler</Text>
+          <Text style={styles.headerSubtitle}>Configure your LOB trading agent</Text>
         </View>
 
-        <Text style={styles.tierLabel}>Tokenized Assets ⭐</Text>
-        <View style={styles.qualityAssetsContainer}>
-          {qualityAssets.map((af) => (
-            <TouchableOpacity
-              key={af.value}
-              style={[
-                styles.qualityCard, 
-                assetFocus === af.value && styles.selectedQualityCard
-              ]}
-              onPress={() => !isLoading && setAssetFocus(af.value)}
-              disabled={isLoading}
-            >
-              <Text style={[
-                styles.qualityTitle, 
-                assetFocus === af.value && styles.selectedQualityTitle
-              ]}>
-                {af.label}
-              </Text>
-              <Text style={styles.qualityDescription}>{af.description}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={styles.speculativeSection}>
-          <Text style={styles.speculativeLabel}>⚠️ Speculative (Not Recommended)</Text>
-          {speculativeAssets.map((af) => (
-            <TouchableOpacity
-              key={af.value}
-              style={[styles.speculativeCard, assetFocus === af.value && styles.selectedSpeculativeCard]}
-              onPress={() => !isLoading && setAssetFocus(af.value)}
-              disabled={isLoading}
-            >
-              <Text style={styles.speculativeTitle}>{af.label}</Text>
-              <Text style={styles.speculativeDescription}>{af.description}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Algorithm</Text>
-        
-        {ALGORITHMS.map((alg) => (
-          <TouchableOpacity
-            key={alg.value}
-            style={[styles.optionCard, algorithmMode === alg.value && styles.selectedCard]}
-            onPress={() => !isLoading && setAlgorithmMode(alg.value)}
-            disabled={isLoading}
-          >
-            <Text style={styles.optionTitle}>{alg.label}</Text>
-            <Text style={styles.optionDescription}>{alg.description}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Risk Caps</Text>
-        
-        <View style={styles.inputRow}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Max Position %</Text>
+        {renderSection('Identity',
+          <>
+            <Text style={styles.label}>Name</Text>
             <TextInput
-              style={styles.smallInput}
-              value={maxPositionSize}
-              onChangeText={setMaxPositionSize}
-              keyboardType="numeric"
-              editable={!isLoading}
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              placeholder="e.g., Trend Hunter #1"
+              placeholderTextColor={lightTheme.colors.wave[400]}
             />
-          </View>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Max Daily Loss ($)</Text>
-            <TextInput
-              style={styles.smallInput}
-              value={maxDailyLoss}
-              onChangeText={setMaxDailyLoss}
-              keyboardType="numeric"
-              editable={!isLoading}
-            />
-          </View>
-        </View>
-
-        <View style={styles.inputRow}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Max Drawdown %</Text>
-            <TextInput
-              style={styles.smallInput}
-              value={maxDrawdown}
-              onChangeText={setMaxDrawdown}
-              keyboardType="numeric"
-              editable={!isLoading}
-            />
-          </View>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Max Trades/Day</Text>
-            <TextInput
-              style={styles.smallInput}
-              value={maxTradesPerDay}
-              onChangeText={setMaxTradesPerDay}
-              keyboardType="numeric"
-              editable={!isLoading}
-            />
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Trading Mode</Text>
-        
-        <View style={styles.switchRow}>
-          <Text>{tradingMode === 'paper' ? '📄 Paper Trading' : '💰 Live Trading'}</Text>
-          <Switch
-            value={tradingMode === 'live'}
-            onValueChange={(v) => setTradingMode(v ? 'live' : 'paper')}
-            disabled={isLoading}
-          />
-        </View>
-        
-        {tradingMode === 'live' && (
-          <Text style={styles.warning}>⚠️ Live trading uses real funds. Start with paper first.</Text>
+          </>
         )}
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>LLM Configuration</Text>
-        
-        <Text style={styles.label}>Provider</Text>
-        <View style={styles.optionsRow}>
-          {(['openai', 'anthropic', 'venice', 'openrouter'] as LlmProvider[]).map((provider) => (
-            <TouchableOpacity
-              key={provider}
-              style={[styles.chip, llmProvider === provider && styles.selectedChip]}
-              onPress={() => !isLoading && setLlmProvider(provider)}
-              disabled={isLoading}
-            >
-              <Text style={[styles.chipText, llmProvider === provider && styles.selectedChipText]}>
-                {provider}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={styles.label}>API Key</Text>
-        <TextInput
-          style={styles.input}
-          value={llmApiKey}
-          onChangeText={setLlmApiKey}
-          placeholder="sk-..."
-          secureTextEntry
-          editable={!isLoading}
-        />
-      </View>
-
-      <View style={styles.buttonContainer}>
-        {isLoading ? (
-          <ActivityIndicator size="large" />
-        ) : (
-          <Button
-            title="Create Bot"
-            onPress={handleCreate}
-            disabled={!isValid}
-          />
+        {renderSection('Trading Persona',
+          <>
+            {PERSONAS.map((p) => (
+              <TouchableOpacity
+                key={p.value}
+                style={[styles.optionCard, persona === p.value && styles.selectedCard]}
+                onPress={() => setPersona(p.value)}
+              >
+                <Text style={styles.optionTitle}>{p.label}</Text>
+                <Text style={styles.optionDescription}>{p.description}</Text>
+              </TouchableOpacity>
+            ))}
+          </>
         )}
-      </View>
-    </ScrollView>
+
+        {renderSection('Asset Focus',
+          <>
+            <View style={styles.assetGrid}>
+              {ASSET_FOCUSES.filter(a => a.tier !== 'speculative').map((af) => (
+                <TouchableOpacity
+                  key={af.value}
+                  style={[
+                    styles.assetChip,
+                    assetFocus === af.value && styles.assetChipSelected,
+                    { borderColor: af.tier === 'quality' ? lightTheme.colors.bullish[500] : lightTheme.colors.primary[500] },
+                  ]}
+                  onPress={() => setAssetFocus(af.value)}
+                >
+                  <Text style={[styles.assetChipText, assetFocus === af.value && styles.assetChipTextSelected]}>
+                    {af.label}
+                  </Text>
+                  <Text style={styles.assetChipSub}>{af.description}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.speculativeSection}>
+              <Text style={styles.speculativeLabel}>⚠️ Speculative (Not Recommended)</Text>
+              <TouchableOpacity
+                style={[styles.assetChip, assetFocus === 'memes' && styles.assetChipSpecSelected]}
+                onPress={() => setAssetFocus('memes')}
+              >
+                <Text style={styles.assetChipText}>Meme Coins</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        {renderSection('Algorithm',
+          <>
+            {ALGORITHMS.map((alg) => (
+              <TouchableOpacity
+                key={alg.value}
+                style={[styles.optionCard, algorithmMode === alg.value && styles.selectedCard]}
+                onPress={() => setAlgorithmMode(alg.value)}
+              >
+                <Text style={styles.optionTitle}>{alg.label}</Text>
+                <Text style={styles.optionDescription}>{alg.description}</Text>
+              </TouchableOpacity>
+            ))}
+          </>
+        )}
+
+        {renderSection('Risk Management',
+          <>
+            <View style={styles.inputRow}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Max Position %</Text>
+                <TextInput
+                  style={styles.smallInput}
+                  value={maxPositionSize}
+                  onChangeText={setMaxPositionSize}
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Daily Loss ($)</Text>
+                <TextInput
+                  style={styles.smallInput}
+                  value={maxDailyLoss}
+                  onChangeText={setMaxDailyLoss}
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+            <View style={styles.inputRow}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Max Drawdown %</Text>
+                <TextInput
+                  style={styles.smallInput}
+                  value={maxDrawdown}
+                  onChangeText={setMaxDrawdown}
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Trades/Day</Text>
+                <TextInput
+                  style={styles.smallInput}
+                  value={maxTradesPerDay}
+                  onChangeText={setMaxTradesPerDay}
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+          </>
+        )}
+
+        {renderSection('Trading Mode',
+          <>
+            <View style={styles.switchRow}>
+              <View>
+                <Text style={styles.switchLabel}>
+                  {tradingMode === 'paper' ? '📄 Paper Trading' : '💰 Live Trading'}
+                </Text>
+                <Text style={styles.switchSub}>
+                  {tradingMode === 'paper' ? 'Test with fake money' : 'Real funds at risk'}
+                </Text>
+              </View>
+              <Switch
+                value={tradingMode === 'live'}
+                onValueChange={(v) => setTradingMode(v ? 'live' : 'paper')}
+                trackColor={{ false: lightTheme.colors.wave[300], true: lightTheme.colors.lobster[400] }}
+                thumbColor={tradingMode === 'live' ? lightTheme.colors.lobster[600] : '#fff'}
+              />
+            </View>
+            
+            {tradingMode === 'live' && (
+              <View style={styles.warningBox}>
+                <Text style={styles.warningText}>⚠️ Live trading uses real funds. Start with paper first.</Text>
+              </View>
+            )}
+          </>
+        )}
+
+        {renderSection('LLM Configuration',
+          <>
+            <Text style={styles.label}>Provider</Text>
+            <View style={styles.providerRow}>
+              {(['openai', 'anthropic', 'venice', 'openrouter'] as LlmProvider[]).map((provider) => (
+                <TouchableOpacity
+                  key={provider}
+                  style={[styles.providerChip, llmProvider === provider && styles.providerChipSelected]}
+                  onPress={() => setLlmProvider(provider)}
+                >
+                  <Text style={[styles.providerText, llmProvider === provider && styles.providerTextSelected]}>
+                    {provider}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.label}>API Key</Text>
+            <TextInput
+              style={styles.input}
+              value={llmApiKey}
+              onChangeText={setLlmApiKey}
+              placeholder="sk-..."
+              placeholderTextColor={lightTheme.colors.wave[400]}
+              secureTextEntry
+            />
+          </>
+        )}
+
+        {persona === 'quant-lite' && renderSection('Signal Knobs',
+          <>
+            {[
+              { label: 'Volume Confirmation', value: volumeConfirmation, setter: setVolumeConfirmation },
+              { label: 'Volatility Brake', value: volatilityBrake, setter: setVolatilityBrake },
+              { label: 'Correlation Brake', value: correlationBrake, setter: setCorrelationBrake },
+            ].map((knob) => (
+              <View key={knob.label} style={styles.switchRow}>
+                <Text style={styles.switchLabel}>{knob.label}</Text>
+                <Switch
+                  value={knob.value}
+                  onValueChange={knob.setter}
+                  trackColor={{ false: lightTheme.colors.wave[300], true: lightTheme.colors.bullish[400] }}
+                />
+              </View>
+            ))}
+            
+            <Text style={styles.label}>Liquidity Filter</Text>
+            <View style={styles.providerRow}>
+              {(['low', 'medium', 'high'] as const).map((level) => (
+                <TouchableOpacity
+                  key={level}
+                  style={[styles.providerChip, liquidityFilter === level && styles.providerChipSelected]}
+                  onPress={() => setLiquidityFilter(level)}
+                >
+                  <Text style={[styles.providerText, liquidityFilter === level && styles.providerTextSelected]}>
+                    {level}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
+
+        {/* Deploy Button */}
+        <View style={styles.card}>
+          {isLoading ? (
+            <ActivityIndicator size="large" color={lightTheme.colors.primary[700]} />
+          ) : (
+            <TouchableOpacity
+              style={styles.deployButton}
+              onPress={handleCreate}
+              disabled={!name.trim() || !llmApiKey.trim()}
+            >
+              <Text style={styles.deployButtonText}>🚀 Deploy Trawler</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </Animated.ScrollView>
+    </OceanBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
-  section: {
-    backgroundColor: '#fff',
+  header: {
+    padding: 20,
+    paddingTop: 60,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: lightTheme.colors.wave[900],
+  },
+  headerSubtitle: {
+    fontSize: 16,
+    color: lightTheme.colors.wave[500],
+    marginTop: 4,
+  },
+  card: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     margin: 16,
     marginBottom: 8,
-    padding: 16,
-    borderRadius: 12,
+    padding: 20,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  sectionSubtitle: {
-    fontSize: 14,
-    color: '#666',
+    color: lightTheme.colors.wave[900],
     marginBottom: 16,
   },
   label: {
     fontSize: 14,
     fontWeight: '600',
+    color: lightTheme.colors.wave[700],
     marginBottom: 8,
-    color: '#333',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
+    borderColor: lightTheme.colors.wave[200],
+    borderRadius: 10,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fafafa',
+    backgroundColor: lightTheme.colors.wave[50],
+    color: lightTheme.colors.wave[900],
   },
   smallInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
+    borderColor: lightTheme.colors.wave[200],
+    borderRadius: 10,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fafafa',
+    backgroundColor: lightTheme.colors.wave[50],
     width: 100,
-  },
-  optionCard: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 8,
-  },
-  selectedCard: {
-    borderColor: '#007AFF',
-    backgroundColor: '#F0F8FF',
-  },
-  optionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  optionDescription: {
-    fontSize: 14,
-    color: '#666',
-  },
-  tierLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#666',
-    marginTop: 12,
-    marginBottom: 8,
-    textTransform: 'uppercase',
-  },
-  optionsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  selectedChip: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  chipText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  selectedChipText: {
-    color: '#fff',
-  },
-  qualityAssetsContainer: {
-    gap: 8,
-  },
-  qualityCard: {
-    borderWidth: 2,
-    borderColor: '#22c55e',
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: '#f0fdf4',
-  },
-  selectedQualityCard: {
-    backgroundColor: '#22c55e',
-  },
-  qualityTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#15803d',
-    marginBottom: 2,
-  },
-  selectedQualityTitle: {
-    color: '#fff',
-  },
-  qualityDescription: {
-    fontSize: 12,
-    color: '#666',
-  },
-  speculativeSection: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e5e5',
-  },
-  speculativeLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#dc2626',
-    marginBottom: 8,
-  },
-  speculativeCard: {
-    borderWidth: 1,
-    borderColor: '#fca5a5',
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: '#fef2f2',
-    opacity: 0.8,
-  },
-  selectedSpeculativeCard: {
-    borderColor: '#dc2626',
-    backgroundColor: '#fee2e2',
-    opacity: 1,
-  },
-  speculativeTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#dc2626',
-  },
-  speculativeDescription: {
-    fontSize: 12,
-    color: '#991b1b',
-    marginTop: 2,
+    color: lightTheme.colors.wave[900],
   },
   inputRow: {
     flexDirection: 'row',
@@ -521,19 +436,137 @@ const styles = StyleSheet.create({
   inputGroup: {
     flex: 1,
   },
+  optionCard: {
+    borderWidth: 2,
+    borderColor: lightTheme.colors.wave[200],
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 10,
+    backgroundColor: lightTheme.colors.wave[50],
+  },
+  selectedCard: {
+    borderColor: lightTheme.colors.primary[600],
+    backgroundColor: lightTheme.colors.primary[50],
+  },
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: lightTheme.colors.wave[900],
+    marginBottom: 4,
+  },
+  optionDescription: {
+    fontSize: 13,
+    color: lightTheme.colors.wave[500],
+  },
+  assetGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  assetChip: {
+    borderWidth: 2,
+    borderRadius: 12,
+    padding: 12,
+    minWidth: '30%',
+    backgroundColor: lightTheme.colors.wave[50],
+  },
+  assetChipSelected: {
+    backgroundColor: lightTheme.colors.bullish[50],
+  },
+  assetChipSpecSelected: {
+    backgroundColor: lightTheme.colors.lobster[50],
+    borderColor: lightTheme.colors.lobster[400],
+  },
+  assetChipText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: lightTheme.colors.wave[800],
+  },
+  assetChipTextSelected: {
+    color: lightTheme.colors.bullish[700],
+  },
+  assetChipSub: {
+    fontSize: 11,
+    color: lightTheme.colors.wave[500],
+    marginTop: 2,
+  },
+  speculativeSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: lightTheme.colors.wave[200],
+  },
+  speculativeLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: lightTheme.colors.lobster[600],
+    marginBottom: 10,
+  },
   switchRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 12,
   },
-  warning: {
-    color: '#F44336',
+  switchLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: lightTheme.colors.wave[900],
+  },
+  switchSub: {
+    fontSize: 13,
+    color: lightTheme.colors.wave[500],
+    marginTop: 2,
+  },
+  warningBox: {
+    backgroundColor: lightTheme.colors.lobster[100],
+    padding: 12,
+    borderRadius: 10,
     marginTop: 8,
+  },
+  warningText: {
+    color: lightTheme.colors.lobster[700],
+    fontSize: 13,
+  },
+  providerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  providerChip: {
+    borderWidth: 1,
+    borderColor: lightTheme.colors.wave[300],
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: lightTheme.colors.wave[50],
+  },
+  providerChipSelected: {
+    backgroundColor: lightTheme.colors.primary[600],
+    borderColor: lightTheme.colors.primary[600],
+  },
+  providerText: {
     fontSize: 14,
+    color: lightTheme.colors.wave[700],
   },
-  buttonContainer: {
-    margin: 16,
-    marginTop: 8,
-    marginBottom: 32,
+  providerTextSelected: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  deployButton: {
+    backgroundColor: lightTheme.colors.primary[700],
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    shadowColor: lightTheme.colors.primary[700],
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  deployButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
 });
