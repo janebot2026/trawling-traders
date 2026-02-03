@@ -9,6 +9,7 @@ import { BotsListScreen } from './screens/BotsListScreen';
 import { CreateBotScreen } from './screens/CreateBotScreen';
 import { BotDetailScreen } from './screens/BotDetailScreen';
 import { BotSettingsScreen } from './screens/BotSettingsScreen';
+import { ProfileScreen } from './screens/ProfileScreen';
 
 // Types
 export type RootStackParamList = {
@@ -88,9 +89,4 @@ export function AppNavigator() {
       </Stack.Navigator>
     </NavigationContainer>
   );
-}
-
-// Placeholder Profile screen
-function ProfileScreen() {
-  return null; // Will implement
 }

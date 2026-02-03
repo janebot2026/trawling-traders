@@ -1,157 +1,197 @@
+const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000/api/v1';
+const DATA_API_URL = process.env.DATA_API_URL || 'http://localhost:8080';
+
 import type {
   Bot,
   BotConfig,
   BotEvent,
   CreateBotRequest,
-  GetBotResponse,
-  GetEventsResponse,
-  GetMetricsResponse,
-  ListBotsResponse,
-  MetricPoint,
   UpdateBotConfigRequest,
+  ListBotsResponse,
+  GetBotResponse,
+  GetMetricsResponse,
+  GetEventsResponse,
+  BotActionRequest,
   User,
 } from '@trawling-traders/types';
 
-// API client configuration
-interface ApiClientConfig {
-  baseUrl: string;
-  getAuthToken: () => string | null;
-}
-
-// API error
+// Generic API error
 export class ApiError extends Error {
   constructor(
+    public status: number,
     message: string,
-    public statusCode: number,
-    public response?: Response
+    public data?: any
   ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
-// Generic API client
-class ApiClient {
-  private config: ApiClientConfig;
+// HTTP client with auth
+async function fetchApi(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<any> {
+  const url = `${API_BASE_URL}${endpoint}`;
+  
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((options.headers as Record<string, string>) || {}),
+  };
 
-  constructor(config: ApiClientConfig) {
-    this.config = config;
+  // TODO: Add auth token from Cedros session
+  // const token = await getAuthToken();
+  // if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const response = await fetch(url, {
+    ...options,
+    headers,
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new ApiError(response.status, error || 'API request failed');
   }
 
-  private async request<T>(
-    method: string,
-    path: string,
-    body?: unknown
-  ): Promise<T> {
-    const token = this.config.getAuthToken();
-    
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const response = await fetch(`${this.config.baseUrl}${path}`, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    if (!response.ok) {
-      throw new ApiError(
-        `API request failed: ${response.statusText}`,
-        response.status,
-        response
-      );
-    }
-
-    return response.json() as Promise<T>;
-  }
-
-  get<T>(path: string): Promise<T> {
-    return this.request<T>('GET', path);
-  }
-
-  post<T>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>('POST', path, body);
-  }
-
-  patch<T>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>('PATCH', path, body);
-  }
-
-  delete<T>(path: string): Promise<T> {
-    return this.request<T>('DELETE', path);
-  }
+  return response.json();
 }
 
-// Trawling Traders API
-export class TrawlingTradersApi {
-  private client: ApiClient;
-
-  constructor(config: ApiClientConfig) {
-    this.client = new ApiClient(config);
-  }
-
-  // Auth
-  async getCurrentUser(): Promise<User> {
-    return this.client.get<User>('/me');
-  }
-
-  // Bots
+// Bot API
+export const botApi = {
+  // List all bots for current user
   async listBots(): Promise<ListBotsResponse> {
-    return this.client.get<ListBotsResponse>('/bots');
-  }
+    return fetchApi('/bots');
+  },
 
+  // Create a new bot
   async createBot(request: CreateBotRequest): Promise<Bot> {
-    return this.client.post<Bot>('/bots', request);
-  }
+    return fetchApi('/bots', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  },
 
+  // Get bot details with config
   async getBot(botId: string): Promise<GetBotResponse> {
-    return this.client.get<GetBotResponse>(`/bots/${botId}`);
-  }
+    return fetchApi(`/bots/${botId}`);
+  },
 
+  // Update bot config
   async updateBotConfig(
     botId: string,
     request: UpdateBotConfigRequest
   ): Promise<BotConfig> {
-    return this.client.patch<BotConfig>(`/bots/${botId}/config`, request);
-  }
+    return fetchApi(`/bots/${botId}/config`, {
+      method: 'PATCH',
+      body: JSON.stringify(request),
+    });
+  },
 
-  async botAction(botId: string, action: 'pause' | 'resume' | 'redeploy' | 'destroy'): Promise<void> {
-    return this.client.post<void>(`/bots/${botId}/actions`, { action });
-  }
+  // Perform action on bot (pause/resume/redeploy/destroy)
+  async botAction(
+    botId: string,
+    action: BotActionRequest['action']
+  ): Promise<void> {
+    return fetchApi(`/bots/${botId}/actions`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    });
+  },
 
-  // Metrics
-  async getMetrics(botId: string, range: '7d' | '30d' = '7d'): Promise<GetMetricsResponse> {
-    return this.client.get<GetMetricsResponse>(`/bots/${botId}/metrics?range=${range}`);
-  }
+  // Get bot metrics
+  async getMetrics(botId: string): Promise<GetMetricsResponse> {
+    return fetchApi(`/bots/${botId}/metrics`);
+  },
 
-  // Events
-  async getEvents(botId: string, cursor?: string): Promise<GetEventsResponse> {
-    const path = cursor
-      ? `/bots/${botId}/events?cursor=${cursor}`
-      : `/bots/${botId}/events`;
-    return this.client.get<GetEventsResponse>(path);
-  }
-}
+  // Get bot events
+  async getEvents(botId: string): Promise<GetEventsResponse> {
+    return fetchApi(`/bots/${botId}/events`);
+  },
+};
 
-// Singleton instance (configure with your API URL)
-let apiInstance: TrawlingTradersApi | null = null;
+// User API
+export const userApi = {
+  async getCurrentUser(): Promise<User> {
+    return fetchApi('/me');
+  },
+};
 
-export function initializeApi(config: ApiClientConfig): TrawlingTradersApi {
-  apiInstance = new TrawlingTradersApi(config);
-  return apiInstance;
-}
+// Price/Data API (separate service)
+export const dataApi = {
+  async getPrice(symbol: string, quote: string = 'USD'): Promise<{
+    symbol: string;
+    price: string;
+    source: string;
+    timestamp: string;
+    confidence?: number;
+  }> {
+    const url = `${DATA_API_URL}/prices/${symbol}?quote=${quote}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new ApiError(response.status, 'Failed to fetch price');
+    }
+    return response.json();
+  },
 
-export function getApi(): TrawlingTradersApi {
-  if (!apiInstance) {
-    throw new Error('API not initialized. Call initializeApi first.');
-  }
-  return apiInstance;
-}
+  async getPricesBatch(symbols: string[]): Promise<{
+    prices: Record<string, {
+      symbol: string;
+      price: string;
+      source: string;
+      timestamp: string;
+      confidence?: number;
+    }>;
+    errors: string[];
+  }> {
+    const url = `${DATA_API_URL}/prices/batch`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols }),
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, 'Failed to fetch prices');
+    }
+    return response.json();
+  },
 
-// Re-export types
-export * from '@trawling-traders/types';
+  async getSupportedSymbols(): Promise<{
+    crypto: string[];
+    stocks: string[];
+    etfs: string[];
+    metals: string[];
+  }> {
+    const url = `${DATA_API_URL}/prices/supported`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new ApiError(response.status, 'Failed to fetch symbols');
+    }
+    return response.json();
+  },
+
+  async healthCheck(): Promise<{
+    status: string;
+    sources: Array<{
+      source: string;
+      is_healthy: boolean;
+      success_rate_24h: number;
+      avg_latency_ms: number;
+    }>;
+  }> {
+    const url = `${DATA_API_URL}/health`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new ApiError(response.status, 'Health check failed');
+    }
+    return response.json();
+  },
+};
+
+// Export all
+export const api = {
+  bot: botApi,
+  user: userApi,
+  data: dataApi,
+};
+
+export default api;
