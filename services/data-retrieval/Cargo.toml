@@ -7,6 +7,10 @@ edition = "2021"
 # HTTP client
 reqwest = { version = "0.11", features = ["json"] }
 
+# HTTP server (for API)
+axum = "0.7"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
@@ -29,6 +33,7 @@ redis = { version = "0.23", features = ["tokio-comp"] }
 
 # WebSocket for real-time feeds
 tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
+futures = "0.3"
 
 # URL parsing
 url = "2.4"
