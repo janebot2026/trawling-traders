@@ -5,6 +5,7 @@ pub mod handlers {
 }
 pub mod db;
 pub mod middleware;
+pub mod cedros;
 
 use std::sync::Arc;
 use axum::{
@@ -45,13 +46,17 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/bot/:id/register", post(handlers::sync::register_bot))
         .route("/bot/:id/config", get(handlers::sync::get_bot_config))
         .route("/bot/:id/config_ack", post(handlers::sync::ack_config))
-        .route("/bot/:id/wallet", post(handlers::sync::report_wallet))  // NEW: Agent wallet reporting
+        .route("/bot/:id/wallet", post(handlers::sync::report_wallet))  // Agent wallet reporting
         .route("/bot/:id/heartbeat", post(handlers::sync::heartbeat))
         .route("/bot/:id/events", post(handlers::sync::ingest_events));
+    
+    // Cedros Pay routes (payments and subscriptions)
+    let cedros_routes = cedros::routes();
     
     Router::new()
         .nest("/api/v1", app_routes)
         .nest("/api/v1", bot_routes)
+        .nest("/api/v1", cedros_routes)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
