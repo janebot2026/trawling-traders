@@ -1,17 +1,6 @@
-// Authentication middleware
-use axum::{
-    extract::Request,
-    middleware::Next,
-    response::Response,
-    http::StatusCode,
-};
+//! Middleware module for Trawling Traders control plane
 
-/// JWT auth middleware
-pub async fn auth_middleware(
-    request: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    // TODO: Implement JWT validation
-    // For now, pass through
-    Ok(next.run(request).await)
-}
+pub mod auth;
+
+// Re-export commonly used items
+pub use auth::{AuthContext, auth_middleware};

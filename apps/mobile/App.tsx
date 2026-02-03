@@ -5,23 +5,22 @@ import { CedrosLoginProvider } from '@cedros/login-react-native';
 import { CedrosProvider } from '@cedros/pay-react-native';
 import { AppNavigator } from './src/navigation/AppNavigator';
 
-// Control plane API URL - update this to match your deployment
-const CONTROL_PLANE_URL = process.env.CONTROL_PLANE_URL || 'http://localhost:3000';
+// API Configuration
+const API_URL = 'https://api.trawlingtraders.com';
 
 export default function App() {
   return (
     <CedrosLoginProvider
       config={{
-        serverUrl: CONTROL_PLANE_URL,
+        serverUrl: API_URL,
         timeout: 30000,
         retries: 3,
       }}
     >
       <CedrosProvider
         config={{
-          apiUrl: CONTROL_PLANE_URL,
-          stripePublicKey: process.env.STRIPE_PUBLIC_KEY,
-          solanaNetwork: 'mainnet-beta',
+          apiUrl: API_URL,
+          // Stripe and Solana config left blank for now per instructions
         }}
       >
         <SafeAreaProvider>
