@@ -5,14 +5,40 @@ use serde::{Deserialize, Serialize};
 /// Universal price data point from any source
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PricePoint {
-    pub asset: String,           // "BTC", "ETH", etc.
-    pub quote: String,           // "USD", "USDT"
-    pub source: String,          // "coingecko", "binance"
-    pub timestamp: DateTime<Utc>,
+    pub symbol: String,          // Full symbol like "BTC/USD", "AAPL"
     pub price: Decimal,
-    pub volume_24h: Option<Decimal>,
-    pub market_cap: Option<Decimal>,
-    pub confidence: f64,         // 0.0 - 1.0 based on source quality
+    pub source: String,          // "coingecko", "binance", "pyth"
+    pub timestamp: DateTime<Utc>,
+    pub confidence: Option<f64>,  // 0.0 - 1.0 based on source quality, None if unknown
+}
+
+impl PricePoint {
+    /// Create a new price point with explicit fields
+    pub fn new(
+        symbol: impl Into<String>,
+        price: Decimal,
+        source: impl Into<String>,
+        timestamp: DateTime<Utc>,
+        confidence: Option<f64>,
+    ) -> Self {
+        Self {
+            symbol: symbol.into(),
+            price,
+            source: source.into(),
+            timestamp,
+            confidence,
+        }
+    }
+    
+    /// Get asset part of symbol (e.g., "BTC" from "BTC/USD")
+    pub fn asset(&self) -> String {
+        self.symbol.split('/').next().unwrap_or(&self.symbol).to_string()
+    }
+    
+    /// Get quote part of symbol (e.g., "USD" from "BTC/USD")
+    pub fn quote(&self) -> Option<String> {
+        self.symbol.split('/').nth(1).map(|s| s.to_string())
+    }
 }
 
 /// OHLCV candle for technical analysis

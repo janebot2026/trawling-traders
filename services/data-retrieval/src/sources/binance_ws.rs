@@ -246,17 +246,23 @@ impl BinanceWebSocketClient {
         let price = price_str.parse::<f64>()
             .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()))?;
         
+        // Format symbol as BTC/USDT from BTCUSDT
+        let formatted_symbol = if symbol.ends_with("USDT") {
+            format!("{}/USDT", &symbol[..symbol.len()-4])
+        } else if symbol.ends_with("USD") {
+            format!("{}/USD", &symbol[..symbol.len()-3])
+        } else {
+            symbol.to_string()
+        };
+        
         let price_point = PricePoint {
-            asset: symbol.replace("USDT", "").replace("USD", ""),
-            quote: "USD".to_string(),
+            symbol: formatted_symbol,
+            price: Decimal::try_from(price)
+                .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()))?,
             source: "binance".to_string(),
             timestamp: chrono::Utc.timestamp_millis_opt(timestamp_ms).single()
                 .unwrap_or_else(chrono::Utc::now),
-            price: Decimal::try_from(price)
-                .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()))?,
-            volume_24h: None,
-            market_cap: None,
-            confidence: 0.95, // Binance is real-time exchange data
+            confidence: Some(0.95), // Binance is real-time exchange data
         };
         
         // Send to channel
@@ -421,7 +427,7 @@ mod tests {
         
         match price {
             Ok(Some(p)) => {
-                println!("Received price: {} = ${}", p.asset, p.price);
+                println!("Received price: {} = ${}", p.symbol, p.price);
                 assert_eq!(p.source, "binance");
                 assert!(p.price > Decimal::ZERO);
             }

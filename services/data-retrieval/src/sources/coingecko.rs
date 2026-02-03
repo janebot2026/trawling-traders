@@ -144,7 +144,7 @@ impl PriceDataSource for CoinGeckoClient {
         let vs_currency = quote.to_lowercase();
         
         let endpoint = format!(
-            "/simple/price?ids={}&vs_currencies={}&include_24hr_vol=true&include_market_cap=true",
+            "/simple/price?ids={}&vs_currencies={}",
             coin_id, vs_currency
         );
         
@@ -162,32 +162,15 @@ impl PriceDataSource for CoinGeckoClient {
                 "Missing price data".to_string()
             ))?;
         
-        let volume_24h = data.get("usd_24h_vol")
-            .or_else(|| data.get(&format!("{}_24h_vol", vs_currency)))
-            .and_then(|v| v.as_f64())
-            .map(Decimal::try_from)
-            .transpose()
-            .ok()
-            .flatten();
-        
-        let market_cap = data.get("usd_market_cap")
-            .or_else(|| data.get(&format!("{}_market_cap", vs_currency)))
-            .and_then(|v| v.as_f64())
-            .map(Decimal::try_from)
-            .transpose()
-            .ok()
-            .flatten();
+        let symbol = format!("{}/{}", asset.to_uppercase(), quote.to_uppercase());
         
         Ok(PricePoint {
-            asset: asset.to_uppercase(),
-            quote: quote.to_uppercase(),
-            source: "coingecko".to_string(),
-            timestamp: Utc::now(),
+            symbol,
             price: Decimal::try_from(price)
                 .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()))?,
-            volume_24h,
-            market_cap,
-            confidence: 0.85, // CoinGecko is reliable but not real-time
+            source: "coingecko".to_string(),
+            timestamp: Utc::now(),
+            confidence: Some(0.85), // CoinGecko is reliable but not real-time
         })
     }
     
@@ -306,11 +289,11 @@ mod tests {
         let client = CoinGeckoClient::new(None);
         let price = client.get_price("BTC", "USD").await.unwrap();
         
-        assert_eq!(price.asset, "BTC");
-        assert_eq!(price.quote, "USD");
+        assert_eq!(price.asset(), "BTC");
+        assert_eq!(price.quote(), Some("USD".to_string()));
         assert_eq!(price.source, "coingecko");
         assert!(price.price > Decimal::ZERO);
-        assert!(price.confidence > 0.0);
+        assert!(price.confidence.unwrap_or(0.0) > 0.0);
     }
     
     #[tokio::test]

@@ -2,6 +2,7 @@ pub mod types;
 pub mod sources {
     pub mod coingecko;
     pub mod binance_ws;
+    pub mod pyth;
 }
 pub mod normalizers;
 pub mod aggregators;
@@ -10,6 +11,7 @@ pub mod cache;
 pub use types::*;
 pub use sources::coingecko::CoinGeckoClient;
 pub use sources::binance_ws::BinanceWebSocketClient;
+pub use sources::pyth::PythClient;
 
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -18,9 +20,51 @@ use tracing::{info, warn};
 use chrono::Utc;
 use std::collections::HashMap;
 
+/// Asset class for routing to appropriate data sources
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AssetClass {
+    Crypto,
+    Stock,
+    Etf,
+    Metal,
+}
+
+impl AssetClass {
+    /// Detect asset class from symbol
+    pub fn from_symbol(symbol: &str) -> Self {
+        let sym = symbol.to_uppercase();
+        
+        // Crypto majors
+        if ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOT", "AVAX"].contains(&sym.as_str()) {
+            return AssetClass::Crypto;
+        }
+        
+        // Stocks (using Pyth feed list)
+        if PythClient::supports_symbol(&sym) && 
+           ["AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "NVDA", "META", "NFLX"].contains(&sym.as_str()) {
+            return AssetClass::Stock;
+        }
+        
+        // ETFs
+        if ["SPY", "QQQ"].contains(&sym.as_str()) {
+            return AssetClass::Etf;
+        }
+        
+        // Metals
+        if ["ORO", "XAU", "XAG"].contains(&sym.as_str()) {
+            return AssetClass::Metal;
+        }
+        
+        // Default to crypto
+        AssetClass::Crypto
+    }
+}
+
 /// Multi-source price aggregator with real-time and cached data
 pub struct PriceAggregator {
-    sources: Vec<Arc<dyn PriceDataSource>>,
+    crypto_sources: Vec<Arc<dyn PriceDataSource>>,
+    stock_sources: Vec<Arc<dyn PriceDataSource>>,
+    metal_sources: Vec<Arc<dyn PriceDataSource>>,
     realtime_sources: Vec<Arc<BinanceWebSocketClient>>,
     cache: Option<cache::RedisCache>,
     latest_prices: Arc<RwLock<HashMap<String, PricePoint>>>, // symbol -> price
@@ -29,15 +73,25 @@ pub struct PriceAggregator {
 impl PriceAggregator {
     pub fn new() -> Self {
         Self {
-            sources: Vec::new(),
+            crypto_sources: Vec::new(),
+            stock_sources: Vec::new(),
+            metal_sources: Vec::new(),
             realtime_sources: Vec::new(),
             cache: None,
             latest_prices: Arc::new(RwLock::new(HashMap::new())),
         }
     }
     
-    pub fn add_source(&mut self, source: Arc<dyn PriceDataSource>) {
-        self.sources.push(source);
+    pub fn add_crypto_source(&mut self, source: Arc<dyn PriceDataSource>) {
+        self.crypto_sources.push(source);
+    }
+    
+    pub fn add_stock_source(&mut self, source: Arc<dyn PriceDataSource>) {
+        self.stock_sources.push(source);
+    }
+    
+    pub fn add_metal_source(&mut self, source: Arc<dyn PriceDataSource>) {
+        self.metal_sources.push(source);
     }
     
     pub fn add_realtime_source(&mut self, source: Arc<BinanceWebSocketClient>) {
@@ -81,22 +135,32 @@ impl PriceAggregator {
     ) -> Result<PricePoint> {
         let key = format!("{}:{}", asset.to_uppercase(), quote.to_uppercase());
         
-        // Check real-time cache first (WebSocket)
-        {
-            let prices = self.latest_prices.read().await;
-            if let Some(price) = prices.get(&key) {
-                // Check if fresh (< 5 seconds for real-time)
-                if (Utc::now() - price.timestamp).num_seconds() < 5 {
-                    return Ok(price.clone());
+        // Check real-time cache first (WebSocket) - only for crypto
+        let asset_class = AssetClass::from_symbol(asset);
+        if asset_class == AssetClass::Crypto {
+            {
+                let prices = self.latest_prices.read().await;
+                if let Some(price) = prices.get(&key) {
+                    // Check if fresh (< 5 seconds for real-time)
+                    if (Utc::now() - price.timestamp).num_seconds() < 5 {
+                        return Ok(price.clone());
+                    }
                 }
             }
         }
         
         // Fall back to aggregated REST sources
         self.get_aggregated_price(asset, quote).await
+            .map(|agg| PricePoint {
+                symbol: format!("{}/{}", asset, quote),
+                price: agg.price,
+                source: "aggregated".to_string(),
+                timestamp: agg.timestamp,
+                confidence: Some(agg.confidence),
+            })
     }
     
-    /// Get aggregated price from multiple sources
+    /// Get aggregated price from appropriate sources for asset class
     pub async fn get_aggregated_price(
         &self,
         asset: &str,
@@ -111,9 +175,23 @@ impl PriceAggregator {
             }
         }
         
+        // Route to appropriate sources based on asset class
+        let asset_class = AssetClass::from_symbol(asset);
+        let sources: &[Arc<dyn PriceDataSource>] = match asset_class {
+            AssetClass::Crypto => &self.crypto_sources,
+            AssetClass::Stock | AssetClass::Etf => &self.stock_sources,
+            AssetClass::Metal => &self.metal_sources,
+        };
+        
+        if sources.is_empty() {
+            return Err(DataRetrievalError::SourceUnhealthy(
+                format!("No sources configured for {:?} asset: {}", asset_class, asset)
+            ));
+        }
+        
         // Fetch from all sources concurrently
         let mut futures = Vec::new();
-        for source in &self.sources {
+        for source in sources {
             let fut = source.get_price(asset, quote);
             futures.push(fut);
         }
@@ -136,20 +214,34 @@ impl PriceAggregator {
         }
         
         // Calculate weighted median
-        let total_weight: f64 = prices.iter().map(|p| p.confidence).sum();
-        let weighted_sum: rust_decimal::Decimal = prices
-            .iter()
-            .map(|p| p.price * rust_decimal::Decimal::from_f64(p.confidence).unwrap())
+        let total_weight: f64 = prices.iter()
+            .map(|p| p.confidence.unwrap_or(0.5))
             .sum();
         
-        let aggregated_price = weighted_sum / rust_decimal::Decimal::from_f64(total_weight).unwrap();
+        let weighted_sum: rust_decimal::Decimal = prices
+            .iter()
+            .map(|p| {
+                let weight = p.confidence.unwrap_or(0.5);
+                p.price * rust_decimal::Decimal::from_f64(weight).unwrap_or_default()
+            })
+            .sum();
+        
+        let aggregated_price = weighted_sum / rust_decimal::Decimal::from_f64(total_weight).unwrap_or_default();
         
         // Calculate spread
-        let min_price = prices.iter().map(|p| p.price).min().unwrap();
-        let max_price = prices.iter().map(|p| p.price).max().unwrap();
-        let avg_price = (min_price + max_price) / rust_decimal::Decimal::from(2);
-        let spread = (max_price - min_price) / avg_price * rust_decimal::Decimal::from(100);
-        let spread_percent = spread.to_f64().unwrap_or(0.0);
+        let prices_f64: Vec<f64> = prices
+            .iter()
+            .filter_map(|p| p.price.to_f64())
+            .collect();
+        
+        let min_price = prices_f64.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_price = prices_f64.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let avg_price = (min_price + max_price) / 2.0;
+        let spread_percent = if avg_price > 0.0 {
+            (max_price - min_price) / avg_price * 100.0
+        } else {
+            0.0
+        };
         
         // Build source contributions
         let sources: Vec<PriceSource> = prices
@@ -157,7 +249,7 @@ impl PriceAggregator {
             .map(|p| PriceSource {
                 source: p.source.clone(),
                 price: p.price,
-                weight: p.confidence / total_weight,
+                weight: p.confidence.unwrap_or(0.5) / total_weight,
                 timestamp: p.timestamp,
             })
             .collect();
@@ -168,7 +260,7 @@ impl PriceAggregator {
             price: aggregated_price,
             sources,
             timestamp: Utc::now(),
-            confidence: prices.iter().map(|p| p.confidence).sum::<f64>() / prices.len() as f64,
+            confidence: prices.iter().map(|p| p.confidence.unwrap_or(0.5)).sum::<f64>() / prices.len() as f64,
             spread_percent,
         };
         
@@ -180,12 +272,44 @@ impl PriceAggregator {
         Ok(result)
     }
     
+    /// Get price specifically for stocks (uses Pyth)
+    pub async fn get_stock_price(&self,
+        symbol: &str,
+    ) -> Result<PricePoint> {
+        self.get_price_realtime(symbol, "USD").await
+    }
+    
+    /// Get batch prices for multiple stocks
+    pub async fn get_stock_prices_batch(
+        &self,
+        symbols: &[&str],
+    ) -> Result<HashMap<String, PricePoint>> {
+        let mut results = HashMap::new();
+        
+        for symbol in symbols {
+            match self.get_stock_price(symbol).await {
+                Ok(price) => { results.insert(symbol.to_string(), price); }
+                Err(e) => warn!("Failed to get price for {}: {}", symbol, e),
+            }
+        }
+        
+        Ok(results)
+    }
+    
     /// Get health status of all sources
     pub async fn health_check(&self,
     ) -> Vec<SourceHealth> {
         let mut healths = Vec::new();
         
-        for source in &self.sources {
+        for source in &self.crypto_sources {
+            healths.push(source.health().await);
+        }
+        
+        for source in &self.stock_sources {
+            healths.push(source.health().await);
+        }
+        
+        for source in &self.metal_sources {
             healths.push(source.health().await);
         }
         
@@ -203,6 +327,26 @@ impl PriceAggregator {
         
         healths
     }
+    
+    /// Get supported symbols for each asset class
+    pub fn get_supported_symbols(&self,
+    ) -> SupportedSymbols {
+        SupportedSymbols {
+            crypto: vec!["BTC", "ETH", "SOL", "BNB", "XRP", "ADA"],
+            stocks: PythClient::supported_stocks(),
+            etfs: PythClient::supported_etfs(),
+            metals: PythClient::supported_metals(),
+        }
+    }
+}
+
+/// List of supported symbols by category
+#[derive(Debug, Clone)]
+pub struct SupportedSymbols {
+    pub crypto: Vec<&'static str>,
+    pub stocks: Vec<&'static str>,
+    pub etfs: Vec<&'static str>,
+    pub metals: Vec<&'static str>,
 }
 
 #[async_trait]
@@ -230,5 +374,53 @@ impl PriceDataSource for CoinGeckoClient {
     
     fn name(&self) -> &str {
         "coingecko"
+    }
+}
+
+#[async_trait]
+impl PriceDataSource for PythClient {
+    async fn get_price(
+        &self,
+        asset: &str,
+        _quote: &str,
+    ) -> Result<PricePoint> {
+        // Pyth always returns USD prices
+        self.get_price(asset).await
+    }
+    
+    async fn get_candles(
+        &self,
+        _asset: &str,
+        _quote: &str,
+        _timeframe: TimeFrame,
+        _limit: usize,
+    ) -> Result<Vec<Candle>> {
+        Err(anyhow::anyhow!("Candles not supported by Pyth"))
+    }
+    
+    async fn health(&self) -> SourceHealth {
+        // Quick health check
+        match self.get_price("BTC").await {
+            Ok(_) => SourceHealth {
+                source: "pyth".to_string(),
+                is_healthy: true,
+                last_success: Some(Utc::now()),
+                last_error: None,
+                success_rate_24h: 1.0,
+                avg_latency_ms: 200,
+            },
+            Err(e) => SourceHealth {
+                source: "pyth".to_string(),
+                is_healthy: false,
+                last_success: None,
+                last_error: Some(e.to_string()),
+                success_rate_24h: 0.0,
+                avg_latency_ms: 0,
+            },
+        }
+    }
+    
+    fn name(&self) -> &str {
+        "pyth"
     }
 }
