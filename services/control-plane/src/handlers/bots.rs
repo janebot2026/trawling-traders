@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, Extension},
     http::StatusCode,
     Json,
 };
@@ -11,16 +11,18 @@ use chrono::Utc;
 use crate::{
     models::User,
     models::*,
+    middleware::AuthContext,
     AppState,
 };
 
 /// GET /bots - List all bots for authenticated user
 pub async fn list_bots(
     State(state): State<Arc<AppState>>,
-    // TODO: Add auth extractor to get user_id from JWT
+    Extension(auth): Extension<AuthContext>,
 ) -> Result<Json<ListBotsResponse>, (StatusCode, String)> {
-    // Placeholder: use a mock user_id
-    let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    // Parse user_id from JWT (stored as string in auth context)
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
     
     let bots = sqlx::query_as::<_, Bot>(
         "SELECT * FROM bots WHERE user_id = $1 ORDER BY created_at DESC"
@@ -38,6 +40,7 @@ pub async fn list_bots(
 /// POST /bots - Create a new bot
 pub async fn create_bot(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthContext>,
     Json(req): Json<CreateBotRequest>,
 ) -> Result<Json<Bot>, (StatusCode, String)> {
     // Validate request
@@ -45,8 +48,9 @@ pub async fn create_bot(
         return Err((StatusCode::BAD_REQUEST, errors.to_string()));
     }
     
-    // Placeholder user_id
-    let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    // Parse user_id from JWT
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
     
     // Check subscription limits
     let bot_count: i64 = sqlx::query_scalar(
@@ -136,6 +140,7 @@ pub async fn create_bot(
 /// GET /bots/:id - Get bot details with config
 pub async fn get_bot(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<BotResponse>, (StatusCode, String)> {
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
@@ -146,6 +151,14 @@ pub async fn get_bot(
             sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
             _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         })?;
+    
+    // Verify bot belongs to authenticated user
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
+    
+    if bot.user_id != user_id {
+        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+    }
     
     // Get current config
     let config = sqlx::query_as::<_, ConfigVersion>(
@@ -162,9 +175,27 @@ pub async fn get_bot(
 /// PATCH /bots/:id/config - Update bot config
 pub async fn update_bot_config(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
     Json(req): Json<UpdateBotConfigRequest>,
 ) -> Result<Json<ConfigVersion>, (StatusCode, String)> {
+    // First verify bot belongs to user
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
+    
+    let bot: Bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
+        .bind(bot_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+    
+    if bot.user_id != user_id {
+        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+    }
+    
     // Get current version
     let current_version: i32 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(version), 0) FROM config_versions WHERE bot_id = $1"
@@ -234,10 +265,28 @@ pub async fn update_bot_config(
 /// POST /bots/:id/actions - Perform action on bot
 pub async fn bot_action(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
     Json(req): Json<BotActionRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let (new_status, message) = match req.action {
+    // Verify bot belongs to user
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
+    
+    let bot: Bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
+        .bind(bot_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+    
+    if bot.user_id != user_id {
+        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+    }
+    
+    let (new_status, _action_message) = match req.action {
         BotAction::Pause => ("paused", "Bot paused"),
         BotAction::Resume => ("online", "Bot resumed"),
         BotAction::Redeploy => ("provisioning", "Bot redeploy triggered"),
@@ -261,9 +310,26 @@ pub async fn bot_action(
 /// GET /bots/:id/metrics - Get bot metrics
 pub async fn get_metrics(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
-    // TODO: Add query param for range
 ) -> Result<Json<MetricsResponse>, (StatusCode, String)> {
+    // Verify bot belongs to user
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
+    
+    let bot: Bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
+        .bind(bot_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+    
+    if bot.user_id != user_id {
+        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+    }
+    
     // Query using MetricDb (BigDecimal) then convert to Metric (Decimal)
     let metrics_db = sqlx::query_as::<_, MetricDb>(
         r#"
@@ -291,8 +357,26 @@ pub async fn get_metrics(
 /// GET /bots/:id/events - Get bot events
 pub async fn get_events(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<EventsResponse>, (StatusCode, String)> {
+    // Verify bot belongs to user
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
+    
+    let bot: Bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
+        .bind(bot_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+    
+    if bot.user_id != user_id {
+        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+    }
+    
     let events = sqlx::query_as::<_, Event>(
         "SELECT * FROM events WHERE bot_id = $1 ORDER BY created_at DESC LIMIT 100"
     )
@@ -309,17 +393,22 @@ pub async fn get_events(
 
 use validator::Validate;
 
-/// GET /me - Get current user
+/// GET /me - Get current user from JWT
 pub async fn get_current_user(
-    State(_state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthContext>,
 ) -> Result<Json<User>, (StatusCode, String)> {
-    // Placeholder: return mock user
+    // Parse user_id from JWT
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
+    
+    // Return user info from JWT claims
     let user = User {
-        id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-        email: "user@example.com".to_string(),
-        cedros_user_id: "cedros_user_123".to_string(),
+        id: user_id,
+        email: auth.email.unwrap_or_else(|| "user@example.com".to_string()),
+        cedros_user_id: auth.user_id.clone(),
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
+    
     Ok(Json(user))
 }
