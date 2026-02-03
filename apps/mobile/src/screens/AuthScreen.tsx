@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Button,
   ActivityIndicator,
   Image,
   ScrollView,
@@ -15,6 +14,11 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { OceanBackground } from '../components/OceanBackground';
 import { lightTheme } from '../theme';
+import {
+  useCedrosLogin,
+  EmailLoginForm,
+  GoogleLoginButton,
+} from '@cedros/login-react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -25,7 +29,7 @@ type AuthScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'A
 
 export function AuthScreen() {
   const navigation = useNavigation<AuthScreenNavigationProp>();
-  const [isLoading, setIsLoading] = React.useState(true);
+  const { isAuthenticated, isLoading: authLoading, user } = useCedrosLogin();
 
   // Animation values
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
@@ -33,46 +37,43 @@ export function AuthScreen() {
   const scaleAnim = React.useRef(new Animated.Value(0.8)).current;
   const featureAnim = React.useRef(new Animated.Value(0)).current;
 
+  // Navigate when authenticated
   useEffect(() => {
-    // Initial loading delay
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-      // Start entrance animations
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(fadeAnim, {
-            toValue: 1,
-            duration: 800,
-            useNativeDriver: true,
-          }),
-          Animated.spring(scaleAnim, {
-            toValue: 1,
-            friction: 6,
-            tension: 40,
-            useNativeDriver: true,
-          }),
-          Animated.timing(slideAnim, {
-            toValue: 0,
-            duration: 600,
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.timing(featureAnim, {
+    if (isAuthenticated && user) {
+      navigation.navigate('Main');
+    }
+  }, [isAuthenticated, user, navigation]);
+
+  useEffect(() => {
+    // Start entrance animations
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
           toValue: 1,
-          duration: 500,
+          duration: 800,
           useNativeDriver: true,
         }),
-      ]).start();
-    }, 1500);
-
-    return () => clearTimeout(timer);
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          friction: 6,
+          tension: 40,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.timing(featureAnim, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+    ]).start();
   }, []);
 
-  const handleLogin = () => {
-    navigation.navigate('Subscribe');
-  };
-
-  if (isLoading) {
+  if (authLoading) {
     return (
       <OceanBackground>
         <View style={styles.loadingContainer}>
@@ -157,11 +158,17 @@ export function AuthScreen() {
             </View>
           </Animated.View>
 
-          <View style={styles.buttonContainer}>
-            <View style={styles.buttonWrapper}
-              <Button title="Sign In with Cedros" onPress={handleLogin} color={lightTheme.colors.primary[700]} />
-            </View>
-          </View>
+          {/* Cedros Login Form */}
+          <Animated.View style={[styles.authContainer, { opacity: featureAnim }]}>
+            <EmailLoginForm
+              onSubmit={async (email, password) => {
+                // CedrosLoginProvider handles the auth state
+                // Navigation happens automatically via useEffect above
+                console.log('Login attempt:', email);
+              }}
+              isLoading={authLoading}
+            />
+          </Animated.View>
 
           <Text style={styles.hint}>Secure authentication powered by Cedros</Text>
 
@@ -283,7 +290,7 @@ const styles = StyleSheet.create({
   },
   features: {
     flexDirection: 'row',
-    marginBottom: 40,
+    marginBottom: 32,
     gap: 16,
   },
   feature: {
@@ -314,20 +321,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: lightTheme.colors.wave[700],
   },
-  buttonContainer: {
+  authContainer: {
     width: '100%',
-    maxWidth: 300,
+    maxWidth: 340,
     marginBottom: 16,
-  },
-  buttonWrapper: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: lightTheme.colors.primary[700],
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 5,
   },
   hint: {
     fontSize: 13,
