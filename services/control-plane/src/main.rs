@@ -85,6 +85,10 @@ async fn build_router(
         .route("/bot/:id/events", post(control_plane::handlers::sync::ingest_events));
     
     // Cedros placeholder routes
+    // TODO: Full Cedros Pay integration requires:
+    // 1. Create separate PostgresPool via cedros_pay::storage::PostgresPool::new()
+    // 2. Create SchemaMapping with table names
+    // 3. Build router via cedros_pay::router()
     let cedros_routes = control_plane::cedros::routes();
     
     // Build router
