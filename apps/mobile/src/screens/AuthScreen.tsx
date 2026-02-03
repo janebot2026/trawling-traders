@@ -1,16 +1,22 @@
 import React, { useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  Button, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  Button,
   ActivityIndicator,
   Image,
   ScrollView,
+  Animated,
+  Dimensions,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
+import { OceanBackground } from '../components/OceanBackground';
+import { lightTheme } from '../theme';
+
+const { width } = Dimensions.get('window');
 
 // LOB Avatar - our lobster mascot
 const LOB_AVATAR = require('../../assets/lob-avatar.png');
@@ -21,75 +27,152 @@ export function AuthScreen() {
   const navigation = useNavigation<AuthScreenNavigationProp>();
   const [isLoading, setIsLoading] = React.useState(true);
 
+  // Animation values
+  const fadeAnim = React.useRef(new Animated.Value(0)).current;
+  const slideAnim = React.useRef(new Animated.Value(50)).current;
+  const scaleAnim = React.useRef(new Animated.Value(0.8)).current;
+  const featureAnim = React.useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
-    // TODO: Check for existing session
-    // If logged in, navigate to Main
-    // If not, show Cedros Login
-    
-    setTimeout(() => {
+    // Initial loading delay
+    const timer = setTimeout(() => {
       setIsLoading(false);
-    }, 1500); // Slightly longer to show off the mascot
+      // Start entrance animations
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+          Animated.spring(scaleAnim, {
+            toValue: 1,
+            friction: 6,
+            tension: 40,
+            useNativeDriver: true,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.timing(featureAnim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }, 1500);
+
+    return () => clearTimeout(timer);
   }, []);
 
   const handleLogin = () => {
-    // TODO: Integrate Cedros Login
     navigation.navigate('Subscribe');
   };
 
   if (isLoading) {
     return (
-      <View style={styles.container}>
-        <Image source={LOB_AVATAR} style={styles.loadingAvatar} />
-        <Text style={styles.loadingText}>Loading...</Text>
-      </View>
+      <OceanBackground>
+        <View style={styles.loadingContainer}>
+          <Animated.Image
+            source={LOB_AVATAR}
+            style={[
+              styles.loadingAvatar,
+              {
+                transform: [{ scale: scaleAnim }],
+              },
+            ]}
+          />
+          <View style={styles.loadingTextContainer}>
+            <Text style={styles.loadingText}>Trawling Traders</Text>
+            <ActivityIndicator
+              size="small"
+              color={lightTheme.colors.primary[700]}
+              style={styles.loadingIndicator}
+            />
+          </View>
+        </View>
+      </OceanBackground>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.scrollContainer}>
-      <View style={styles.container}>
-        {/* LOB Mascot */}
-        <View style={styles.mascotContainer}>
-          <Image source={LOB_AVATAR} style={styles.avatar} />
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>#4821</Text>
+    <OceanBackground>
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        showsVerticalScrollIndicator={false}
+      >
+        <Animated.View
+          style={[
+            styles.container,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
+        >
+          {/* LOB Mascot */}
+          <View style={styles.mascotContainer}>
+            <Image source={LOB_AVATAR} style={styles.avatar} />
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>#4821</Text>
+            </View>
+            <View style={styles.statusIndicator} />
           </View>
-        </View>
 
-        <Text style={styles.greeting}>Ahoy, Trader! 🦞</Text>
-        <Text style={styles.title}>Trawling Traders</Text>
-        <Text style={styles.subtitle}>
-          Deploy AI-powered trading bots that trawl the markets 24/7
-        </Text>
+          <Text style={styles.greeting}>Ahoy, Trader! 🦞</Text>
+          <Text style={styles.title}>Trawling Traders</Text>
+          <Text style={styles.subtitle}>
+            Deploy AI-powered trading bots that trawl the markets 24/7
+          </Text>
 
-        {/* Feature highlights */}
-        <View style={styles.features}>
-          <View style={styles.feature}>
-            <Text style={styles.featureIcon}>🤖</Text>
-            <Text style={styles.featureText}>Up to 4 AI bots</Text>
+          {/* Feature highlights */}
+          <Animated.View
+            style={[
+              styles.features,
+              { opacity: featureAnim },
+            ]}
+          >
+            <View style={styles.feature}>
+              <View style={[styles.featureIcon, { backgroundColor: lightTheme.colors.bullish[100] }]}>
+                <Text style={[styles.featureEmoji, { color: lightTheme.colors.bullish[600] }]}>🤖</Text>
+              </View>
+              <Text style={styles.featureText}>Up to 4 bots</Text>
+            </View>
+
+            <View style={styles.feature}>
+              <View style={[styles.featureIcon, { backgroundColor: lightTheme.colors.primary[100] }]}>
+                <Text style={[styles.featureEmoji, { color: lightTheme.colors.primary[600] }]}>📈</Text>
+              </View>
+              <Text style={styles.featureText}>xStocks & crypto</Text>
+            </View>
+
+            <View style={styles.feature}>
+              <View style={[styles.featureIcon, { backgroundColor: lightTheme.colors.lobster[100] }]}>
+                <Text style={[styles.featureEmoji, { color: lightTheme.colors.lobster[600] }]}>🔒</Text>
+              </View>
+              <Text style={styles.featureText}>Your own VPS</Text>
+            </View>
+          </Animated.View>
+
+          <View style={styles.buttonContainer}>
+            <View style={styles.buttonWrapper}
+              <Button title="Sign In with Cedros" onPress={handleLogin} color={lightTheme.colors.primary[700]} />
+            </View>
           </View>
-          <View style={styles.feature}>
-            <Text style={styles.featureIcon}>📈</Text>
-            <Text style={styles.featureText}>xStocks & crypto</Text>
+
+          <Text style={styles.hint}>Secure authentication powered by Cedros</Text>
+
+          {/* Lobster footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Meet LOB — your trading companion</Text>
+            <Text style={styles.footerSub}>Always trawling, never sleeping</Text>
           </View>
-          <View style={styles.feature}>
-            <Text style={styles.featureIcon}>🔒</Text>
-            <Text style={styles.featureText}>Your own VPS</Text>
-          </View>
-        </View>
-        
-        <View style={styles.buttonContainer}>
-          <Button title="Sign In with Cedros" onPress={handleLogin} />
-        </View>
-        
-        <Text style={styles.hint}>Secure authentication powered by Cedros</Text>
-        
-        {/* Lobster footer */}
-        <Text style={styles.footer}>
-          Meet LOB — your trading companion
-        </Text>
-      </View>
-    </ScrollView>
+        </Animated.View>
+      </ScrollView>
+    </OceanBackground>
   );
 }
 
@@ -97,97 +180,173 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flexGrow: 1,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingAvatar: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    borderWidth: 4,
+    borderColor: lightTheme.colors.primary[700],
+  },
+  loadingTextContainer: {
+    marginTop: 24,
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: lightTheme.colors.wave[800],
+    marginBottom: 12,
+  },
+  loadingIndicator: {
+    marginTop: 8,
+  },
   container: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#fff',
-  },
-  loadingAvatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666',
+    padding: 24,
+    paddingTop: 60,
+    paddingBottom: 40,
   },
   mascotContainer: {
     position: 'relative',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   avatar: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
     borderWidth: 4,
-    borderColor: '#007AFF',
+    borderColor: lightTheme.colors.primary[700],
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 8,
   },
   badge: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
-    backgroundColor: '#22c55e',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    bottom: 8,
+    right: 8,
+    backgroundColor: lightTheme.colors.bullish[500],
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
     borderWidth: 3,
     borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   badgeText: {
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 14,
   },
+  statusIndicator: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: lightTheme.colors.bullish[500],
+    borderWidth: 3,
+    borderColor: '#fff',
+  },
   greeting: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: '#007AFF',
+    fontSize: 28,
+    fontWeight: '700',
+    color: lightTheme.colors.primary[700],
     marginBottom: 8,
   },
   title: {
-    fontSize: 32,
+    fontSize: 36,
     fontWeight: 'bold',
-    marginBottom: 10,
+    color: lightTheme.colors.wave[900],
+    marginBottom: 12,
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
+    color: lightTheme.colors.wave[600],
     textAlign: 'center',
-    marginBottom: 30,
-    maxWidth: 300,
+    marginBottom: 32,
+    maxWidth: 320,
+    lineHeight: 22,
   },
   features: {
     flexDirection: 'row',
-    marginBottom: 30,
-    gap: 20,
+    marginBottom: 40,
+    gap: 16,
   },
   feature: {
     alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    padding: 16,
+    borderRadius: 16,
+    minWidth: 90,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
   },
   featureIcon: {
-    fontSize: 28,
-    marginBottom: 4,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  featureEmoji: {
+    fontSize: 24,
   },
   featureText: {
     fontSize: 12,
-    color: '#666',
+    fontWeight: '600',
+    color: lightTheme.colors.wave[700],
   },
   buttonContainer: {
     width: '100%',
     maxWidth: 300,
-    marginBottom: 20,
+    marginBottom: 16,
+  },
+  buttonWrapper: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: lightTheme.colors.primary[700],
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 5,
   },
   hint: {
-    fontSize: 12,
-    color: '#999',
-    marginBottom: 20,
+    fontSize: 13,
+    color: lightTheme.colors.wave[500],
+    marginBottom: 40,
   },
   footer: {
+    alignItems: 'center',
+    marginTop: 'auto',
+    paddingTop: 20,
+  },
+  footerText: {
     fontSize: 14,
-    color: '#999',
+    color: lightTheme.colors.wave[600],
     fontStyle: 'italic',
+  },
+  footerSub: {
+    fontSize: 12,
+    color: lightTheme.colors.wave[400],
+    marginTop: 4,
   },
 });
