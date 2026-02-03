@@ -1,4 +1,6 @@
-const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000/api/v1';
+import { API_URL } from '../config/api';
+
+const API_BASE_URL = `${API_URL}/v1`;
 const DATA_API_URL = process.env.DATA_API_URL || 'http://localhost:8080';
 
 import type {
@@ -27,6 +29,18 @@ export class ApiError extends Error {
   }
 }
 
+// Get auth token from Cedros Login (via AsyncStorage)
+async function getAuthToken(): Promise<string | null> {
+  try {
+    // Cedros Login stores token in AsyncStorage
+    // We'll need to import from @cedros/login-react-native utils
+    const { TokenManager } = await import('@cedros/login-react-native');
+    return await TokenManager.getAccessToken();
+  } catch {
+    return null;
+  }
+}
+
 // HTTP client with auth
 async function fetchApi(
   endpoint: string,
@@ -39,9 +53,11 @@ async function fetchApi(
     ...((options.headers as Record<string, string>) || {}),
   };
 
-  // TODO: Add auth token from Cedros session
-  // const token = await getAuthToken();
-  // if (token) headers['Authorization'] = `Bearer ${token}`;
+  // Add auth token from Cedros session
+  const token = await getAuthToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
 
   const response = await fetch(url, {
     ...options,

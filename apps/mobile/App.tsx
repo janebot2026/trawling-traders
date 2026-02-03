@@ -4,25 +4,12 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { CedrosLoginProvider } from '@cedros/login-react-native';
 import { CedrosProvider } from '@cedros/pay-react-native';
 import { AppNavigator } from './src/navigation/AppNavigator';
-
-// API Configuration
-const API_URL = 'https://api.trawlingtraders.com';
+import { CEDROS_CONFIG, CEDROS_PAY_CONFIG } from './src/config/api';
 
 export default function App() {
   return (
-    <CedrosLoginProvider
-      config={{
-        serverUrl: API_URL,
-        timeout: 30000,
-        retries: 3,
-      }}
-    >
-      <CedrosProvider
-        config={{
-          apiUrl: API_URL,
-          // Stripe and Solana config left blank for now per instructions
-        }}
-      >
+    <CedrosLoginProvider config={CEDROS_CONFIG}>
+      <CedrosProvider config={CEDROS_PAY_CONFIG}>
         <SafeAreaProvider>
           <AppNavigator />
           <StatusBar style="auto" />
