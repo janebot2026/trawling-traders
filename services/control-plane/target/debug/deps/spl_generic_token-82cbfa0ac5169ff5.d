@@ -1,0 +1,9 @@
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/spl_generic_token-82cbfa0ac5169ff5.d: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/associated_token_account.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/generic_token.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/token.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/token_2022.rs
+
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/libspl_generic_token-82cbfa0ac5169ff5.rmeta: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/associated_token_account.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/generic_token.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/token.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/token_2022.rs
+
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/lib.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/associated_token_account.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/generic_token.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/token.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-generic-token-1.0.1/src/token_2022.rs:

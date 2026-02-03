@@ -1,0 +1,10 @@
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/solana_curve25519-4134ce41d40db5ab.d: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/curve_syscall_traits.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/edwards.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/errors.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/ristretto.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/scalar.rs
+
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/libsolana_curve25519-4134ce41d40db5ab.rmeta: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/curve_syscall_traits.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/edwards.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/errors.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/ristretto.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/scalar.rs
+
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/lib.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/curve_syscall_traits.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/edwards.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/errors.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/ristretto.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/solana-curve25519-2.3.13/src/scalar.rs:

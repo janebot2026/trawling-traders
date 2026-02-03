@@ -1,0 +1,12 @@
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/sha2-8324adb434a8f69e.d: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/consts.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha256.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha512.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha256/soft.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha256/x86.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha512/soft.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha512/x86.rs
+
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/libsha2-8324adb434a8f69e.rmeta: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/consts.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha256.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha512.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha256/soft.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha256/x86.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha512/soft.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha512/x86.rs
+
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/lib.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/consts.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha256.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha512.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha256/soft.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha256/x86.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha512/soft.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.9.9/src/sha512/x86.rs:

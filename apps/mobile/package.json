@@ -11,11 +11,13 @@
     "lint": "eslint . --ext .ts,.tsx"
   },
   "dependencies": {
+    "@cedros/login-react-native": "^0.0.1",
+    "@cedros/pay-react-native": "^1.0.0",
     "@react-navigation/native": "^6.1.9",
     "@react-navigation/native-stack": "^6.9.17",
     "@react-navigation/bottom-tabs": "^6.5.11",
-    "@trawling-traders/api-client": "workspace:*",
-    "@trawling-traders/types": "workspace:*",
+    "@trawling-traders/api-client": "file:../../packages/api-client",
+    "@trawling-traders/types": "file:../../packages/types",
     "expo": "~49.0.15",
     "expo-status-bar": "~1.6.0",
     "expo-secure-store": "~12.3.1",

@@ -1,0 +1,11 @@
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/yaml_rust2-82f702d02b6a3f49.d: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/char_traits.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/debug.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/emitter.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/parser.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/scanner.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/yaml.rs
+
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/libyaml_rust2-82f702d02b6a3f49.rmeta: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/char_traits.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/debug.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/emitter.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/parser.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/scanner.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/yaml.rs
+
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/lib.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/char_traits.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/debug.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/emitter.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/parser.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/scanner.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.8.1/src/yaml.rs:

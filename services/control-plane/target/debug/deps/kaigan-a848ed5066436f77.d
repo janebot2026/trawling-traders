@@ -1,0 +1,10 @@
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/kaigan-a848ed5066436f77.d: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/mod.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/prefix_string.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/prefix_vec.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/remainder_str.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/remainder_vec.rs
+
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/libkaigan-a848ed5066436f77.rmeta: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/mod.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/prefix_string.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/prefix_vec.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/remainder_str.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/remainder_vec.rs
+
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/lib.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/mod.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/prefix_string.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/prefix_vec.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/remainder_str.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kaigan-0.2.6/src/types/remainder_vec.rs:

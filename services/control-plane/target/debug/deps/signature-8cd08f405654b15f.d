@@ -1,0 +1,11 @@
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/signature-8cd08f405654b15f.d: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/error.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/keypair.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/signature.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/signer.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/verifier.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/../README.md
+
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/libsignature-8cd08f405654b15f.rmeta: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/error.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/keypair.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/signature.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/signer.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/verifier.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/../README.md
+
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/lib.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/error.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/keypair.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/signature.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/signer.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/verifier.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/signature-1.6.4/src/../README.md:

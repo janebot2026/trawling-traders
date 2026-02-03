@@ -2,22 +2,20 @@
 use crate::types::*;
 
 /// Normalize a price point from any source to standard format
-pub fn normalize_price(source: &str, raw_price: f64, asset: &str, quote: &str) -> PricePoint {
+pub fn normalize_price(source: &str, raw_price: f64, symbol: &str) -> PricePoint {
     // Apply source-specific adjustments if needed
     let confidence = match source {
-        "binance" => 0.95, // Real-time, high confidence
-        "coingecko" => 0.85, // Aggregated, slight delay
-        _ => 0.70,
+        "binance" => Some(0.95), // Real-time, high confidence
+        "coingecko" => Some(0.85), // Aggregated, slight delay
+        "pyth" => Some(0.90),    // Solana-native, on-chain
+        _ => Some(0.70),
     };
     
     PricePoint {
-        asset: asset.to_uppercase(),
-        quote: quote.to_uppercase(),
+        symbol: symbol.to_uppercase(),
+        price: rust_decimal::Decimal::try_from(raw_price).unwrap_or_default(),
         source: source.to_string(),
         timestamp: chrono::Utc::now(),
-        price: rust_decimal::Decimal::try_from(raw_price).unwrap_or_default(),
-        volume_24h: None,
-        market_cap: None,
         confidence,
     }
 }
@@ -29,8 +27,6 @@ pub fn validate_price(price: &PricePoint) -> Result<()> {
             "Price must be positive".to_string()
         ));
     }
-    
-    // TODO: Add outlier detection based on historical data
     
     Ok(())
 }

@@ -1,0 +1,9 @@
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/spl_type_length_value-1ef2ca46ddf796c4.d: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/error.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/length.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/state.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/variable_len_pack.rs
+
+/home/jane/workspace/trawling-traders/services/control-plane/target/debug/deps/libspl_type_length_value-1ef2ca46ddf796c4.rmeta: /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/lib.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/error.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/length.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/state.rs /home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/variable_len_pack.rs
+
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/lib.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/error.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/length.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/state.rs:
+/home/jane/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-type-length-value-0.5.0/src/variable_len_pack.rs:
