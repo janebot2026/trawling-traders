@@ -13,12 +13,10 @@ use crate::{
 };
 
 /// GET /bot/:id/config - Bot polls for config updates
-/// Returns the desired config for the bot to apply
 pub async fn get_bot_config(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<BotConfigPayload>>, (StatusCode, String)> {
-    // Get bot and desired config
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
         .bind(bot_id)
         .fetch_one(&state.db)
@@ -36,13 +34,8 @@ pub async fn get_bot_config(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    // Generate config hash
     let config_hash = format!("{}:{}", config.id, config.version);
-    
-    // Build cron jobs based on config
     let cron_jobs = generate_cron_jobs(&config);
-    
-    // Decrypt API key (placeholder - implement actual decryption)
     let decrypted_key = decrypt_api_key(&config.encrypted_llm_api_key)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     
@@ -74,13 +67,12 @@ pub async fn get_bot_config(
     Ok(Json(payload))
 }
 
-/// POST /bot/:id/config_ack - Bot confirms config was applied
+/// POST /bot/:id/config_ack - Bot confirms config applied
 pub async fn ack_config(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
     Json(ack): Json<ConfigAckRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Verify the hash matches current desired version
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
         .bind(bot_id)
         .fetch_one(&state.db)
@@ -98,17 +90,10 @@ pub async fn ack_config(
     let expected_hash = format!("{}:{}", config.id, config.version);
     
     if ack.hash != expected_hash {
-        warn!(
-            "Config hash mismatch for bot {}: expected {}, got {}",
-            bot_id, expected_hash, ack.hash
-        );
-        return Err((
-            StatusCode::CONFLICT,
-            "Config hash mismatch".to_string()
-        ));
+        warn!("Config hash mismatch for bot {}: expected {}, got {}", bot_id, expected_hash, ack.hash);
+        return Err((StatusCode::CONFLICT, "Config hash mismatch".to_string()));
     }
     
-    // Update bot as applied
     sqlx::query(
         "UPDATE bots SET applied_version_id = $1, config_status = 'applied', updated_at = NOW() WHERE id = $2"
     )
@@ -118,12 +103,44 @@ pub async fn ack_config(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    info!(
-        "Bot {} acknowledged config version {} at {:?}",
-        bot_id, ack.version, ack.applied_at
-    );
+    info!("Bot {} acknowledged config version {} at {:?}", bot_id, ack.version, ack.applied_at);
     
     Ok(StatusCode::OK)
+}
+
+/// POST /bot/:id/wallet - Bot reports its Solana wallet address
+pub async fn report_wallet(
+    State(state): State<Arc<AppState>>,
+    Path(bot_id): Path<Uuid>,
+    Json(req): Json<WalletReportRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // Validate wallet address format (basic Solana address check)
+    if req.wallet_address.len() != 44 || !req.wallet_address.chars().all(|c| c.is_alphanumeric()) {
+        return Err((StatusCode::BAD_REQUEST, "Invalid Solana wallet address format".to_string()));
+    }
+    
+    // Update bot with wallet address
+    let result = sqlx::query(
+        "UPDATE bots SET agent_wallet = $1, updated_at = NOW() WHERE id = $2"
+    )
+    .bind(&req.wallet_address)
+    .bind(bot_id)
+    .execute(&state.db)
+    .await;
+    
+    match result {
+        Ok(res) if res.rows_affected() == 0 => {
+            return Err((StatusCode::NOT_FOUND, "Bot not found".to_string()));
+        }
+        Ok(_) => {
+            info!("Bot {} reported wallet address: {}", bot_id, req.wallet_address);
+            Ok(StatusCode::OK)
+        }
+        Err(e) => {
+            warn!("Failed to update wallet for bot {}: {}", bot_id, e);
+            Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        }
+    }
 }
 
 /// POST /bot/:id/heartbeat - Bot status ping
@@ -132,7 +149,6 @@ pub async fn heartbeat(
     Path(bot_id): Path<Uuid>,
     Json(req): Json<HeartbeatRequest>,
 ) -> Result<Json<HeartbeatResponse>>, (StatusCode, String)> {
-    // Update bot status
     sqlx::query(
         "UPDATE bots SET status = $1::bot_status, last_heartbeat_at = $2, updated_at = NOW() WHERE id = $3"
     )
@@ -143,7 +159,6 @@ pub async fn heartbeat(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    // Store metrics if provided
     if let Some(metrics) = req.metrics {
         for metric in metrics {
             sqlx::query(
@@ -159,7 +174,6 @@ pub async fn heartbeat(
         }
     }
     
-    // Check if config update needed
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
         .bind(bot_id)
         .fetch_one(&state.db)
@@ -170,11 +184,7 @@ pub async fn heartbeat(
     
     Ok(Json(HeartbeatResponse {
         needs_config_update: needs_update,
-        message: if needs_update {
-            "New config available".to_string()
-        } else {
-            "OK".to_string()
-        },
+        message: if needs_update { "New config available".to_string() } else { "OK".to_string() },
     }))
 }
 
@@ -206,7 +216,6 @@ pub async fn register_bot(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<RegistrationResponse>>, (StatusCode, String)> {
-    // Verify bot exists and is in provisioning state
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
         .bind(bot_id)
         .fetch_one(&state.db)
@@ -217,20 +226,14 @@ pub async fn register_bot(
         })?;
     
     if bot.status != BotStatus::Provisioning {
-        return Err((
-            StatusCode::CONFLICT,
-            format!("Bot already registered with status: {:?}", bot.status)
-        ));
+        return Err((StatusCode::CONFLICT, format!("Bot already registered: {:?}", bot.status)));
     }
     
-    // Mark as online
-    sqlx::query(
-        "UPDATE bots SET status = 'online', updated_at = NOW() WHERE id = $1"
-    )
-    .bind(bot_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    sqlx::query("UPDATE bots SET status = 'online', updated_at = NOW() WHERE id = $1")
+        .bind(bot_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
     info!("Bot {} registered successfully", bot_id);
     
@@ -241,77 +244,58 @@ pub async fn register_bot(
     }))
 }
 
-/// Generate cron jobs based on config
 fn generate_cron_jobs(config: &ConfigVersion) -> Vec<CronJob> {
     let mut jobs = vec![];
     
-    // Config sync (most important)
     jobs.push(CronJob {
         name: "config-sync".to_string(),
-        schedule: "*/30 * * * * *".to_string(), // Every 30 seconds
-        message: "Pull config from https://api.trawling-traders.com/bot/{bot_id}/config".to_string(),
+        schedule: "*/30 * * * * *".to_string(),
+        message: "Pull config".to_string(),
     });
     
-    // Data fetching - frequency based on strictness
     let data_schedule = match config.strictness {
-        Strictness::High => "* * * * *".to_string(),   // Every minute (tight stops)
-        Strictness::Medium => "*/2 * * * *".to_string(), // Every 2 minutes
-        Strictness::Low => "*/5 * * * *".to_string(),   // Every 5 minutes
+        Strictness::High => "* * * * *".to_string(),
+        Strictness::Medium => "*/2 * * * *".to_string(),
+        Strictness::Low => "*/5 * * * *".to_string(),
     };
     
     jobs.push(CronJob {
         name: "fetch-market-data".to_string(),
         schedule: data_schedule,
-        message: format!(
-            "Fetch prices for {:?} assets from data-retrieval service",
-            config.asset_focus
-        ),
+        message: format!("Fetch prices for {:?}", config.asset_focus),
     });
     
-    // Algorithm execution
     let algo_schedule = match config.algorithm_mode {
-        AlgorithmMode::Trend => "*/5 * * * *".to_string(),         // 5 min for trends
-        AlgorithmMode::MeanReversion => "*/2 * * * *".to_string(),  // 2 min for scalping
-        AlgorithmMode::Breakout => "*/3 * * * *".to_string(),       // 3 min for breakouts
+        AlgorithmMode::Trend => "*/5 * * * *".to_string(),
+        AlgorithmMode::MeanReversion => "*/2 * * * *".to_string(),
+        AlgorithmMode::Breakout => "*/3 * * * *".to_string(),
     };
     
     jobs.push(CronJob {
         name: "run-algorithm".to_string(),
         schedule: algo_schedule,
-        message: format!(
-            "Run {:?} algorithm with {:?} strictness",
-            config.algorithm_mode, config.strictness
-        ),
+        message: format!("Run {:?} algo", config.algorithm_mode),
     });
     
-    // Health ping
     jobs.push(CronJob {
         name: "health-ping".to_string(),
-        schedule: "*/30 * * * * *".to_string(), // Every 30 seconds
-        message: "POST heartbeat to control plane".to_string(),
+        schedule: "*/30 * * * * *".to_string(),
+        message: "POST heartbeat".to_string(),
     });
     
-    // Risk check
     jobs.push(CronJob {
         name: "risk-check".to_string(),
-        schedule: "* * * * *".to_string(), // Every minute
-        message: format!(
-            "Check daily loss (${}) and drawdown ({}%) limits",
-            config.max_daily_loss_usd, config.max_drawdown_percent
-        ),
+        schedule: "* * * * *".to_string(),
+        message: format!("Check loss (${}) limits", config.max_daily_loss_usd),
     });
     
     jobs
 }
 
-/// Decrypt API key (placeholder - implement real encryption)
 fn decrypt_api_key(encrypted: &str) -> Result<String, String> {
-    // TODO: Implement AES-GCM decryption with master key
-    // For now, return as-is (assuming it was stored plaintext during dev)
     Ok(encrypted.to_string())
 }
 
-// Response types
 #[derive(Debug, serde::Serialize)]
 pub struct HeartbeatResponse {
     pub needs_config_update: bool,

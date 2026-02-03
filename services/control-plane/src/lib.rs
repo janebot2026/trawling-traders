@@ -21,12 +21,10 @@ pub use db::Db;
 /// Application state shared across handlers
 pub struct AppState {
     pub db: Db,
-    // Add other shared resources here (Redis, DO client, etc.)
 }
 
 /// Build the API router
 pub fn app(state: Arc<AppState>) -> Router {
-    // CORS for mobile app
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -36,32 +34,18 @@ pub fn app(state: Arc<AppState>) -> Router {
     let app_routes = Router::new()
         .route("/me", get(handlers::bots::get_current_user))
         .route("/bots", get(handlers::bots::list_bots).post(handlers::bots::create_bot))
-        .route(
-            "/bots/:id",
-            get(handlers::bots::get_bot),
-        )
-        .route(
-            "/bots/:id/config",
-            patch(handlers::bots::update_bot_config),
-        )
-        .route(
-            "/bots/:id/actions",
-            post(handlers::bots::bot_action),
-        )
-        .route(
-            "/bots/:id/metrics",
-            get(handlers::bots::get_metrics),
-        )
-        .route(
-            "/bots/:id/events",
-            get(handlers::bots::get_events),
-        );
+        .route("/bots/:id", get(handlers::bots::get_bot))
+        .route("/bots/:id/config", patch(handlers::bots::update_bot_config))
+        .route("/bots/:id/actions", post(handlers::bots::bot_action))
+        .route("/bots/:id/metrics", get(handlers::bots::get_metrics))
+        .route("/bots/:id/events", get(handlers::bots::get_events));
     
     // Bot-facing routes (internal, from VPS)
     let bot_routes = Router::new()
         .route("/bot/:id/register", post(handlers::sync::register_bot))
         .route("/bot/:id/config", get(handlers::sync::get_bot_config))
         .route("/bot/:id/config_ack", post(handlers::sync::ack_config))
+        .route("/bot/:id/wallet", post(handlers::sync::report_wallet))  // NEW: Agent wallet reporting
         .route("/bot/:id/heartbeat", post(handlers::sync::heartbeat))
         .route("/bot/:id/events", post(handlers::sync::ingest_events));
     
@@ -73,7 +57,6 @@ pub fn app(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-// Placeholder for get_current_user
 pub async fn get_current_user() -> Result<String, String> {
     Ok("user".to_string())
 }
