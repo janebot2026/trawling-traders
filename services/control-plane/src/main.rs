@@ -13,15 +13,20 @@ async fn main() -> anyhow::Result<()> {
     
     // Database URL from env
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/trawling_traders".to_string());
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/trawling_traders".to_string());
+    
+    info!("Connecting to database...");
     
     // Initialize database
     let db = control_plane::db::init_db(&database_url).await?;
     info!("✓ Database connected");
     
     // Run migrations
-    // sqlx::migrate!("./migrations").run(&db).await?;
-    // info!("✓ Migrations applied");
+    info!("Running migrations...");
+    sqlx::migrate!("./migrations")
+        .run(&db)
+        .await?;
+    info!("✓ Migrations applied");
     
     // Create app state
     let state = Arc::new(control_plane::AppState { db });
