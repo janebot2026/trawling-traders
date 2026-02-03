@@ -1,43 +1,45 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TextInput,
-  Button,
   TouchableOpacity,
   Switch,
   ActivityIndicator,
   Alert,
+  Animated,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import type { Bot, BotConfig, Persona, AlgorithmMode, AssetFocus, Strictness, TradingMode, LlmProvider } from '@trawling-traders/types';
 import { api } from '@trawling-traders/api-client';
+import { OceanBackground } from '../components/OceanBackground';
+import { lightTheme } from '../theme';
 
 type BotSettingsScreenRouteProp = RouteProp<RootStackParamList, 'BotSettings'>;
 type BotSettingsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'BotSettings'>;
 
 const PERSONAS: { value: Persona; label: string; description: string }[] = [
-  { value: 'beginner', label: 'Set & Forget', description: 'Blue-chip crypto + tokenized equities/metals' },
-  { value: 'tweaker', label: 'Hands-on', description: 'Tune assets including xStocks, risk controls' },
-  { value: 'quant-lite', label: 'Power User', description: 'Signal knobs, custom baskets, full control' },
+  { value: 'beginner', label: 'Set & Forget', description: 'Blue-chip crypto + xStocks/metals' },
+  { value: 'tweaker', label: 'Hands-on', description: 'Tune assets, risk controls' },
+  { value: 'quant-lite', label: 'Power User', description: 'Signal knobs, full control' },
 ];
 
 const ALGORITHMS: { value: AlgorithmMode; label: string; description: string }[] = [
-  { value: 'trend', label: 'Trend', description: 'Ride momentum with confirmations' },
-  { value: 'mean-reversion', label: 'Mean Reversion', description: 'Fade extremes, frequent trades' },
-  { value: 'breakout', label: 'Breakout', description: 'Trade breakouts with volume' },
+  { value: 'trend', label: 'Trend', description: 'Ride momentum' },
+  { value: 'mean-reversion', label: 'Mean Reversion', description: 'Fade extremes' },
+  { value: 'breakout', label: 'Breakout', description: 'Volume breakouts' },
 ];
 
 const ASSET_FOCUSES: { value: AssetFocus; label: string; description: string; tier: 'core' | 'quality' | 'speculative' }[] = [
   { value: 'majors', label: 'Crypto Majors', description: 'BTC, ETH, SOL', tier: 'core' },
-  { value: 'tokenized-equities', label: 'Tokenized Stocks', description: 'AAPL, TSLA, SPY on Solana', tier: 'quality' },
-  { value: 'tokenized-metals', label: 'Tokenized Metals', description: 'Gold, silver (ORO)', tier: 'quality' },
-  { value: 'custom', label: 'Custom Basket', description: 'Build your own selection', tier: 'quality' },
-  { value: 'memes', label: 'Meme Coins', description: 'High risk - Not recommended', tier: 'speculative' },
+  { value: 'tokenized-equities', label: 'xStocks', description: 'AAPL, TSLA, SPY', tier: 'quality' },
+  { value: 'tokenized-metals', label: 'Metals', description: 'Gold, silver', tier: 'quality' },
+  { value: 'custom', label: 'Custom', description: 'Your basket', tier: 'quality' },
+  { value: 'memes', label: 'Memes ⚠️', description: 'High risk', tier: 'speculative' },
 ];
 
 export function BotSettingsScreen() {
@@ -50,6 +52,9 @@ export function BotSettingsScreen() {
   const [hasChanges, setHasChanges] = useState(false);
   const [bot, setBot] = useState<Bot | null>(null);
 
+  // Animation
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
   // Bot state
   const [name, setName] = useState('');
   const [persona, setPersona] = useState<Persona>('beginner');
@@ -59,14 +64,10 @@ export function BotSettingsScreen() {
   const [tradingMode, setTradingMode] = useState<TradingMode>('paper');
   const [llmProvider, setLlmProvider] = useState<LlmProvider>('openai');
   const [llmApiKey, setLlmApiKey] = useState('');
-
-  // Risk caps
   const [maxPositionSize, setMaxPositionSize] = useState('5');
   const [maxDailyLoss, setMaxDailyLoss] = useState('50');
   const [maxDrawdown, setMaxDrawdown] = useState('10');
   const [maxTradesPerDay, setMaxTradesPerDay] = useState('5');
-
-  // Signal knobs (Quant-lite only)
   const [volumeConfirmation, setVolumeConfirmation] = useState(true);
   const [volatilityBrake, setVolatilityBrake] = useState(true);
   const [liquidityFilter, setLiquidityFilter] = useState<'low' | 'medium' | 'high'>('high');
@@ -77,7 +78,6 @@ export function BotSettingsScreen() {
       const response = await api.bot.getBot(botId);
       setBot(response.bot);
       
-      // Populate form with current config
       if (response.config) {
         setName(response.config.name || '');
         setPersona(response.config.persona);
@@ -100,12 +100,12 @@ export function BotSettingsScreen() {
         }
       }
     } catch (error) {
-      console.error('Failed to fetch bot config:', error);
-      Alert.alert('Error', 'Failed to load bot configuration');
+      Alert.alert('Error', 'Failed to load configuration');
     } finally {
       setIsLoading(false);
+      Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
     }
-  }, [botId]);
+  }, [botId, fadeAnim]);
 
   useEffect(() => {
     fetchBotConfig();
@@ -114,10 +114,6 @@ export function BotSettingsScreen() {
   const handleSave = async () => {
     if (!name.trim()) {
       Alert.alert('Error', 'Please enter a bot name');
-      return;
-    }
-    if (!llmApiKey.trim()) {
-      Alert.alert('Error', 'Please enter your LLM API key');
       return;
     }
 
@@ -147,16 +143,11 @@ export function BotSettingsScreen() {
           } : undefined,
         },
       });
-
       setHasChanges(false);
-      Alert.alert(
-        'Success', 
-        'Configuration updated! The bot will receive the new config within 30 seconds.',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      );
+      Alert.alert('Success', 'Configuration updated!');
+      navigation.goBack();
     } catch (error) {
-      console.error('Failed to save config:', error);
-      Alert.alert('Error', 'Failed to save configuration. Please try again.');
+      Alert.alert('Error', 'Failed to save configuration');
     } finally {
       setIsSaving(false);
     }
@@ -164,315 +155,286 @@ export function BotSettingsScreen() {
 
   const handleDiscard = () => {
     if (hasChanges) {
-      Alert.alert(
-        'Discard Changes?',
-        'You have unsaved changes. Are you sure you want to discard them?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Discard', style: 'destructive', onPress: () => navigation.goBack() },
-        ]
-      );
+      Alert.alert('Discard Changes?', 'Unsaved changes will be lost.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => navigation.goBack() },
+      ]);
     } else {
       navigation.goBack();
     }
   };
 
-  const onChange = <T, > setter: React.Dispatch<React.SetStateAction<T>>) => {
+  const onChange = <T, >(setter: React.Dispatch<React.SetStateAction<T>>) => {
     return (value: T) => {
       setter(value);
       setHasChanges(true);
     };
   };
 
+  const renderSection = (title: string, children: React.ReactNode) => (
+    <View style={styles.card}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+
   if (isLoading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" />
-      </View>
+      <OceanBackground>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={lightTheme.colors.primary[700]} />
+        </View>
+      </OceanBackground>
     );
   }
 
-  const coreAssets = ASSET_FOCUSES.filter(a => a.tier === 'core');
-  const qualityAssets = ASSET_FOCUSES.filter(a => a.tier === 'quality');
-  const speculativeAssets = ASSET_FOCUSES.filter(a => a.tier === 'speculative');
-
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Bot Settings</Text>
-        <Text style={styles.headerSubtitle}>Changes apply within 30 seconds</Text>
-        {bot?.configStatus === 'pending' && (
-          <View style={styles.pendingBadge}>
-            <Text style={styles.pendingText}>⏳ Config Update Pending</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Identity</Text>
-        
-        <Text style={styles.label}>Name</Text>
-        <TextInput
-          style={styles.input}
-          value={name}
-          onChangeText={onChange(setName)}
-          placeholder="Bot name"
-          editable={!isSaving}
-        />
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Trading Persona</Text>
-        
-        {PERSONAS.map((p) => (
-          <TouchableOpacity
-            key={p.value}
-            style={[styles.optionCard, persona === p.value && styles.selectedCard]}
-            onPress={() => !isSaving && onChange(setPersona)(p.value)}
-            disabled={isSaving}
-          >
-            <Text style={styles.optionTitle}>{p.label}</Text>
-            <Text style={styles.optionDescription}>{p.description}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Asset Focus</Text>
-
-        <Text style={styles.tierLabel}>Core Crypto</Text>
-        <View style={styles.chipRow}>
-          {coreAssets.map((af) => (
-            <TouchableOpacity
-              key={af.value}
-              style={[styles.chip, assetFocus === af.value && styles.selectedChip]}
-              onPress={() => !isSaving && onChange(setAssetFocus)(af.value)}
-              disabled={isSaving}
-            >
-              <Text style={[styles.chipText, assetFocus === af.value && styles.selectedChipText]}>
-                {af.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+    <OceanBackground>
+      <Animated.ScrollView
+        style={[styles.container, { opacity: fadeAnim }]}
+        contentContainerStyle={{ paddingBottom: 40 }}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Bot Settings</Text>
+          <Text style={styles.headerSubtitle}>Changes apply within 30 seconds</Text>
+          {bot?.configStatus === 'pending' && (
+            <View style={styles.pendingBadge}>
+              <Text style={styles.pendingText}>⏳ Config Update Pending</Text>
+            </View>
+          )}
         </View>
 
-        <Text style={styles.tierLabel}>Tokenized Assets ⭐</Text>
-        {qualityAssets.map((af) => (
-          <TouchableOpacity
-            key={af.value}
-            style={[
-              styles.qualityCard,
-              assetFocus === af.value && styles.selectedQualityCard
-            ]}
-            onPress={() => !isSaving && onChange(setAssetFocus)(af.value)}
-            disabled={isSaving}
-          >
-            <Text style={[
-              styles.qualityTitle,
-              assetFocus === af.value && styles.selectedQualityTitle
-            ]}>
-              {af.label}
-            </Text>
-            <Text style={styles.qualityDescription}>{af.description}</Text>
-          </TouchableOpacity>
-        ))}
-
-        <View style={styles.speculativeSection}>
-          <Text style={styles.speculativeLabel}>⚠️ Speculative</Text>
-          {speculativeAssets.map((af) => (
-            <TouchableOpacity
-              key={af.value}
-              style={[styles.speculativeCard, assetFocus === af.value && styles.selectedSpeculativeCard]}
-              onPress={() => !isSaving && onChange(setAssetFocus)(af.value)}
-              disabled={isSaving}
-            >
-              <Text style={styles.speculativeTitle}>{af.label}</Text>
-              <Text style={styles.speculativeDescription}>{af.description}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Algorithm</Text>
-        
-        {ALGORITHMS.map((alg) => (
-          <TouchableOpacity
-            key={alg.value}
-            style={[styles.optionCard, algorithmMode === alg.value && styles.selectedCard]}
-            onPress={() => !isSaving && onChange(setAlgorithmMode)(alg.value)}
-            disabled={isSaving}
-          >
-            <Text style={styles.optionTitle}>{alg.label}</Text>
-            <Text style={styles.optionDescription}>{alg.description}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Risk Management</Text>
-        
-        <View style={styles.inputRow}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Max Position %</Text>
-            <TextInput
-              style={styles.smallInput}
-              value={maxPositionSize}
-              onChangeText={onChange(setMaxPositionSize)}
-              keyboardType="numeric"
-              editable={!isSaving}
-            />
-          </View>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Max Daily Loss ($)</Text>
-            <TextInput
-              style={styles.smallInput}
-              value={maxDailyLoss}
-              onChangeText={onChange(setMaxDailyLoss)}
-              keyboardType="numeric"
-              editable={!isSaving}
-            />
-          </View>
-        </View>
-
-        <View style={styles.inputRow}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Max Drawdown %</Text>
-            <TextInput
-              style={styles.smallInput}
-              value={maxDrawdown}
-              onChangeText={onChange(setMaxDrawdown)}
-              keyboardType="numeric"
-              editable={!isSaving}
-            />
-          </View>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Max Trades/Day</Text>
-            <TextInput
-              style={styles.smallInput}
-              value={maxTradesPerDay}
-              onChangeText={onChange(setMaxTradesPerDay)}
-              keyboardType="numeric"
-              editable={!isSaving}
-            />
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Trading Mode</Text>
-        
-        <View style={styles.switchRow}>
-          <Text>{tradingMode === 'paper' ? '📄 Paper Trading' : '💰 Live Trading'}</Text>
-          <Switch
-            value={tradingMode === 'live'}
-            onValueChange={(v) => onChange(setTradingMode)(v ? 'live' : 'paper')}
-            disabled={isSaving}
-          />
-        </View>
-        
-        {tradingMode === 'live' && (
-          <Text style={styles.warning}>⚠️ Live trading uses real funds</Text>
-        )}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>LLM Configuration</Text>
-        
-        <Text style={styles.label}>Provider</Text>
-        <View style={styles.chipRow}>
-          {(['openai', 'anthropic', 'venice', 'openrouter'] as LlmProvider[]).map((provider) => (
-            <TouchableOpacity
-              key={provider}
-              style={[styles.chip, llmProvider === provider && styles.selectedChip]}
-              onPress={() => !isSaving && onChange(setLlmProvider)(provider)}
-              disabled={isSaving}
-            >
-              <Text style={[styles.chipText, llmProvider === provider && styles.selectedChipText]}>
-                {provider}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={styles.label}>API Key</Text>
-        <TextInput
-          style={styles.input}
-          value={llmApiKey}
-          onChangeText={onChange(setLlmApiKey)}
-          placeholder="sk-..."
-          secureTextEntry
-          editable={!isSaving}
-        />
-      </View>
-
-      {persona === 'quant-lite' && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Signal Knobs</Text>
-          
-          <View style={styles.switchRow}>
-            <Text>Volume Confirmation</Text>
-            <Switch value={volumeConfirmation} onValueChange={onChange(setVolumeConfirmation)} disabled={isSaving} />
-          </View>
-          
-          <View style={styles.switchRow}>
-            <Text>Volatility Brake</Text>
-            <Switch value={volatilityBrake} onValueChange={onChange(setVolatilityBrake)} disabled={isSaving} />
-          </View>
-          
-          <View style={styles.switchRow}>
-            <Text>Correlation Brake</Text>
-            <Switch value={correlationBrake} onValueChange={onChange(setCorrelationBrake)} disabled={isSaving} />
-          </View>
-          
-          <Text style={styles.label}>Liquidity Filter</Text>
-          <View style={styles.chipRow}>
-            {(['low', 'medium', 'high'] as const).map((level) => (
-              <TouchableOpacity
-                key={level}
-                style={[styles.chip, liquidityFilter === level && styles.selectedChip]}
-                onPress={() => !isSaving && onChange(setLiquidityFilter)(level)}
-                disabled={isSaving}
-              >
-                <Text style={[styles.chipText, liquidityFilter === level && styles.selectedChipText]}>
-                  {level}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      )}
-
-      <View style={styles.actions}>
-        {isSaving ? (
-          <ActivityIndicator size="large" />
-        ) : (
+        {renderSection('Identity',
           <>
-            <Button
-              title="Save Changes"
-              onPress={handleSave}
-              disabled={!hasChanges}
-            />
-            <View style={styles.buttonSpacer} />
-            
-            <Button
-              title="Discard Changes"
-              onPress={handleDiscard}
-              color="#666"
+            <Text style={styles.label}>Name</Text>
+            <TextInput
+              style={styles.input}
+              value={name}
+              onChangeText={onChange(setName)}
+              placeholder="Bot name"
+              placeholderTextColor={lightTheme.colors.wave[400]}
             />
           </>
         )}
-      </View>
-    </ScrollView>
+
+        {renderSection('Persona',
+          <>
+            {PERSONAS.map((p) => (
+              <TouchableOpacity
+                key={p.value}
+                style={[styles.optionCard, persona === p.value && styles.selectedCard]}
+                onPress={() => onChange(setPersona)(p.value)}
+              >
+                <Text style={styles.optionTitle}>{p.label}</Text>
+                <Text style={styles.optionDescription}>{p.description}</Text>
+              </TouchableOpacity>
+            ))}
+          </>
+        )}
+
+        {renderSection('Assets',
+          <>
+            <View style={styles.assetRow}>
+              {ASSET_FOCUSES.filter(a => a.tier !== 'speculative').map((af) => (
+                <TouchableOpacity
+                  key={af.value}
+                  style={[
+                    styles.assetChip,
+                    assetFocus === af.value && styles.assetChipSelected,
+                  ]}
+                  onPress={() => onChange(setAssetFocus)(af.value)}
+                >
+                  <Text style={[styles.assetChipText, assetFocus === af.value && styles.assetChipTextSelected]}>
+                    {af.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.speculativeSection}>
+              <Text style={styles.speculativeLabel}>⚠️ Speculative</Text>
+              <TouchableOpacity
+                style={[styles.assetChip, assetFocus === 'memes' && styles.assetChipSpecSelected]}
+                onPress={() => onChange(setAssetFocus)('memes')}
+              >
+                <Text style={styles.assetChipText}>Meme Coins</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        {renderSection('Algorithm',
+          <>
+            {ALGORITHMS.map((alg) => (
+              <TouchableOpacity
+                key={alg.value}
+                style={[styles.optionCard, algorithmMode === alg.value && styles.selectedCard]}
+                onPress={() => onChange(setAlgorithmMode)(alg.value)}
+              >
+                <Text style={styles.optionTitle}>{alg.label}</Text>
+                <Text style={styles.optionDescription}>{alg.description}</Text>
+              </TouchableOpacity>
+            ))}
+          </>
+        )}
+
+        {renderSection('Risk',
+          <>
+            <View style={styles.inputRow}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Max Position %</Text>
+                <TextInput
+                  style={styles.smallInput}
+                  value={maxPositionSize}
+                  onChangeText={onChange(setMaxPositionSize)}
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Daily Loss ($)</Text>
+                <TextInput
+                  style={styles.smallInput}
+                  value={maxDailyLoss}
+                  onChangeText={onChange(setMaxDailyLoss)}
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+            <View style={styles.inputRow}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Drawdown %</Text>
+                <TextInput
+                  style={styles.smallInput}
+                  value={maxDrawdown}
+                  onChangeText={onChange(setMaxDrawdown)}
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Trades/Day</Text>
+                <TextInput
+                  style={styles.smallInput}
+                  value={maxTradesPerDay}
+                  onChangeText={onChange(setMaxTradesPerDay)}
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+          </>
+        )}
+
+        {renderSection('Trading',
+          <>
+            <View style={styles.switchRow}>
+              <View>
+                <Text style={styles.switchLabel}>
+                  {tradingMode === 'paper' ? '📄 Paper' : '💰 Live'}
+                </Text>
+                <Text style={styles.switchSub}>
+                  {tradingMode === 'paper' ? 'Test mode' : 'Real funds'}
+                </Text>
+              </View>
+              <Switch
+                value={tradingMode === 'live'}
+                onValueChange={(v) => onChange(setTradingMode)(v ? 'live' : 'paper')}
+                trackColor={{ false: lightTheme.colors.wave[300], true: lightTheme.colors.lobster[400] }}
+              />
+            </View>
+            
+            {tradingMode === 'live' && (
+              <View style={styles.warningBox}>
+                <Text style={styles.warningText}>⚠️ Live trading uses real funds</Text>
+              </View>
+            )}
+          </>
+        )}
+
+        {renderSection('LLM',
+          <>
+            <Text style={styles.label}>Provider</Text>
+            <View style={styles.providerRow}>
+              {(['openai', 'anthropic', 'venice', 'openrouter'] as LlmProvider[]).map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  style={[styles.providerChip, llmProvider === p && styles.providerChipSelected]}
+                  onPress={() => onChange(setLlmProvider)(p)}
+                >
+                  <Text style={[styles.providerText, llmProvider === p && styles.providerTextSelected]}>{p}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.label}>API Key</Text>
+            <TextInput
+              style={styles.input}
+              value={llmApiKey}
+              onChangeText={onChange(setLlmApiKey)}
+              placeholder="sk-..."
+              secureTextEntry
+            />
+          </>
+        )}
+
+        {persona === 'quant-lite' && renderSection('Signal Knobs',
+          <>
+            {[
+              { label: 'Volume Confirmation', value: volumeConfirmation, setter: setVolumeConfirmation },
+              { label: 'Volatility Brake', value: volatilityBrake, setter: setVolatilityBrake },
+              { label: 'Correlation Brake', value: correlationBrake, setter: setCorrelationBrake },
+            ].map((k) => (
+              <View key={k.label} style={styles.switchRow}>
+                <Text style={styles.switchLabel}>{k.label}</Text>
+                <Switch value={k.value} onValueChange={k.setter} />
+              </View>
+            ))}
+            
+            <Text style={styles.label}>Liquidity</Text>
+            <View style={styles.providerRow}>
+              {(['low', 'medium', 'high'] as const).map((l) => (
+                <TouchableOpacity
+                  key={l}
+                  style={[styles.providerChip, liquidityFilter === l && styles.providerChipSelected]}
+                  onPress={() => onChange(setLiquidityFilter)(l)}
+                >
+                  <Text style={[styles.providerText, liquidityFilter === l && styles.providerTextSelected]}>{l}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
+
+        {/* Actions */}
+        <View style={styles.card}>
+          {isSaving ? (
+            <ActivityIndicator size="large" color={lightTheme.colors.primary[700]} />
+          ) : (
+            <>
+              <TouchableOpacity
+                style={styles.saveButton}
+                onPress={handleSave}
+                disabled={!hasChanges}
+              >
+                <Text style={styles.saveButtonText}>Save Changes</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.discardButton}
+                onPress={handleDiscard}
+              >
+                <Text style={styles.discardButtonText}>Discard</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </Animated.ScrollView>
+    </OceanBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   centered: {
     flex: 1,
@@ -480,22 +442,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
-    backgroundColor: '#fff',
     padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    paddingTop: 60,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
+    color: lightTheme.colors.wave[900],
   },
   headerSubtitle: {
     fontSize: 14,
-    color: '#666',
+    color: lightTheme.colors.wave[500],
     marginTop: 4,
   },
   pendingBadge: {
-    backgroundColor: '#FFF3E0',
+    backgroundColor: lightTheme.colors.caution[100],
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
@@ -504,153 +473,51 @@ const styles = StyleSheet.create({
   },
   pendingText: {
     fontSize: 12,
-    color: '#E65100',
+    color: lightTheme.colors.caution[700],
     fontWeight: '600',
   },
-  section: {
-    backgroundColor: '#fff',
+  card: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     margin: 16,
     marginBottom: 8,
-    padding: 16,
-    borderRadius: 12,
+    padding: 20,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
+    color: lightTheme.colors.wave[900],
     marginBottom: 16,
   },
   label: {
     fontSize: 14,
     fontWeight: '600',
+    color: lightTheme.colors.wave[700],
     marginBottom: 8,
-    color: '#333',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
+    borderColor: lightTheme.colors.wave[200],
+    borderRadius: 10,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fafafa',
+    backgroundColor: lightTheme.colors.wave[50],
+    color: lightTheme.colors.wave[900],
   },
   smallInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
+    borderColor: lightTheme.colors.wave[200],
+    borderRadius: 10,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fafafa',
+    backgroundColor: lightTheme.colors.wave[50],
     width: 100,
-  },
-  optionCard: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 8,
-  },
-  selectedCard: {
-    borderColor: '#007AFF',
-    backgroundColor: '#F0F8FF',
-  },
-  optionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  optionDescription: {
-    fontSize: 14,
-    color: '#666',
-  },
-  tierLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#666',
-    marginTop: 12,
-    marginBottom: 8,
-    textTransform: 'uppercase',
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  selectedChip: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  chipText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  selectedChipText: {
-    color: '#fff',
-  },
-  qualityCard: {
-    borderWidth: 2,
-    borderColor: '#22c55e',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-    backgroundColor: '#f0fdf4',
-  },
-  selectedQualityCard: {
-    backgroundColor: '#22c55e',
-  },
-  qualityTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#15803d',
-    marginBottom: 2,
-  },
-  selectedQualityTitle: {
-    color: '#fff',
-  },
-  qualityDescription: {
-    fontSize: 12,
-    color: '#666',
-  },
-  speculativeSection: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e5e5',
-  },
-  speculativeLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#dc2626',
-    marginBottom: 8,
-  },
-  speculativeCard: {
-    borderWidth: 1,
-    borderColor: '#fca5a5',
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: '#fef2f2',
-    opacity: 0.8,
-  },
-  selectedSpeculativeCard: {
-    borderColor: '#dc2626',
-    backgroundColor: '#fee2e2',
-    opacity: 1,
-  },
-  speculativeTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#dc2626',
-  },
-  speculativeDescription: {
-    fontSize: 12,
-    color: '#991b1b',
-    marginTop: 2,
+    color: lightTheme.colors.wave[900],
   },
   inputRow: {
     flexDirection: 'row',
@@ -659,23 +526,140 @@ const styles = StyleSheet.create({
   inputGroup: {
     flex: 1,
   },
+  optionCard: {
+    borderWidth: 2,
+    borderColor: lightTheme.colors.wave[200],
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 10,
+    backgroundColor: lightTheme.colors.wave[50],
+  },
+  selectedCard: {
+    borderColor: lightTheme.colors.primary[600],
+    backgroundColor: lightTheme.colors.primary[50],
+  },
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: lightTheme.colors.wave[900],
+    marginBottom: 4,
+  },
+  optionDescription: {
+    fontSize: 13,
+    color: lightTheme.colors.wave[500],
+  },
+  assetRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  assetChip: {
+    borderWidth: 2,
+    borderColor: lightTheme.colors.wave[200],
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: lightTheme.colors.wave[50],
+  },
+  assetChipSelected: {
+    backgroundColor: lightTheme.colors.bullish[50],
+    borderColor: lightTheme.colors.bullish[500],
+  },
+  assetChipSpecSelected: {
+    backgroundColor: lightTheme.colors.lobster[50],
+    borderColor: lightTheme.colors.lobster[400],
+  },
+  assetChipText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: lightTheme.colors.wave[700],
+  },
+  assetChipTextSelected: {
+    color: lightTheme.colors.bullish[700],
+  },
+  speculativeSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: lightTheme.colors.wave[200],
+  },
+  speculativeLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: lightTheme.colors.lobster[600],
+    marginBottom: 10,
+  },
   switchRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
-  warning: {
-    color: '#F44336',
+  switchLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: lightTheme.colors.wave[900],
+  },
+  switchSub: {
+    fontSize: 13,
+    color: lightTheme.colors.wave[500],
+    marginTop: 2,
+  },
+  warningBox: {
+    backgroundColor: lightTheme.colors.lobster[100],
+    padding: 12,
+    borderRadius: 10,
     marginTop: 8,
+  },
+  warningText: {
+    color: lightTheme.colors.lobster[700],
+    fontSize: 13,
+  },
+  providerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  providerChip: {
+    borderWidth: 1,
+    borderColor: lightTheme.colors.wave[300],
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: lightTheme.colors.wave[50],
+  },
+  providerChipSelected: {
+    backgroundColor: lightTheme.colors.primary[600],
+    borderColor: lightTheme.colors.primary[600],
+  },
+  providerText: {
     fontSize: 14,
+    color: lightTheme.colors.wave[700],
   },
-  actions: {
-    margin: 16,
-    marginTop: 8,
-    marginBottom: 32,
+  providerTextSelected: {
+    color: '#fff',
+    fontWeight: '600',
   },
-  buttonSpacer: {
-    height: 12,
+  saveButton: {
+    backgroundColor: lightTheme.colors.primary[700],
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  discardButton: {
+    backgroundColor: lightTheme.colors.wave[200],
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  discardButtonText: {
+    color: lightTheme.colors.wave[700],
+    fontSize: 16,
   },
 });
