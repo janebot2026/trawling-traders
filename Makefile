@@ -39,7 +39,7 @@ setup: ## Check/install dependencies
 	@echo "$(GREEN)✓ PostgreSQL found$(RESET)"
 	@echo ""
 	@echo "$(YELLOW)Installing Rust dependencies...$(RESET)"
-cd services/control-plane && cargo fetch
+	cd services/control-plane && cargo fetch
 	cd services/data-retrieval && cargo fetch
 	@echo "$(GREEN)✓ Rust dependencies installed$(RESET)"
 	@echo ""
@@ -51,7 +51,15 @@ cd services/control-plane && cargo fetch
 
 db: ## Start PostgreSQL database
 	@echo "$(BLUE)🐘 Starting PostgreSQL...$(RESET)"
-	@sudo systemctl start postgresql || (echo "$(YELLOW)⚠️  Could not start PostgreSQL via systemctl$(RESET)" && echo "$(YELLOW)   Please start PostgreSQL manually$(RESET)")
+	@if pg_isready -q 2>/dev/null; then \
+		echo "$(GREEN)PostgreSQL already running$(RESET)"; \
+	elif command -v brew >/dev/null 2>&1; then \
+		brew services start postgresql@16 2>/dev/null || brew services start postgresql 2>/dev/null || echo "$(YELLOW)⚠️  Could not start PostgreSQL via brew$(RESET)"; \
+	elif command -v pg_ctl >/dev/null 2>&1; then \
+		pg_ctl start -D "$${PGDATA:-/var/lib/postgresql/data}" -l /tmp/postgres.log 2>/dev/null || echo "$(YELLOW)⚠️  Could not start PostgreSQL via pg_ctl$(RESET)"; \
+	else \
+		echo "$(YELLOW)⚠️  Please start PostgreSQL manually$(RESET)"; \
+	fi
 	@echo "$(GREEN)✓ PostgreSQL started$(RESET)"
 
 migrate: ## Run database migrations
@@ -124,14 +132,18 @@ clean: ## Clean build artifacts
 stop: ## Stop all services and database
 	@echo "$(BLUE)🛑 Stopping services...$(RESET)"
 	-tmux kill-session -t tt 2>/dev/null || true
-	-sudo systemctl stop postgresql 2>/dev/null || true
+	@if command -v brew >/dev/null 2>&1; then \
+		brew services stop postgresql@16 2>/dev/null || brew services stop postgresql 2>/dev/null || true; \
+	elif command -v pg_ctl >/dev/null 2>&1; then \
+		pg_ctl stop -D "$${PGDATA:-/var/lib/postgresql/data}" 2>/dev/null || true; \
+	fi
 	@echo "$(GREEN)✓ Services stopped$(RESET)"
 
 status: ## Check service status
 	@echo "$(BLUE)📊 Service Status:$(RESET)"
 	@echo ""
 	@printf "PostgreSQL:           "
-	@sudo systemctl is-active postgresql 2>/dev/null | grep -q active && echo "$(GREEN)up ✓$(RESET)" || echo "$(RED)down ✗$(RESET)"
+	@pg_isready -q 2>/dev/null && echo "$(GREEN)up ✓$(RESET)" || echo "$(RED)down ✗$(RESET)"
 	@printf "Data Retrieval:8080:  "
 	@curl -s http://localhost:8080/healthz > /dev/null 2>&1 && echo "$(GREEN)up ✓$(RESET)" || echo "$(RED)down ✗$(RESET)"
 	@printf "Control Plane:3000:   "
