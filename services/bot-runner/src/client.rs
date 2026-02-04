@@ -174,7 +174,7 @@ impl ControlPlaneClient {
 
 // Request/Response types
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct RegisterRequest {
     agent_wallet: String,
 }
@@ -193,21 +193,21 @@ pub struct BotConfigResponse {
     pub config: serde_json::Value,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct ConfigAckRequest {
     version: String,
     hash: String,
     applied_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct HeartbeatRequest {
     status: String,
     timestamp: chrono::DateTime<chrono::Utc>,
     metrics: Option<Vec<MetricInput>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MetricInput {
     pub timestamp: chrono::DateTime<chrono::Utc>,
     pub equity: rust_decimal::Decimal,
@@ -220,12 +220,12 @@ pub struct HeartbeatResponse {
     pub message: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct EventsBatchRequest {
     events: Vec<EventInput>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct EventInput {
     pub event_type: String,
     pub message: String,

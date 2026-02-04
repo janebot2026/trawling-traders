@@ -17,7 +17,7 @@ use crate::executor::{
 use crate::intent::{IntentRegistry, TradeIntent, TradeIntentState};
 use crate::portfolio::{Portfolio, PortfolioSnapshot};
 use crate::reconciler::HoldingsReconciler;
-use crate::Config;
+use crate::config::Config;
 
 /// Main bot runner that manages the trading loop
 pub struct BotRunner {

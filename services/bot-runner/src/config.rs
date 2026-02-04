@@ -1,9 +1,61 @@
 //! Bot Configuration
 
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::client::BotConfigResponse;
+
+/// Runtime configuration loaded from environment
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub bot_id: Uuid,
+    pub control_plane_url: String,
+    pub data_retrieval_url: String,
+    pub solana_rpc_url: String,
+    pub agent_wallet: Option<String>,
+    pub keypair_path: PathBuf,
+    pub wallet_address: String,
+}
+
+impl Config {
+    /// Load configuration from environment variables
+    pub fn from_env() -> anyhow::Result<Self> {
+        let bot_id = std::env::var("BOT_ID")
+            .map_err(|_| anyhow::anyhow!("BOT_ID environment variable required"))?
+            .parse::<Uuid>()
+            .map_err(|e| anyhow::anyhow!("Invalid BOT_ID: {}", e))?;
+
+        let control_plane_url = std::env::var("CONTROL_PLANE_URL")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+
+        let data_retrieval_url = std::env::var("DATA_RETRIEVAL_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+
+        let solana_rpc_url = std::env::var("SOLANA_RPC_URL")
+            .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
+
+        let agent_wallet = std::env::var("AGENT_WALLET").ok();
+        
+        let keypair_path = std::env::var("AGENT_WALLET_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/opt/trawling-traders/.config/solana/id.json"));
+        
+        let wallet_address = std::env::var("WALLET_ADDRESS")
+            .or_else(|_| agent_wallet.clone().ok_or_else(|| anyhow::anyhow!("No wallet address")))
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        Ok(Self {
+            bot_id,
+            control_plane_url,
+            data_retrieval_url,
+            solana_rpc_url,
+            agent_wallet,
+            keypair_path,
+            wallet_address,
+        })
+    }
+}
 
 /// Bot trading configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -25,7 +77,6 @@ pub struct BotConfig {
 impl BotConfig {
     /// Parse config from control plane response
     pub fn from_response(resp: BotConfigResponse) -> Self {
-        // Parse the nested config JSON
         let config: BotConfigInner = serde_json::from_value(resp.config)
             .unwrap_or_default();
 
