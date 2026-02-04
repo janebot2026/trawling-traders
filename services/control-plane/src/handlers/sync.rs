@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::{
     models::*,
     AppState,
+    observability::{Logger, metrics},
 };
 
 /// GET /bot/:id/config - Bot polls for config updates
@@ -17,6 +18,8 @@ pub async fn get_bot_config(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<BotConfigPayload>, (StatusCode, String)> {
+    let start = std::time::Instant::now();
+    
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
         .bind(bot_id)
         .fetch_one(&state.db)
@@ -36,7 +39,7 @@ pub async fn get_bot_config(
     
     let config_hash = format!("{}:{}", config.id, config.version);
     let cron_jobs = generate_cron_jobs(&config);
-    let decrypted_key = decrypt_api_key(&config.encrypted_llm_api_key)
+    let decrypted_key = decrypt_api_key(&config.encrypted_llm_api_key, &state.secrets)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     
     let payload = BotConfigPayload {
@@ -63,6 +66,11 @@ pub async fn get_bot_config(
             api_key: decrypted_key,
         },
     };
+    
+    // Record metrics
+    let duration = start.elapsed().as_millis() as f64;
+    state.metrics.histogram(metrics::CONFIG_FETCH_DURATION_MS, duration).await;
+    state.metrics.increment(metrics::CONFIG_FETCH_COUNT, 1).await;
     
     Ok(Json(payload))
 }
@@ -91,6 +99,7 @@ pub async fn ack_config(
     
     if ack.hash != expected_hash {
         warn!("Config hash mismatch for bot {}: expected {}, got {}", bot_id, expected_hash, ack.hash);
+        state.metrics.increment(metrics::CONFIG_MISMATCH_COUNT, 1).await;
         return Err((StatusCode::CONFLICT, "Config hash mismatch".to_string()));
     }
     
@@ -104,6 +113,7 @@ pub async fn ack_config(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
     info!("Bot {} acknowledged config version {} at {:?}", bot_id, ack.version, ack.applied_at);
+    state.metrics.increment(metrics::CONFIG_ACK_COUNT, 1).await;
     
     Ok(StatusCode::OK)
 }
@@ -134,10 +144,12 @@ pub async fn report_wallet(
         }
         Ok(_) => {
             info!("Bot {} reported wallet address: {}", bot_id, req.wallet_address);
+            state.metrics.increment(metrics::WALLET_REPORT_COUNT, 1).await;
             Ok(StatusCode::OK)
         }
         Err(e) => {
             warn!("Failed to update wallet for bot {}: {}", bot_id, e);
+            state.metrics.increment(metrics::WALLET_REPORT_ERRORS, 1).await;
             Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
         }
     }
@@ -149,6 +161,8 @@ pub async fn heartbeat(
     Path(bot_id): Path<Uuid>,
     Json(req): Json<HeartbeatRequest>,
 ) -> Result<Json<HeartbeatResponse>, (StatusCode, String)> {
+    let start = std::time::Instant::now();
+    
     // Parse status string to BotStatus - for now just store as string
     sqlx::query(
         "UPDATE bots SET last_heartbeat_at = $1, updated_at = NOW() WHERE id = $2"
@@ -159,8 +173,8 @@ pub async fn heartbeat(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    if let Some(metrics) = req.metrics {
-        for metric in metrics {
+    if let Some(metrics_batch) = req.metrics {
+        for metric in metrics_batch {
             // Convert Decimal to BigDecimal for database storage
             let equity_bd = bigdecimal_from_decimal(metric.equity);
             let pnl_bd = bigdecimal_from_decimal(metric.pnl);
@@ -176,6 +190,8 @@ pub async fn heartbeat(
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         }
+        
+        state.metrics.increment(metrics::METRICS_BATCH_RECEIVED, metrics_batch.len() as u64).await;
     }
     
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
@@ -185,6 +201,23 @@ pub async fn heartbeat(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
     let needs_update = bot.desired_version_id != bot.applied_version_id.unwrap_or_default();
+    
+    // Record heartbeat metrics
+    let duration = start.elapsed().as_millis() as f64;
+    state.metrics.histogram(metrics::HEARTBEAT_DURATION_MS, duration).await;
+    state.metrics.increment(metrics::HEARTBEAT_COUNT, 1).await;
+    
+    // Check for config mismatch alert
+    if needs_update {
+        state.metrics.increment(metrics::CONFIG_MISMATCH_COUNT, 1).await;
+        if let Some(alert) = state.alerts.check_config_mismatch(
+            &bot_id.to_string(),
+            &bot.desired_version_id.to_string(),
+            &bot.applied_version_id.map(|id| id.to_string()).unwrap_or_default(),
+        ).await {
+            state.alerts.fire_alert(&alert, crate::alerting::AlertSeverity::Warning).await;
+        }
+    }
     
     Ok(Json(HeartbeatResponse {
         needs_config_update: needs_update,
@@ -198,19 +231,54 @@ pub async fn ingest_events(
     Path(bot_id): Path<Uuid>,
     Json(req): Json<EventsBatchRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    for event in req.events {
+    let event_count = req.events.len() as u64;
+    let mut trade_count = 0u64;
+    let mut error_count = 0u64;
+    
+    for event in &req.events {
         sqlx::query(
             "INSERT INTO events (bot_id, event_type, message, metadata, created_at) VALUES ($1, $2, $3, $4, $5)"
         )
         .bind(bot_id)
-        .bind(event.event_type)
-        .bind(event.message)
-        .bind(event.metadata)
+        .bind(&event.event_type)
+        .bind(&event.message)
+        .bind(&event.metadata)
         .bind(event.timestamp)
         .execute(&state.db)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        
+        // Count trade events
+        if event.event_type.starts_with("trade_") {
+            trade_count += 1;
+            if event.event_type == "trade_executed" {
+                state.metrics.increment(metrics::TRADE_EXECUTED, 1).await;
+            } else if event.event_type == "trade_blocked" {
+                state.metrics.increment(metrics::TRADE_BLOCKED, 1).await;
+            } else if event.event_type == "trade_failed" {
+                state.metrics.increment(metrics::TRADE_FAILED, 1).await;
+                error_count += 1;
+            }
+        }
+        
+        // Check for error events
+        if event.event_type.contains("error") || event.event_type.contains("failed") {
+            error_count += 1;
+        }
     }
+    
+    // Update metrics
+    state.metrics.increment(metrics::EVENTS_INGESTED, event_count).await;
+    state.metrics.increment(metrics::EVENTS_TRADES, trade_count).await;
+    if error_count > 0 {
+        state.metrics.increment(metrics::EVENTS_ERRORS, error_count).await;
+    }
+    
+    Logger::bot_event(
+        &bot_id.to_string(),
+        "events_ingested",
+        &format!("count={}, trades={}, errors={}", event_count, trade_count, error_count),
+    );
     
     Ok(StatusCode::OK)
 }
@@ -240,6 +308,8 @@ pub async fn register_bot(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
     info!("Bot {} registered successfully", bot_id);
+    state.metrics.increment(metrics::BOT_REGISTERED, 1).await;
+    Logger::bot_event(&bot_id.to_string(), "registered", "Bot successfully registered");
     
     Ok(Json(RegistrationResponse {
         bot_id: bot.id.to_string(),
@@ -296,6 +366,6 @@ fn generate_cron_jobs(config: &ConfigVersion) -> Vec<CronJob> {
     jobs
 }
 
-fn decrypt_api_key(encrypted: &str) -> Result<String, String> {
-    Ok(encrypted.to_string())
+fn decrypt_api_key(encrypted: &str, secrets: &crate::SecretsManager) -> Result<String, String> {
+    secrets.decrypt(encrypted).map_err(|e| format!("Failed to decrypt API key: {}", e))
 }

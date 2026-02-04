@@ -143,7 +143,9 @@ pub mod metrics {
     // Bot lifecycle
     pub const BOT_CREATED: &str = "bot_created_total";
     pub const BOT_DESTROYED: &str = "bot_destroyed_total";
+    pub const BOT_REGISTERED: &str = "bot_registered_total";
     pub const BOT_PROVISION_FAILED: &str = "bot_provision_failed_total";
+    pub const BOT_PROVISION_SUCCESS: &str = "bot_provision_success_total";
     
     // Trading
     pub const TRADE_EXECUTED: &str = "trade_executed_total";
@@ -158,4 +160,26 @@ pub mod metrics {
     // Queue
     pub const PROVISION_QUEUE_DEPTH: &str = "provision_queue_depth";
     pub const PROVISION_RETRIES: &str = "provision_retries_total";
+    
+    // Config sync
+    pub const CONFIG_FETCH_COUNT: &str = "config_fetch_total";
+    pub const CONFIG_FETCH_DURATION_MS: &str = "config_fetch_duration_ms";
+    pub const CONFIG_ACK_COUNT: &str = "config_ack_total";
+    pub const CONFIG_MISMATCH_COUNT: &str = "config_mismatch_total";
+    
+    // Heartbeat
+    pub const HEARTBEAT_COUNT: &str = "heartbeat_total";
+    pub const HEARTBEAT_DURATION_MS: &str = "heartbeat_duration_ms";
+    
+    // Wallet
+    pub const WALLET_REPORT_COUNT: &str = "wallet_report_total";
+    pub const WALLET_REPORT_ERRORS: &str = "wallet_report_errors_total";
+    
+    // Events
+    pub const EVENTS_INGESTED: &str = "events_ingested_total";
+    pub const EVENTS_TRADES: &str = "events_trades_total";
+    pub const EVENTS_ERRORS: &str = "events_errors_total";
+    
+    // Metrics batch
+    pub const METRICS_BATCH_RECEIVED: &str = "metrics_batch_received_total";
 }

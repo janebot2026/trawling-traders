@@ -12,6 +12,7 @@ pub mod cedros;
 pub mod secrets;
 pub mod observability;
 pub mod provisioning;
+pub mod alerting;
 
 use std::sync::Arc;
 use axum::{
@@ -26,6 +27,7 @@ pub use models::*;
 pub use db::Db;
 pub use secrets::SecretsManager;
 pub use observability::{MetricsCollector, Logger};
+pub use alerting::{AlertManager, AlertConfig};
 
 /// Application state shared across handlers
 #[derive(Clone)]
@@ -37,6 +39,8 @@ pub struct AppState {
     pub bot_rate_limiter: middleware::rate_limit::RateLimiter,
     /// Concurrency limit for droplet provisioning (max 3 concurrent)
     pub droplet_semaphore: Arc<Semaphore>,
+    /// Alert manager for threshold-based notifications
+    pub alerts: AlertManager,
 }
 
 impl AppState {
@@ -48,6 +52,7 @@ impl AppState {
             rate_limiter: middleware::rate_limit::RateLimiter::new(60, 100),
             bot_rate_limiter: middleware::rate_limit::RateLimiter::new(60, 120),
             droplet_semaphore: Arc::new(Semaphore::new(3)), // Max 3 concurrent provisions
+            alerts: AlertManager::new(AlertConfig::default()),
         }
     }
 }

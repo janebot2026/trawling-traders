@@ -31,13 +31,17 @@ async fn main() -> anyhow::Result<()> {
     // Create app state with all components
     let state = Arc::new(control_plane::AppState::new(db.clone()));
     info!("✓ App state initialized (secrets: {}, metrics: {})", 
-
-    // Spawn orphan cleanup background task
-    control_plane::provisioning::spawn_cleanup_task(db.clone());
-    info!("✓ Orphan cleanup task spawned");
         if state.secrets.is_encryption_active() { "encrypted" } else { "plaintext" },
         "active"
     );
+    
+    // Spawn orphan cleanup background task
+    control_plane::provisioning::spawn_cleanup_task(db.clone());
+    info!("✓ Orphan cleanup task spawned");
+    
+    // Spawn offline bot checker (alerting)
+    control_plane::alerting::spawn_offline_checker(db.clone(), state.alerts.clone());
+    info!("✓ Offline bot checker spawned");
     
     // Build router
     let app = build_router(state, db.clone()).await?;
