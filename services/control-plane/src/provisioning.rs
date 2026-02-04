@@ -1,11 +1,12 @@
 //! Provisioning utilities for DigitalOcean droplet management
 //!
-//! Provides retry logic with exponential backoff and orphan cleanup.
+//! Provides retry logic with exponential backoff, circuit breaker, and orphan cleanup.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time::sleep;
-use tracing::{debug, info, warn};
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn, error};
 
 /// Retry configuration for DO API calls
 #[derive(Debug, Clone)]
@@ -76,6 +77,146 @@ where
     Err(last_error.expect("last_error should be set"))
 }
 
+// ==================== CIRCUIT BREAKER ====================
+
+/// Circuit breaker state
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CircuitState {
+    Closed,     // Normal operation
+    Open,       // Failing, rejecting requests
+    HalfOpen,   // Testing if recovered
+}
+
+/// Circuit breaker for DO API calls
+/// Prevents cascade failures by stopping requests after threshold
+#[derive(Clone)]
+pub struct CircuitBreaker {
+    state: Arc<RwLock<CircuitState>>,
+    failure_count: Arc<RwLock<u32>>,
+    last_failure_time: Arc<RwLock<Option<Instant>>>,
+    config: CircuitConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct CircuitConfig {
+    /// Max failures before opening circuit
+    pub failure_threshold: u32,
+    /// Time window for counting failures
+    pub failure_window_secs: u64,
+    /// Time to wait before trying half-open
+    pub recovery_timeout_secs: u64,
+}
+
+impl Default for CircuitConfig {
+    fn default() -> Self {
+        Self {
+            failure_threshold: 5,        // 5 failures
+            failure_window_secs: 60,     // in 60 seconds
+            recovery_timeout_secs: 300,  // wait 5 min before retry
+        }
+    }
+}
+
+impl CircuitBreaker {
+    pub fn new(config: CircuitConfig) -> Self {
+        Self {
+            state: Arc::new(RwLock::new(CircuitState::Closed)),
+            failure_count: Arc::new(RwLock::new(0)),
+            last_failure_time: Arc::new(RwLock::new(None)),
+            config,
+        }
+    }
+
+    /// Check if request should be allowed
+    pub async fn allow(&self) -> bool {
+        let state = *self.state.read().await;
+        
+        match state {
+            CircuitState::Closed => true,
+            CircuitState::Open => {
+                // Check if recovery timeout has passed
+                let last_failure = *self.last_failure_time.read().await;
+                if let Some(last) = last_failure {
+                    if last.elapsed().as_secs() >= self.config.recovery_timeout_secs {
+                        // Transition to half-open
+                        let mut s = self.state.write().await;
+                        *s = CircuitState::HalfOpen;
+                        info!("Circuit breaker entering half-open state");
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            CircuitState::HalfOpen => true, // Allow test request
+        }
+    }
+
+    /// Record a success
+    pub async fn record_success(&self) {
+        let state = *self.state.read().await;
+        
+        if state == CircuitState::HalfOpen {
+            // Recovery successful, close circuit
+            let mut s = self.state.write().await;
+            *s = CircuitState::Closed;
+            
+            let mut count = self.failure_count.write().await;
+            *count = 0;
+            
+            info!("Circuit breaker closed - service recovered");
+        }
+    }
+
+    /// Record a failure
+    pub async fn record_failure(&self) {
+        let mut count = self.failure_count.write().await;
+        *count += 1;
+        
+        let current_count = *count;
+        
+        let mut last = self.last_failure_time.write().await;
+        *last = Some(Instant::now());
+        
+        // Check if we should open the circuit
+        if current_count >= self.config.failure_threshold {
+            let mut state = self.state.write().await;
+            if *state == CircuitState::Closed || *state == CircuitState::HalfOpen {
+                *state = CircuitState::Open;
+                error!(
+                    "Circuit breaker OPENED after {} failures in {}s. Pausing provisions for {}s.",
+                    current_count, self.config.failure_window_secs, self.config.recovery_timeout_secs
+                );
+            }
+        }
+    }
+
+    /// Get current state (for metrics)
+    pub async fn current_state(&self) -> CircuitState {
+        *self.state.read().await
+    }
+
+    /// Reset circuit breaker (manual recovery)
+    pub async fn reset(&self) {
+        let mut state = self.state.write().await;
+        *state = CircuitState::Closed;
+        
+        let mut count = self.failure_count.write().await;
+        *count = 0;
+        
+        info!("Circuit breaker manually reset to closed");
+    }
+}
+
+/// Global circuit breaker for DO provisioning
+pub fn create_provision_circuit_breaker() -> CircuitBreaker {
+    CircuitBreaker::new(CircuitConfig::default())
+}
+
+// ==================== ORPHAN CLEANUP ====================
+
 /// Orphan cleanup configuration
 #[derive(Debug, Clone)]
 pub struct CleanupConfig {
@@ -131,8 +272,6 @@ pub async fn cleanup_orphaned_bot(
     droplet_id: Option<i64>,
     pool: &sqlx::PgPool,
 ) -> anyhow::Result<()> {
-    use tracing::{info, error};
-    
     match status {
         "provisioning" => {
             // Bot stuck in provisioning - mark as error
@@ -197,12 +336,12 @@ pub fn spawn_cleanup_task(pool: sqlx::PgPool) {
                 Ok(orphans) => {
                     for (bot_id, status, droplet_id) in orphans {
                         if let Err(e) = cleanup_orphaned_bot(bot_id, &status, droplet_id, &pool).await {
-                            tracing::error!("Failed to cleanup orphaned bot {}: {}", bot_id, e);
+                            error!("Failed to cleanup orphaned bot {}: {}", bot_id, e);
                         }
                     }
                 }
                 Err(e) => {
-                    tracing::error!("Failed to find orphaned bots: {}", e);
+                    error!("Failed to find orphaned bots: {}", e);
                 }
             }
         }

@@ -39,6 +39,7 @@ struct QuoteCacheEntry {
 pub struct QuoteCache {
     entries: Arc<RwLock<HashMap<QuoteCacheKey, QuoteCacheEntry>>>,
     ttl_secs: u64,
+    max_size: usize,
 }
 
 impl QuoteCache {
@@ -46,6 +47,15 @@ impl QuoteCache {
         Self {
             entries: Arc::new(RwLock::new(HashMap::new())),
             ttl_secs,
+            max_size: 10000,
+        }
+    }
+    
+    pub fn with_max_size(ttl_secs: u64, max_size: usize) -> Self {
+        Self {
+            entries: Arc::new(RwLock::new(HashMap::new())),
+            ttl_secs,
+            max_size,
         }
     }
 
@@ -83,6 +93,16 @@ impl QuoteCache {
         };
 
         let mut entries = self.entries.write().await;
+        
+        if entries.len() >= self.max_size {
+            let oldest = entries.iter()
+                .min_by_key(|(_, entry)| entry.cached_at)
+                .map(|(k, _)| k.clone());
+            if let Some(k) = oldest {
+                entries.remove(&k);
+            }
+        }
+        
         entries.insert(key, QuoteCacheEntry {
             price,
             cached_at: Instant::now(),
@@ -92,8 +112,29 @@ impl QuoteCache {
     /// Clean up expired entries
     pub async fn cleanup(&self) {
         let mut entries = self.entries.write().await;
+        let before = entries.len();
         entries.retain(|_, entry| {
             entry.cached_at.elapsed().as_secs() < self.ttl_secs
+        });
+        let after = entries.len();
+        if before != after {
+            debug!("Quote cache cleanup: removed {} expired entries, {} remaining", 
+                   before - after, after);
+        }
+    }
+    
+    pub async fn size(&self) -> usize {
+        let entries = self.entries.read().await;
+        entries.len()
+    }
+    
+    pub fn spawn_cleanup_task(self) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                self.cleanup().await;
+            }
         });
     }
 }

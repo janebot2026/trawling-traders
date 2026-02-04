@@ -40,6 +40,10 @@ pub enum AlertType {
     /// Bot lifecycle alerts
     BotOffline { bot_id: String, last_heartbeat: Option<chrono::DateTime<chrono::Utc>> },
     ConfigMismatch { bot_id: String, desired: String, applied: String },
+    
+    /// Trading failure alerts
+    RepeatedTradeFailed { bot_id: String, consecutive_fails: u32 },
+    DrawdownBreach { bot_id: String, current_dd: Decimal, limit: Decimal },
 }
 
 /// Alert configuration thresholds
@@ -78,6 +82,8 @@ pub struct AlertManager {
     config: AlertConfig,
     /// Track alert state to prevent spam
     alert_state: Arc<RwLock<HashMap<String, AlertState>>>,
+    /// Track consecutive trade failures per bot
+    trade_failures: Arc<RwLock<HashMap<String, u32>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +98,7 @@ impl AlertManager {
         Self {
             config,
             alert_state: Arc::new(RwLock::new(HashMap::new())),
+            trade_failures: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -268,8 +275,40 @@ impl AlertManager {
                  format!("Last heartbeat: {}", last))
             }
             AlertType::ConfigMismatch { bot_id, desired, applied } => {
+            AlertType::RepeatedTradeFailed { bot_id, consecutive_fails } => {
+                (format!("Repeated Trade Failures [{}]", bot_id),
+                 format!("{} consecutive failed trades", consecutive_fails))
+            }
+            AlertType::DrawdownBreach { bot_id, current_dd, limit } => {
+                (format!("Drawdown Breach [{}]", bot_id),
+                 format!("Current: {}%, Limit: {}%", current_dd, limit))
+            }
                 (format!("Config Mismatch [{}]", bot_id),
+            AlertType::RepeatedTradeFailed { bot_id, consecutive_fails } => {
+                (format!("Repeated Trade Failures [{}]", bot_id),
+                 format!("{} consecutive failed trades", consecutive_fails))
+            }
+            AlertType::DrawdownBreach { bot_id, current_dd, limit } => {
+                (format!("Drawdown Breach [{}]", bot_id),
+                 format!("Current: {}%, Limit: {}%", current_dd, limit))
+            }
                  format!("Desired: {}, Applied: {}", desired, applied))
+            AlertType::RepeatedTradeFailed { bot_id, consecutive_fails } => {
+                (format!("Repeated Trade Failures [{}]", bot_id),
+                 format!("{} consecutive failed trades", consecutive_fails))
+            }
+            AlertType::DrawdownBreach { bot_id, current_dd, limit } => {
+                (format!("Drawdown Breach [{}]", bot_id),
+                 format!("Current: {}%, Limit: {}%", current_dd, limit))
+            }
+            }
+            AlertType::RepeatedTradeFailed { bot_id, consecutive_fails } => {
+                (format!("Repeated Trade Failures [{}]", bot_id),
+                 format!("{} consecutive failed trades", consecutive_fails))
+            }
+            AlertType::DrawdownBreach { bot_id, current_dd, limit } => {
+                (format!("Drawdown Breach [{}]", bot_id),
+                 format!("Current: {}%, Limit: {}%", current_dd, limit))
             }
         };
 
@@ -287,6 +326,36 @@ impl AlertManager {
 
         // TODO: Add webhook/email notification here
         // e.g., send_webhook_notification(&title, &message, severity).await;
+    }
+
+
+    /// Record a trade failure and check for repeated failures
+    pub async fn record_trade_failure(u0026self, bot_id: u0026str) -> Optionu003cAlertTypeu003e {
+        let mut failures = self.trade_failures.write().await;
+        let count = failures.entry(bot_id.to_string()).or_insert(0);
+        *count += 1;
+        
+        let current_count = *count;
+        drop(failures);
+        
+        // Alert on 3+ consecutive failures
+        if current_count >= 3 {
+            let key = format!("trade_fails:{}", bot_id);
+            if self.should_fire(u0026key, 600).await { // 10 min cooldown
+                self.record_fired(key).await;
+                return Some(AlertType::RepeatedTradeFailed {
+                    bot_id: bot_id.to_string(),
+                    consecutive_fails: current_count,
+                });
+            }
+        }
+        None
+    }
+    
+    /// Reset trade failure count on success
+    pub async fn reset_trade_failures(u0026self, bot_id: u0026str) {
+        let mut failures = self.trade_failures.write().await;
+        failures.remove(bot_id);
     }
 
     /// Acknowledge an alert (prevents refiring)

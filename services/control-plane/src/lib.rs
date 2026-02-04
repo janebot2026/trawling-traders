@@ -13,6 +13,8 @@ pub mod secrets;
 pub mod observability;
 pub mod provisioning;
 pub mod alerting;
+pub mod webhook;
+pub mod health;
 
 use std::sync::Arc;
 use axum::{
@@ -28,6 +30,7 @@ pub use db::Db;
 pub use secrets::SecretsManager;
 pub use observability::{MetricsCollector, Logger};
 pub use alerting::{AlertManager, AlertConfig};
+pub use webhook::{WebhookNotifier, WebhookConfig};
 
 /// Application state shared across handlers
 #[derive(Clone)]
@@ -41,6 +44,8 @@ pub struct AppState {
     pub droplet_semaphore: Arc<Semaphore>,
     /// Alert manager for threshold-based notifications
     pub alerts: AlertManager,
+    /// Webhook notifier for external alerts
+    pub webhooks: WebhookNotifier,
 }
 
 impl AppState {
@@ -51,8 +56,9 @@ impl AppState {
             metrics: MetricsCollector::new(),
             rate_limiter: middleware::rate_limit::RateLimiter::new(60, 100),
             bot_rate_limiter: middleware::rate_limit::RateLimiter::new(60, 120),
-            droplet_semaphore: Arc::new(Semaphore::new(3)), // Max 3 concurrent provisions
+            droplet_semaphore: Arc::new(Semaphore::new(3)),
             alerts: AlertManager::new(AlertConfig::default()),
+            webhooks: WebhookNotifier::new(WebhookConfig::default()),
         }
     }
 }
@@ -79,6 +85,9 @@ pub async fn app(state: Arc<AppState>) -> Router {
         .route("/bots/:id/metrics", get(handlers::bots::get_metrics))
         .route("/bots/:id/events", get(handlers::bots::get_events))
         .route("/simulate-signal", post(handlers::simulate::simulate_signal))
+        // Health endpoints
+        .route("/healthz", get(health::healthz))
+        .route("/readyz", get(health::readyz))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::subscription::subscription_middleware
