@@ -133,6 +133,124 @@ pub async fn create_bot(
     Ok(Json(bot))
 }
 
+/// Generate cloud-init user_data script for droplet provisioning
+fn generate_user_data(
+    bot_id: Uuid,
+    bot_name: &str,
+    control_plane_url: &str,
+) -> String {
+    format!(r##"#!/bin/bash
+set -euo pipefail
+exec > >(logpress)
+exec 2>&1
+
+export DEBIAN_FRONTEND=noninteractive
+export BOT_ID="{}"
+export BOT_NAME="{}"
+export CONTROL_PLANE_URL="{}"
+export HOME=/root
+export WORKSPACE_DIR=/opt/trawling-traders
+
+echo "=== Starting Trawler Provisioning ==="
+echo "Bot ID: $BOT_ID"
+echo "Bot Name: $BOT_NAME"
+echo "Control Plane: $CONTROL_PLANE_URL"
+
+# Update system
+echo "[1/8] Updating system packages..."
+apt-get update
+apt-get install -y curl git build-essential pkg-config libssl-dev
+
+# Install Rust
+echo "[2/8] Installing Rust..."
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
+# Install OpenClaw
+echo "[3/8] Installing OpenClaw..."
+curl -fsSL https://openclaw.ai/install.sh | bash
+
+# Create workspace directory
+mkdir -p "$WORKSPACE_DIR"
+cd "$WORKSPACE_DIR"
+
+# Install janebot-cli
+echo "[4/8] Installing janebot-cli..."
+git clone https://github.com/janebot2026/janebot-cli.git
+cd janebot-cli
+cargo build --release
+cp target/release/janebot-cli /usr/local/bin/
+cd "$WORKSPACE_DIR"
+
+# Run janebot-cli init for first-time configuration
+echo "[5/8] Running janebot-cli init..."
+/usr/local/bin/janebot-cli init --workspace-dir "$WORKSPACE_DIR/workspace" --agent-name "$BOT_NAME"
+
+# Install Jupiter Rust CLI
+echo "[6/8] Installing Jupiter Rust CLI..."
+git clone https://github.com/jup-ag/jupiter-rust-cli.git 2>/dev/null || echo "Jupiter CLI repo not available, skipping"
+if [ -d jupiter-rust-cli ]; then
+    cd jupiter-rust-cli
+    cargo build --release 2>/dev/null || echo "Jupiter build failed, will use API instead"
+    cp target/release/jupiter-cli /usr/local/bin/ 2>/dev/null || true
+    cd "$WORKSPACE_DIR"
+fi
+
+# Install bot-runner
+echo "[7/8] Installing bot-runner..."
+git clone https://github.com/janebot2026/trawling-traders.git
+cd trawling-traders/services/bot-runner
+cargo build --release
+cp target/release/bot-runner /usr/local/bin/
+cd "$WORKSPACE_DIR"
+
+# Create bot-runner systemd service
+echo "[8/8] Creating bot-runner service..."
+cat > /etc/systemd/system/bot-runner.service << 'EOFSERVICE'
+[Unit]
+Description=Trawling Traders Bot Runner
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Environment="BOT_ID={bot_id}"
+Environment="CONTROL_PLANE_URL={control_plane_url}"
+Environment="DATA_RETRIEVAL_URL={control_plane_url}"
+Environment="SOLANA_RPC_URL=https://api.devnet.solana.com"
+Environment="RUST_LOG=info"
+ExecStart=/usr/local/bin/bot-runner
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOFSERVICE
+
+# Register bot with control plane before starting service
+echo "Registering bot with control plane..."
+curl -X POST "$CONTROL_PLANE_URL/v1/bot/{bot_id}/register" \
+    -H "Content-Type: application/json" \
+    -d '{{"agent_wallet":""}}' || echo "Registration may have failed, bot-runner will retry"
+
+# Enable and start services
+systemctl daemon-reload
+systemctl enable bot-runner
+systemctl start bot-runner
+systemctl enable openclaw-agent
+systemctl start openclaw-agent
+
+echo "=== Trawler Provisioning Complete ==="
+echo "Bot ID: $BOT_ID"
+echo "Status: online"
+echo "Services: bot-runner, openclaw-agent"
+"##,
+        bot_id, bot_name, control_plane_url,
+        bot_id = bot_id,
+        control_plane_url = control_plane_url,
+    )
+}
+
 /// Spawn bot droplet on DigitalOcean using claw-spawn
 async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, pool: Db) {
     let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
@@ -159,29 +277,8 @@ async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, pool: Db) {
     let control_plane_url = std::env::var("CONTROL_PLANE_URL")
         .unwrap_or_else(|_| "https://api.trawlingtraders.com".to_string());
     
-    let user_data = format!(r##"#!/bin/bash
-set -e
-export BOT_ID="{}"
-export CONTROL_PLANE_URL="{}"
-curl -fsSL https://openclaw.ai/install.sh | bash
-cat > /etc/openclaw/agent.toml << 'EOFCFG'
-[agent]
-name = "trawler-{}"
-mode = "bot"
-[sync]
-config_url = "{}/v1/bot/{}/config"
-heartbeat_url = "{}/v1/bot/{}/heartbeat"
-events_url = "{}/v1/bot/{}/events"
-interval_secs = 30
-EOFCFG
-systemctl enable openclaw-agent
-systemctl start openclaw-agent
-"##,
-        bot_id, control_plane_url, bot_name,
-        control_plane_url, bot_id,
-        control_plane_url, bot_id,
-        control_plane_url, bot_id
-    );
+    // Generate comprehensive user_data script
+    let user_data = generate_user_data(bot_id, &bot_name, &control_plane_url);
     
     let droplet_req = claw_spawn::domain::DropletCreateRequest {
         name: droplet_name,
