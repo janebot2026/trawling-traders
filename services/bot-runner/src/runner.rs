@@ -12,7 +12,7 @@ use crate::client::{ControlPlaneClient, EventInput, MetricInput};
 use crate::config::{BotConfig, TradingMode, AlgorithmMode, Strictness};
 use crate::executor::{
     generate_breakout_signal, generate_reversion_signal, generate_trend_signal,
-    TradeExecutor, NormalizedTradeResult, TradeStage, TradeSide, TradingSignal,
+    TradeExecutor, NormalizedTradeResult, TradeSide, TradingSignal,
 };
 use crate::intent::{IntentRegistry, TradeIntent, TradeIntentState};
 use crate::portfolio::{Portfolio, PortfolioSnapshot};

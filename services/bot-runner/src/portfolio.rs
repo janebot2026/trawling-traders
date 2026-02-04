@@ -3,7 +3,7 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Portfolio state for a bot
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

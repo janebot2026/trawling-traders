@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::executor::TradeExecutor;
 use crate::portfolio::Portfolio;

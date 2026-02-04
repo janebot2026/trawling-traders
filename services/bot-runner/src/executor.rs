@@ -5,13 +5,99 @@ use rust_decimal::MathematicalOps;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use std::time::Duration;
 use tokio::process::Command as TokioCommand;
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
 use crate::config::{ExecutionConfig, TradingMode};
+
+// ==================== QUOTE CACHE ====================
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use std::time::Instant;
+
+/// Cache key for quote caching
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+struct QuoteCacheKey {
+    input_mint: String,
+    output_mint: String,
+    in_amount: u64,
+}
+
+/// Cached quote entry with TTL
+struct QuoteCacheEntry {
+    price: ClawTraderPrice,
+    cached_at: Instant,
+}
+
+/// Quote cache for reducing API calls
+/// Per principal engineer: Cache key is (in_mint, out_mint, raw_in_amount) for quote_cache_secs
+#[derive(Clone)]
+pub struct QuoteCache {
+    entries: Arc<RwLock<HashMap<QuoteCacheKey, QuoteCacheEntry>>>,
+    ttl_secs: u64,
+}
+
+impl QuoteCache {
+    pub fn new(ttl_secs: u64) -> Self {
+        Self {
+            entries: Arc::new(RwLock::new(HashMap::new())),
+            ttl_secs,
+        }
+    }
+
+    pub async fn get(&self,
+        input_mint: &str,
+        output_mint: &str,
+        in_amount: u64,
+    ) -> Option<ClawTraderPrice> {
+        let key = QuoteCacheKey {
+            input_mint: input_mint.to_string(),
+            output_mint: output_mint.to_string(),
+            in_amount,
+        };
+
+        let entries = self.entries.read().await;
+        if let Some(entry) = entries.get(&key) {
+            if entry.cached_at.elapsed().as_secs() < self.ttl_secs {
+                return Some(entry.price.clone());
+            }
+        }
+        None
+    }
+
+    pub async fn set(
+        &self,
+        input_mint: &str,
+        output_mint: &str,
+        in_amount: u64,
+        price: ClawTraderPrice,
+    ) {
+        let key = QuoteCacheKey {
+            input_mint: input_mint.to_string(),
+            output_mint: output_mint.to_string(),
+            in_amount,
+        };
+
+        let mut entries = self.entries.write().await;
+        entries.insert(key, QuoteCacheEntry {
+            price,
+            cached_at: Instant::now(),
+        });
+    }
+
+    /// Clean up expired entries
+    pub async fn cleanup(&self) {
+        let mut entries = self.entries.write().await;
+        entries.retain(|_, entry| {
+            entry.cached_at.elapsed().as_secs() < self.ttl_secs
+        });
+    }
+}
+
 
 /// Normalized trade result returned by TradeExecutor
 /// Regardless of claw-trader quirks, this is the canonical representation
@@ -70,6 +156,7 @@ pub struct TradeExecutor {
     keypair_path: PathBuf,
     jupiter_api_key: Option<String>,
     execution_config: ExecutionConfig,
+    quote_cache: QuoteCache,
 }
 
 impl TradeExecutor {
@@ -98,6 +185,7 @@ impl TradeExecutor {
             keypair_path,
             jupiter_api_key: std::env::var("JUPITER_API_KEY").ok(),
             execution_config,
+            quote_cache: QuoteCache::new(execution_config.quote_cache_secs),
         })
     }
 
@@ -175,32 +263,43 @@ impl TradeExecutor {
     }
 
     /// Fetch current price for a symbol using claw-trader
+    /// Per principal engineer: Uses quote cache to reduce API calls
     pub async fn fetch_price(
         &self,
         input_mint: &str,
         output_mint: &str,
         amount: u64,
     ) -> anyhow::Result<ClawTraderPrice> {
-        if !self.is_claw_trader_available() {
-            // Fallback to HTTP API
-            return self.fetch_price_http(input_mint, output_mint, amount).await;
+        // Check cache first
+        if let Some(cached) = self.quote_cache.get(input_mint, output_mint, amount).await {
+            debug!("Quote cache hit for {} -> {}", input_mint, output_mint);
+            return Ok(cached);
         }
+
+        let price = if !self.is_claw_trader_available() {
+            // Fallback to HTTP API
+            self.fetch_price_http(input_mint, output_mint, amount).await?
+        } else {
+            let result = self.run_claw_trader(&[
+                "price",
+                "--input-mint", input_mint,
+                "--output-mint", output_mint,
+                "--amount", &amount.to_string(),
+            ]).await?;
         
-        let result = self.run_claw_trader(&[
-            "price",
-            "--input-mint", input_mint,
-            "--output-mint", output_mint,
-            "--amount", &amount.to_string(),
-        ]).await?;
-        
-        let price = ClawTraderPrice {
-            input_mint: result["inputMint"].as_str().unwrap_or(input_mint).to_string(),
-            output_mint: result["outputMint"].as_str().unwrap_or(output_mint).to_string(),
-            in_amount: result["inAmount"].as_str().and_then(|s| s.parse().ok()).unwrap_or(amount),
-            out_amount: result["outAmount"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0),
-            price_impact_pct: result["priceImpactPct"].as_f64().unwrap_or(0.0),
-            fee_bps: result["feeBps"].as_u64().unwrap_or(69),
+            let price = ClawTraderPrice {
+                input_mint: result["inputMint"].as_str().unwrap_or(input_mint).to_string(),
+                output_mint: result["outputMint"].as_str().unwrap_or(output_mint).to_string(),
+                in_amount: result["inAmount"].as_str().and_then(|s| s.parse().ok()).unwrap_or(amount),
+                out_amount: result["outAmount"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0),
+                price_impact_pct: result["priceImpactPct"].as_f64().unwrap_or(0.0),
+                fee_bps: result["feeBps"].as_u64().unwrap_or(69),
+            };
+            price
         };
+
+        // Cache the result
+        self.quote_cache.set(input_mint, output_mint, amount, price.clone()).await;
         
         Ok(price)
     }
@@ -401,7 +500,7 @@ impl TradeExecutor {
 
         // Calculate fee
         let fee_bps = price_quote.fee_bps as f64 / 10000.0;
-        let fee_amount = (price_quote.out_amount as f64 * fee_bps) as u64;
+        let _fee_amount = (price_quote.out_amount as f64 * fee_bps) as u64;
 
         result.stage_reached = TradeStage::Confirmed;
         result.signature = Some("paper_trade_simulated".to_string());

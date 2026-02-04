@@ -3,14 +3,16 @@
 //! Validates the full trading loop:
 //! config → signal → intent → shield/quote → execute (paper) → events + portfolio
 
+mod mock_executor;
+
 use bot_runner::{
-    client::{ControlPlaneClient, EventInput, MetricInput, BotConfigResponse, HeartbeatResponse},
+    client::{EventInput, MetricInput},
     config::{BotConfig, ExecutionConfig, TradingMode, AlgorithmMode, Strictness, AssetFocus, Persona, RiskCaps},
-    executor::{TradeExecutor, NormalizedTradeResult, TradeStage, TradeSide},
+    executor::{TradeStage, TradeSide, TradeError},
     intent::{IntentRegistry, TradeIntentState},
     portfolio::{Portfolio, Position},
-    Config,
 };
+use mock_executor::{MockTradeExecutor, MockPriceOracle};
 use rust_decimal::Decimal;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -87,7 +89,7 @@ pub fn create_test_config(version: i32) -> BotConfig {
 #[tokio::test]
 async fn test_paper_trade_buy_cycle() {
     let config = create_test_config(1);
-    let executor = create_test_executor(config.execution);
+    let executor = MockTradeExecutor::new(config.execution);
     
     // Execute a buy: USDC -> SOL
     let result = executor.execute_trade(
@@ -127,15 +129,30 @@ async fn test_paper_trade_buy_cycle() {
 /// Test: Trade blocked by high price impact
 #[tokio::test]
 async fn test_trade_blocked_by_impact() {
-    let config = create_test_config(1);
-    let executor = create_test_executor(config.execution);
+    // Create config with very low impact threshold
+    let config = BotConfig {
+        execution: ExecutionConfig {
+            max_price_impact_pct: 0.5, // Very low threshold
+            max_slippage_bps: 100,
+            confirm_timeout_secs: 60,
+            quote_cache_secs: 10,
+        },
+        ..create_test_config(1)
+    };
+    
+    let executor = MockTradeExecutor::new(config.execution)
+        .with_oracle(MockPriceOracle {
+            sol_price_usdc: 150.0,
+            btc_price_usdc: 65000.0,
+            impact_for_amount: |_| 2.0, // Always return 2% impact
+        });
 
-    // Execute with a very large amount that should trigger impact check
+    // Execute with any amount - should be blocked due to high impact
     let result = executor.execute_trade(
         "test-intent-impact",
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         "So11111111111111111111111111111111111111112",
-        100_000_000_000_000u64, // Huge amount
+        1_000_000_000,
         TradeSide::Buy,
         TradingMode::Paper,
     ).await;
@@ -150,6 +167,67 @@ async fn test_trade_blocked_by_impact() {
     
     println!("✅ Trade correctly blocked due to high price impact");
     println!("   Block reason: {}", error.message);
+}
+
+/// Test: Trade fails on shield check
+#[tokio::test]
+async fn test_trade_blocked_by_shield() {
+    let config = create_test_config(1);
+    let executor = MockTradeExecutor::new(config.execution)
+        .with_failure_simulator(|| TradeError {
+            stage: "shield".to_string(),
+            code: "shield_deny".to_string(),
+            message: "Token marked as high risk".to_string(),
+        });
+
+    let result = executor.execute_trade(
+        "test-intent-shield",
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "So11111111111111111111111111111111111111112",
+        1_000_000_000,
+        TradeSide::Buy,
+        TradingMode::Paper,
+    ).await;
+
+    assert_eq!(result.stage_reached, TradeStage::Failed);
+    assert!(result.error.is_some());
+    
+    let error = result.error.unwrap();
+    assert_eq!(error.stage, "shield");
+    assert_eq!(error.code, "shield_deny");
+    
+    println!("✅ Trade correctly blocked by shield");
+    println!("   Block reason: {}", error.message);
+}
+
+/// Test: Confirmation timeout failure
+#[tokio::test]
+async fn test_confirmation_timeout() {
+    let config = create_test_config(1);
+    let executor = MockTradeExecutor::new(config.execution)
+        .with_failure_simulator(|| TradeError {
+            stage: "confirm".to_string(),
+            code: "confirm_timeout".to_string(),
+            message: "Transaction confirmation timed out".to_string(),
+        });
+
+    let result = executor.execute_trade(
+        "test-intent-timeout",
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "So11111111111111111111111111111111111111112",
+        1_000_000_000,
+        TradeSide::Buy,
+        TradingMode::Live, // Timeout only relevant for live trades
+    ).await;
+
+    assert_eq!(result.stage_reached, TradeStage::Failed);
+    assert!(result.error.is_some());
+    
+    let error = result.error.unwrap();
+    assert_eq!(error.stage, "confirm");
+    assert_eq!(error.code, "confirm_timeout");
+    
+    println!("✅ Confirmation timeout correctly handled");
 }
 
 /// Test: Intent registry equivalence with mode/version context
@@ -248,6 +326,53 @@ fn test_portfolio_updates_after_trade() {
     );
 }
 
+/// Test: Portfolio updates correctly after sell
+#[test]
+fn test_portfolio_updates_after_sell() {
+    let mut portfolio = Portfolio::new(Decimal::from(10000));
+    
+    // Setup initial position
+    portfolio.update_cash(9_000_000_000, "initial");
+    portfolio.update_position(
+        "So11111111111111111111111111111111111111112",
+        "SOL",
+        5_000_000_000, // 5 SOL
+        Decimal::from(200), // $200 entry
+        9,
+    );
+    
+    // Now sell 2 SOL at $220
+    let sold_sol = 2_000_000_000u64;
+    let received_usdc = 440_000_000u64; // 2 * $220 = $440
+    
+    // Update cash
+    portfolio.update_cash(
+        portfolio.cash_usdc_raw + received_usdc,
+        "sell trade"
+    );
+    
+    // Update position (partial close)
+    let current_qty = portfolio.get_position("So11111111111111111111111111111111111111112")
+        .unwrap().quantity_raw;
+    portfolio.update_position(
+        "So11111111111111111111111111111111111111112",
+        "SOL",
+        current_qty - sold_sol,
+        Decimal::ZERO, // Keep same avg entry
+        9,
+    );
+    
+    // Verify
+    assert_eq!(portfolio.cash_usdc_raw, 9_440_000_000); // 9000 + 440
+    let sol_pos = portfolio.get_position("So11111111111111111111111111111111111111112").unwrap();
+    assert_eq!(sol_pos.quantity_raw, 3_000_000_000); // 5 - 2 = 3 SOL
+    assert_eq!(sol_pos.avg_entry_price_usdc, Decimal::from(200)); // Unchanged
+    
+    println!("✅ Portfolio correctly updated after sell");
+    println!("   Cash: {} USDC", portfolio.cash_usdc_raw / 1_000_000);
+    println!("   SOL position: {} tokens", sol_pos.quantity_raw / 1_000_000_000);
+}
+
 /// Test: Reconciler discovers unknown cost basis position
 #[test]
 fn test_reconciler_unknown_cost_basis() {
@@ -305,6 +430,16 @@ fn test_event_schema_structure() {
             timestamp: chrono::Utc::now(),
         },
         EventInput {
+            event_type: "trade_submitted".to_string(),
+            message: "Trade submitted".to_string(),
+            metadata: Some(serde_json::json!({
+                "intent_id": "test-123",
+                "signature": "sig123",
+                "expected_out": 500_000_000u64,
+            })),
+            timestamp: chrono::Utc::now(),
+        },
+        EventInput {
             event_type: "trade_confirmed".to_string(),
             message: "Trade confirmed".to_string(),
             metadata: Some(serde_json::json!({
@@ -313,6 +448,16 @@ fn test_event_schema_structure() {
                 "out_amount": 500_000_000u64,
                 "executed_price": "0.0005",
                 "slippage_bps": 50,
+            })),
+            timestamp: chrono::Utc::now(),
+        },
+        EventInput {
+            event_type: "trade_failed".to_string(),
+            message: "Trade failed".to_string(),
+            metadata: Some(serde_json::json!({
+                "intent_id": "test-123",
+                "stage": "confirm",
+                "error_code": "confirm_timeout",
             })),
             timestamp: chrono::Utc::now(),
         },
@@ -350,6 +495,14 @@ fn test_event_schema_structure() {
             );
         }
 
+        // Submitted events have signature
+        if event.event_type == "trade_submitted" {
+            assert!(
+                metadata.get("signature").is_some(),
+                "trade_submitted missing signature"
+            );
+        }
+
         // Confirmed events have signature + execution details
         if event.event_type == "trade_confirmed" {
             assert!(
@@ -366,17 +519,7 @@ fn test_event_schema_structure() {
     println!("✅ All events have correct schema structure");
 }
 
-/// Helper: Create test executor with mocked dependencies
-fn create_test_executor(execution_config: ExecutionConfig) -> TradeExecutor {
-    TradeExecutor::new(
-        "http://localhost:8080",
-        "https://api.devnet.solana.com",
-        std::path::PathBuf::from("/tmp/test-keypair.json"),
-        execution_config,
-    ).expect("Failed to create test executor")
-}
-
-/// Integration test: Full trading cycle
+/// Integration test: Full trading cycle with mocked executor
 #[tokio::test]
 async fn test_full_trading_cycle_integration() {
     println!("\n=== Full Trading Cycle Integration Test ===\n");
@@ -384,6 +527,7 @@ async fn test_full_trading_cycle_integration() {
     let config = create_test_config(1);
     let mut portfolio = Portfolio::new(Decimal::from(10000));
     let mut intent_registry = IntentRegistry::new();
+    let executor = MockTradeExecutor::new(config.execution);
 
     // Step 1: Create intent
     let intent = intent_registry.create_with_version(
@@ -402,7 +546,6 @@ async fn test_full_trading_cycle_integration() {
     assert_eq!(intent.state, TradeIntentState::Created);
 
     // Step 2: Execute paper trade
-    let executor = create_test_executor(config.execution);
     let result = executor.execute_trade(
         &intent.id.to_string(),
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -461,4 +604,50 @@ async fn test_full_trading_cycle_integration() {
     assert!(!snapshot.positions.is_empty());
     
     println!("\n✅ Full trading cycle integration test passed!");
+}
+
+/// Test: Multiple trades in sequence
+#[tokio::test]
+async fn test_multiple_trades_sequence() {
+    let config = create_test_config(1);
+    let mut portfolio = Portfolio::new(Decimal::from(10000));
+    let executor = MockTradeExecutor::new(config.execution);
+    
+    // Trade 1: Buy SOL
+    let result1 = executor.execute_trade(
+        "intent-1",
+        "USDC_MINT",
+        "SOL_MINT",
+        2_000_000_000, // 2000 USDC
+        TradeSide::Buy,
+        TradingMode::Paper,
+    ).await;
+    assert_eq!(result1.stage_reached, TradeStage::Confirmed);
+    
+    // Update portfolio
+    portfolio.update_cash(8_000_000_000, "buy 1");
+    portfolio.update_position("SOL_MINT", "SOL", result1.execution.out_amount_raw, Decimal::from(150), 9);
+    
+    // Trade 2: Buy BTC
+    let result2 = executor.execute_trade(
+        "intent-2",
+        "USDC_MINT",
+        "BTC_MINT",
+        3_000_000_000, // 3000 USDC
+        TradeSide::Buy,
+        TradingMode::Paper,
+    ).await;
+    assert_eq!(result2.stage_reached, TradeStage::Confirmed);
+    
+    // Update portfolio
+    portfolio.update_cash(5_000_000_000, "buy 2");
+    portfolio.update_position("BTC_MINT", "BTC", result2.execution.out_amount_raw, Decimal::from(65000), 8);
+    
+    // Verify
+    assert_eq!(portfolio.cash_usdc_raw, 5_000_000_000);
+    assert_eq!(portfolio.positions.len(), 2);
+    
+    println!("✅ Multiple trades executed successfully");
+    println!("   Cash: {} USDC", portfolio.cash_usdc_raw / 1_000_000);
+    println!("   Positions: {}", portfolio.positions.len());
 }
