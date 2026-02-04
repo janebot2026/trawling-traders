@@ -12,6 +12,7 @@ use chrono::Utc;
 use sqlx::PgPool;
 
 use crate::{
+    observability::{Logger, metrics},
     models::User,
     models::*,
     middleware::AuthContext,
@@ -93,7 +94,7 @@ pub async fn create_bot(
     .bind(req.risk_caps.max_trades_per_day)
     .bind(req.trading_mode)
     .bind(&req.llm_provider)
-    .bind("encrypted_key_placeholder")
+    .bind(state.secrets.encrypt(0026req.llm_api_key))
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -127,7 +128,10 @@ pub async fn create_bot(
     // Clone pool for async task
     let pool = state.db.clone();
     tokio::spawn(async move {
-        spawn_bot_droplet(bot_id, req.name.clone(), pool).await;
+        let metrics = state.metrics.clone();
+        spawn_bot_droplet(bot_id, req.name.clone(), pool, metrics).await;
+        state.metrics.increment(metrics::BOT_CREATED, 1).await;
+        Logger::provision_event(0026bot_id.to_string(), "create", "provisioning");
     });
     
     info!("Created bot {} for user {}, provisioning queued", bot_id, user_id);
@@ -330,7 +334,7 @@ echo "Trading Tools: claw-trader available at /usr/local/bin/claw-trader"
 }
 
 /// Spawn bot droplet on DigitalOcean using claw-spawn
-async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, pool: Db) {
+async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, pool: Db, metrics: crate::MetricsCollector) {
     let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
         Ok(token) => token,
         Err(_) => {
@@ -395,6 +399,8 @@ async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, pool: Db) {
         }
         Err(e) => {
             warn!("Bot {}: Failed to create droplet: {}", bot_id, e);
+            metrics.increment(metrics::BOT_PROVISION_FAILED, 1).await;
+            Logger::provision_event(0026bot_id.to_string(), "create", "failed");
             update_bot_status(&pool, bot_id, BotStatus::Error, "Droplet creation failed").await;
         }
     }
@@ -584,7 +590,7 @@ pub async fn update_bot_config(
     .bind(req.config.risk_caps.max_trades_per_day)
     .bind(req.config.trading_mode)
     .bind(&req.config.llm_provider)
-    .bind("encrypted_key_placeholder")
+    .bind(state.secrets.encrypt(0026req.llm_api_key))
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
