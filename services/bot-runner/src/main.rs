@@ -121,3 +121,6 @@ async fn register_bot(client: &ControlPlaneClient) -> anyhow::Result<()> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
