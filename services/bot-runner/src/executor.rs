@@ -5,10 +5,60 @@ use rust_decimal::MathematicalOps;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+use tokio::process::Command as TokioCommand;
+use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
-use crate::config::TradingMode;
+use crate::config::{ExecutionConfig, TradingMode};
+
+/// Normalized trade result returned by TradeExecutor
+/// Regardless of claw-trader quirks, this is the canonical representation
+#[derive(Debug, Clone)]
+pub struct NormalizedTradeResult {
+    pub intent_id: String,
+    pub stage_reached: TradeStage,
+    pub signature: Option<String>,
+    pub quote: QuoteData,
+    pub execution: ExecutionData,
+    pub error: Option<TradeError>,
+    pub input_mint: String,
+    pub output_mint: String,
+    pub side: TradeSide,
+    pub trading_mode: TradingMode,
+    pub shield_result: Option<ShieldCheck>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TradeStage {
+    Blocked,
+    Submitted,
+    Confirmed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct QuoteData {
+    pub in_amount: u64,
+    pub expected_out: u64,
+    pub price_impact_pct: f64,
+    pub fee_bps: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ExecutionData {
+    pub out_amount_raw: u64,
+    pub realized_price: Decimal,
+    pub slippage_bps_estimate: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TradeError {
+    pub stage: String,      // "shield", "quote", "swap", "confirm"
+    pub code: String,       // machine-readable error code
+    pub message: String,    // sanitized for logging
+}
 
 /// Trade executor using claw-trader-cli
 #[derive(Clone)]
@@ -19,6 +69,7 @@ pub struct TradeExecutor {
     claw_trader_path: PathBuf,
     keypair_path: PathBuf,
     jupiter_api_key: Option<String>,
+    execution_config: ExecutionConfig,
 }
 
 impl TradeExecutor {
@@ -27,6 +78,7 @@ impl TradeExecutor {
         data_retrieval_url: &str, 
         solana_rpc_url: &str,
         keypair_path: PathBuf,
+        execution_config: ExecutionConfig,
     ) -> anyhow::Result<Self> {
         // Get claw-trader path from env or use default
         let claw_trader_path = std::env::var("CLAW_TRADER_PATH")
@@ -45,6 +97,7 @@ impl TradeExecutor {
             claw_trader_path,
             keypair_path,
             jupiter_api_key: std::env::var("JUPITER_API_KEY").ok(),
+            execution_config,
         })
     }
 
@@ -53,12 +106,12 @@ impl TradeExecutor {
         self.claw_trader_path.exists()
     }
 
-    /// Run claw-trader command and parse JSON output
+    /// Run claw-trader command with timeout and parse JSON output
     pub async fn run_claw_trader(
         &self,
         args: &[&str],
     ) -> anyhow::Result<serde_json::Value> {
-        let mut cmd = Command::new(&self.claw_trader_path);
+        let mut cmd = TokioCommand::new(&self.claw_trader_path);
         
         // Add common flags
         cmd.arg("--json");
@@ -76,25 +129,49 @@ impl TradeExecutor {
         // Add subcommand args
         cmd.args(args);
         
-        debug!("Running claw-trader: {:?}", cmd);
+        // Set timeout from execution config
+        let timeout_duration = Duration::from_secs(self.execution_config.confirm_timeout_secs);
         
-        let output = cmd.output()?;
+        debug!("Running claw-trader with timeout {:?}: {:?}", timeout_duration, cmd);
         
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("claw-trader failed: {}", stderr));
+        // Run with timeout
+        let result = timeout(timeout_duration, cmd.output()).await;
+        
+        match result {
+            Ok(Ok(output)) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(anyhow::anyhow!("claw-trader failed: {}", stderr));
+                }
+                
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let json: serde_json::Value = serde_json::from_str(&stdout)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse claw-trader output: {} | Output: {}", e, stdout))?;
+                
+                // Check for error in JSON
+                if let Some(error) = json.get("error") {
+                    return Err(anyhow::anyhow!("claw-trader error: {:?}", error));
+                }
+                
+                Ok(json)
+            }
+            Ok(Err(e)) => {
+                Err(anyhow::anyhow!("Failed to execute claw-trader: {}", e))
+            }
+            Err(_) => {
+                // Timeout occurred
+                error!("claw-trader command timed out after {:?}", timeout_duration);
+                
+                // Try to kill any lingering process
+                let _ = TokioCommand::new("pkill")
+                    .args(&["-f", "claw-trader"])
+                    .output()
+                    .await;
+                
+                Err(anyhow::anyhow!("confirm_timeout: claw-trader did not complete within {} seconds", 
+                    self.execution_config.confirm_timeout_secs))
+            }
         }
-        
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let json: serde_json::Value = serde_json::from_str(&stdout)
-            .map_err(|e| anyhow::anyhow!("Failed to parse claw-trader output: {} | Output: {}", e, stdout))?;
-        
-        // Check for error in JSON
-        if let Some(error) = json.get("error") {
-            return Err(anyhow::anyhow!("claw-trader error: {:?}", error));
-        }
-        
-        Ok(json)
     }
 
     /// Fetch current price for a symbol using claw-trader
@@ -166,6 +243,7 @@ impl TradeExecutor {
             // Default to safe if claw-trader not available
             return Ok(ShieldCheck {
                 safe: true,
+                verdict: ShieldVerdict::Allow,
                 warnings: vec![],
                 message: "claw-trader not available, skipping shield check".to_string(),
             });
@@ -176,155 +254,257 @@ impl TradeExecutor {
             "--mints", mint,
         ]).await?;
         
-        // Parse shield response
+        // Parse shield response with structured verdict
         let safe = result["safe"].as_bool().unwrap_or(true);
+        let verdict_str = result["verdict"].as_str().unwrap_or("allow");
+        let verdict = match verdict_str {
+            "deny" => ShieldVerdict::Deny,
+            "warn" => ShieldVerdict::Warn,
+            _ => ShieldVerdict::Allow,
+        };
+        
         let warnings: Vec<String> = result["warnings"]
             .as_array()
             .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
             .unwrap_or_default();
         
         Ok(ShieldCheck {
-            safe,
+            safe: safe && verdict != ShieldVerdict::Deny,
+            verdict,
             warnings,
             message: result["message"].as_str().unwrap_or("OK").to_string(),
         })
     }
 
-    /// Execute a trade (paper or live)
+    /// Execute a trade (paper or live) - returns normalized result
     pub async fn execute_trade(
         &self,
+        intent_id: &str,
         input_mint: &str,
         output_mint: &str,
         amount: u64,
         side: TradeSide,
         trading_mode: TradingMode,
-    ) -> anyhow::Result<TradeResult> {
+    ) -> NormalizedTradeResult {
+        // Initialize result with defaults
+        let mut result = NormalizedTradeResult {
+            intent_id: intent_id.to_string(),
+            stage_reached: TradeStage::Failed,
+            signature: None,
+            quote: QuoteData::default(),
+            execution: ExecutionData::default(),
+            error: None,
+            input_mint: input_mint.to_string(),
+            output_mint: output_mint.to_string(),
+            side,
+            trading_mode,
+            shield_result: None,
+        };
+
         // Run shield check first
-        let shield = self.shield_check(input_mint).await?;
-        if !shield.safe {
-            warn!("Shield check failed for {}: {:?}", input_mint, shield.warnings);
-            return Ok(TradeResult {
-                success: false,
-                tx_hash: None,
-                message: format!("Shield check failed: {}", shield.message),
-                executed_price: Decimal::ZERO,
-                pnl: None,
-                input_mint: input_mint.to_string(),
-                output_mint: output_mint.to_string(),
-                in_amount: amount,
-                out_amount: 0,
-                fee_usd: None,
-                shield_result: Some(shield),
-            });
+        match self.shield_check(input_mint).await {
+            Ok(shield) => {
+                result.shield_result = Some(shield.clone());
+                
+                if !shield.safe {
+                    result.stage_reached = TradeStage::Blocked;
+                    result.error = Some(TradeError {
+                        stage: "shield".to_string(),
+                        code: "shield_deny".to_string(),
+                        message: format!("Shield check failed: {}", shield.message),
+                    });
+                    warn!("Shield check failed for {}: {:?}", input_mint, shield.warnings);
+                    return result;
+                }
+            }
+            Err(e) => {
+                // Shield error - treat as blocked
+                result.stage_reached = TradeStage::Blocked;
+                result.error = Some(TradeError {
+                    stage: "shield".to_string(),
+                    code: "shield_error".to_string(),
+                    message: format!("Shield check error: {}", e),
+                });
+                warn!("Shield check error for {}: {}", input_mint, e);
+                return result;
+            }
         }
-        
-        // Get price quote first
-        let price_quote = self.fetch_price(input_mint, output_mint, amount).await?;
-        
-        // Check price impact
-        if price_quote.price_impact_pct > 2.0 {
-            warn!("Price impact too high: {}%, skipping trade", price_quote.price_impact_pct);
-            return Ok(TradeResult {
-                success: false,
-                tx_hash: None,
-                message: format!("Price impact too high: {}%", price_quote.price_impact_pct),
-                executed_price: Decimal::ZERO,
-                pnl: None,
-                input_mint: input_mint.to_string(),
-                output_mint: output_mint.to_string(),
-                in_amount: amount,
-                out_amount: 0,
-                fee_usd: None,
-                shield_result: Some(shield),
+
+        // Get price quote
+        let price_quote = match self.fetch_price(input_mint, output_mint, amount).await {
+            Ok(quote) => {
+                result.quote = QuoteData {
+                    in_amount: quote.in_amount,
+                    expected_out: quote.out_amount,
+                    price_impact_pct: quote.price_impact_pct,
+                    fee_bps: quote.fee_bps,
+                };
+                quote
+            }
+            Err(e) => {
+                result.stage_reached = TradeStage::Failed;
+                result.error = Some(TradeError {
+                    stage: "quote".to_string(),
+                    code: "quote_failed".to_string(),
+                    message: format!("Failed to fetch price: {}", e),
+                });
+                return result;
+            }
+        };
+
+        // Check price impact against config (not hardcoded)
+        if price_quote.price_impact_pct > self.execution_config.max_price_impact_pct {
+            result.stage_reached = TradeStage::Blocked;
+            result.error = Some(TradeError {
+                stage: "quote".to_string(),
+                code: "impact_too_high".to_string(),
+                message: format!("Price impact {}% exceeds max {}", 
+                    price_quote.price_impact_pct, 
+                    self.execution_config.max_price_impact_pct),
             });
+            warn!("Price impact too high: {}% > {}%", 
+                price_quote.price_impact_pct, 
+                self.execution_config.max_price_impact_pct);
+            return result;
         }
-        
+
+        // Route to paper or live execution
         match trading_mode {
             TradingMode::Paper => {
-                self.execute_paper_trade(input_mint, output_mint, amount, &price_quote, side).await
+                self.execute_paper_trade(&mut result, input_mint, output_mint, amount, &price_quote).await;
             }
             TradingMode::Live => {
-                self.execute_live_trade(input_mint, output_mint, amount, &price_quote, side).await
+                self.execute_live_trade(&mut result, input_mint, output_mint, amount, &price_quote).await;
             }
         }
+        
+        result
     }
 
     /// Execute a paper trade (simulated)
     async fn execute_paper_trade(
         &self,
+        result: &mut NormalizedTradeResult,
         input_mint: &str,
         output_mint: &str,
         amount: u64,
         price_quote: &ClawTraderPrice,
-        side: TradeSide,
-    ) -> anyhow::Result<TradeResult> {
+    ) {
         info!(
-            "📝 PAPER TRADE: {:?} {} -> {} | Expected out: {} | Impact: {}%",
-            side, input_mint, output_mint, price_quote.out_amount, price_quote.price_impact_pct
+            "📝 PAPER TRADE: {:?} {:?} -> {:?} | Expected out: {:?} | Impact: {:?}%",
+            result.side, input_mint, output_mint, price_quote.out_amount, price_quote.price_impact_pct
         );
 
-        // Simulate small slippage (0.1%)
-        let slippage_factor = 0.999; // 0.1% slippage
+        // Simulate small slippage based on configured max
+        let slippage_factor = 1.0 - (self.execution_config.max_slippage_bps as f64 / 10000.0);
         let simulated_out = (price_quote.out_amount as f64 * slippage_factor) as u64;
 
-        // Calculate fee (69 bps = 0.69%)
+        // Calculate fee
         let fee_bps = price_quote.fee_bps as f64 / 10000.0;
         let fee_amount = (price_quote.out_amount as f64 * fee_bps) as u64;
 
-        Ok(TradeResult {
-            success: true,
-            tx_hash: Some("paper_trade_simulated".to_string()),
-            message: format!("Paper trade: {:?} {} -> {}", side, input_mint, output_mint),
-            executed_price: Decimal::from(simulated_out) / Decimal::from(amount),
-            pnl: None, // Calculated by caller based on position tracking
-            input_mint: input_mint.to_string(),
-            output_mint: output_mint.to_string(),
-            in_amount: amount,
-            out_amount: simulated_out,
-            fee_usd: Some(Decimal::from(fee_amount)),
-            shield_result: None,
-        })
+        result.stage_reached = TradeStage::Confirmed;
+        result.signature = Some("paper_trade_simulated".to_string());
+        result.execution = ExecutionData {
+            out_amount_raw: simulated_out,
+            realized_price: if amount > 0 {
+                Decimal::from(simulated_out) / Decimal::from(amount)
+            } else {
+                Decimal::ZERO
+            },
+            slippage_bps_estimate: Some(self.execution_config.max_slippage_bps),
+        };
     }
 
     /// Execute a live trade on Solana via claw-trader
     async fn execute_live_trade(
         &self,
+        result: &mut NormalizedTradeResult,
         input_mint: &str,
         output_mint: &str,
         amount: u64,
         price_quote: &ClawTraderPrice,
-        side: TradeSide,
-    ) -> anyhow::Result<TradeResult> {
+    ) {
         if !self.is_claw_trader_available() {
             warn!("claw-trader not available, falling back to paper trade");
-            return self.execute_paper_trade(input_mint, output_mint, amount, price_quote, side).await;
+            return self.execute_paper_trade(result, input_mint, output_mint, amount, price_quote).await;
         }
         
         if !self.keypair_path.exists() {
-            return Err(anyhow::anyhow!("Keypair not found at {:?}", self.keypair_path));
+            result.stage_reached = TradeStage::Failed;
+            result.error = Some(TradeError {
+                stage: "swap".to_string(),
+                code: "keypair_missing".to_string(),
+                message: format!("Keypair not found at {:?}", self.keypair_path),
+            });
+            return;
         }
         
         info!(
-            "💰 LIVE TRADE: {:?} {} -> {} | Amount: {} | Expected out: {}",
-            side, input_mint, output_mint, amount, price_quote.out_amount
+            "💰 LIVE TRADE: {:?} {:?} -> {:?} | Amount: {:?} | Expected out: {:?}",
+            result.side, input_mint, output_mint, amount, price_quote.out_amount
         );
 
-        // Execute swap via claw-trader
-        let result = self.run_claw_trader(&[
+        // Build swap args with slippage if supported
+        let amount_str = amount.to_string();
+        let slippage_str = self.execution_config.max_slippage_bps.to_string();
+        let mut args: Vec<&str> = vec![
             "swap",
             "--input-mint", input_mint,
             "--output-mint", output_mint,
-            "--amount", &amount.to_string(),
+            "--amount", &amount_str,
             "--keypair", self.keypair_path.to_str().unwrap(),
             "--confirm",
-        ]).await?;
+        ];
         
-        // Parse swap response
-        let success = result["ok"].as_bool().unwrap_or(false);
+        // Add slippage if claw-trader supports it
+        args.push("--slippage-bps");
+        args.push(&slippage_str);
+
+        // Execute swap with timeout already handled in run_claw_trader
+        match self.run_claw_trader(&args).await {
+            Ok(swap_result) => {
+                self.parse_live_trade_result(result, swap_result, amount, price_quote).await;
+            }
+            Err(e) => {
+                let error_str = e.to_string();
+                
+                // Check if this was a timeout
+                if error_str.contains("confirm_timeout") {
+                    result.stage_reached = TradeStage::Failed;
+                    result.error = Some(TradeError {
+                        stage: "confirm".to_string(),
+                        code: "confirm_timeout".to_string(),
+                        message: format!("Trade confirmation timed out after {} seconds", 
+                            self.execution_config.confirm_timeout_secs),
+                    });
+                } else {
+                    result.stage_reached = TradeStage::Failed;
+                    result.error = Some(TradeError {
+                        stage: "swap".to_string(),
+                        code: "swap_failed".to_string(),
+                        message: format!("Swap execution failed: {}", e),
+                    });
+                }
+                warn!("Live trade failed: {}", e);
+            }
+        }
+    }
+
+    /// Parse live trade result from claw-trader output
+    async fn parse_live_trade_result(
+        &self,
+        result: &mut NormalizedTradeResult,
+        swap_result: serde_json::Value,
+        in_amount: u64,
+        _price_quote: &ClawTraderPrice,
+    ) {
+        let success = swap_result["ok"].as_bool().unwrap_or(false);
         
         if success {
-            let execute = &result["result"]["execute"];
-            let confirmation = &result["result"]["confirmation"];
+            let execute = &swap_result["result"]["execute"];
+            let confirmation = &swap_result["result"]["confirmation"];
+            let order = &swap_result["result"]["order"];
             
             let tx_hash = execute["signature"].as_str()
                 .or_else(|| confirmation["signature"].as_str())
@@ -332,50 +512,55 @@ impl TradeExecutor {
                 .to_string();
             
             let status = execute["status"].as_str().unwrap_or("Unknown");
-            let code = execute["code"].as_i64().unwrap_or(-1);
             
-            info!("✅ Trade executed: {} | Status: {} | Code: {}", tx_hash, status, code);
+            info!("✅ Trade executed: {} | Status: {}", tx_hash, status);
             
-            // Calculate actual executed price if we have out_amount
-            let out_amount = result["result"]["order"]["outAmount"]
+            // Get actual out amount
+            let out_amount = order["outAmount"]
                 .as_str()
                 .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(price_quote.out_amount);
+                .or_else(|| order["expectedOutAmount"].as_str().and_then(|s| s.parse().ok()))
+                .unwrap_or(0);
             
-            Ok(TradeResult {
-                success: true,
-                tx_hash: Some(tx_hash.clone()),
-                message: format!("Trade executed: {} | Status: {}", tx_hash, status),
-                executed_price: Decimal::from(out_amount) / Decimal::from(amount),
-                pnl: None,
-                input_mint: input_mint.to_string(),
-                output_mint: output_mint.to_string(),
-                in_amount: amount,
-                out_amount,
-                fee_usd: None, // Could calculate from fee_bps
-                shield_result: None,
-            })
+            // Calculate realized slippage
+            let expected_out = result.quote.expected_out as f64;
+            let actual_out = out_amount as f64;
+            let slippage_bps = if expected_out > 0.0 && actual_out < expected_out {
+                (((expected_out - actual_out) / expected_out) * 10000.0) as u32
+            } else {
+                0
+            };
+            
+            result.stage_reached = TradeStage::Confirmed;
+            result.signature = Some(tx_hash);
+            result.execution = ExecutionData {
+                out_amount_raw: out_amount,
+                realized_price: if in_amount > 0 {
+                    Decimal::from(out_amount) / Decimal::from(in_amount)
+                } else {
+                    Decimal::ZERO
+                },
+                slippage_bps_estimate: Some(slippage_bps),
+            };
         } else {
-            let error_msg = result["error"]["message"]
+            let error_msg = swap_result["error"]["message"]
                 .as_str()
                 .unwrap_or("Unknown error")
                 .to_string();
             
-            warn!("❌ Trade failed: {}", error_msg);
+            let error_code = swap_result["error"]["code"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string();
             
-            Ok(TradeResult {
-                success: false,
-                tx_hash: None,
+            warn!("❌ Trade failed: {} (code: {})", error_msg, error_code);
+            
+            result.stage_reached = TradeStage::Failed;
+            result.error = Some(TradeError {
+                stage: "swap".to_string(),
+                code: error_code,
                 message: error_msg,
-                executed_price: Decimal::ZERO,
-                pnl: None,
-                input_mint: input_mint.to_string(),
-                output_mint: output_mint.to_string(),
-                in_amount: amount,
-                out_amount: 0,
-                fee_usd: None,
-                shield_result: None,
-            })
+            });
         }
     }
 
@@ -389,6 +574,11 @@ impl TradeExecutor {
         // We need the wallet address from the keypair
         // For now, return empty - can be enhanced later
         Ok(vec![])
+    }
+
+    /// Get execution config
+    pub fn execution_config(&self) -> &ExecutionConfig {
+        &self.execution_config
     }
 }
 
@@ -414,8 +604,16 @@ pub struct ClawTraderPrice {
 #[derive(Debug, Clone)]
 pub struct ShieldCheck {
     pub safe: bool,
+    pub verdict: ShieldVerdict,
     pub warnings: Vec<String>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShieldVerdict {
+    Allow,
+    Warn,
+    Deny,
 }
 
 #[derive(Debug, Clone)]
@@ -432,6 +630,8 @@ pub enum TradeSide {
     Sell,
 }
 
+/// Legacy TradeResult - kept for backward compatibility during migration
+/// Prefer NormalizedTradeResult for new code
 #[derive(Debug, Clone)]
 pub struct TradeResult {
     pub success: bool,
@@ -445,6 +645,26 @@ pub struct TradeResult {
     pub out_amount: u64,
     pub fee_usd: Option<Decimal>,
     pub shield_result: Option<ShieldCheck>,
+}
+
+impl From<NormalizedTradeResult> for TradeResult {
+    fn from(n: NormalizedTradeResult) -> Self {
+        Self {
+            success: n.stage_reached == TradeStage::Confirmed,
+            tx_hash: n.signature,
+            message: n.error.as_ref()
+                .map(|e| e.message.clone())
+                .unwrap_or_else(|| format!("Trade {:?}", n.stage_reached)),
+            executed_price: n.execution.realized_price,
+            pnl: None,
+            input_mint: n.input_mint,
+            output_mint: n.output_mint,
+            in_amount: n.quote.in_amount,
+            out_amount: n.execution.out_amount_raw,
+            fee_usd: None,
+            shield_result: n.shield_result,
+        }
+    }
 }
 
 // ==================== ALGORITHM SIGNAL GENERATORS ====================

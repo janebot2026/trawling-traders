@@ -25,6 +25,10 @@ pub struct Position {
     pub avg_entry_price_usdc: Decimal,
     pub current_price_usdc: Option<Decimal>,
     pub last_updated: chrono::DateTime<chrono::Utc>,
+    /// True if cost basis is unknown (e.g., from reconciliation discovery)
+    /// Per principal engineer feedback: tag positions with unknown cost basis
+    #[serde(default)]
+    pub unknown_cost_basis: bool,
 }
 
 /// Portfolio snapshot for reporting
@@ -116,7 +120,7 @@ impl Portfolio {
                 pos.avg_entry_price_usdc
             );
         } else {
-            // New position
+            // New position (from trade, so cost basis is known)
             self.positions.insert(
                 mint.to_string(),
                 Position {
@@ -126,6 +130,7 @@ impl Portfolio {
                     avg_entry_price_usdc: price_usdc,
                     current_price_usdc: Some(price_usdc),
                     last_updated: now,
+                    unknown_cost_basis: false, // Known from trade execution
                 }
             );
             

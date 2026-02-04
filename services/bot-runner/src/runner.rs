@@ -1,4 +1,5 @@
 //! Bot Runner - Main orchestration loop
+use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use crate::client::{ControlPlaneClient, EventInput, MetricInput};
 use crate::config::{BotConfig, TradingMode, AlgorithmMode, Strictness};
 use crate::executor::{
     generate_breakout_signal, generate_reversion_signal, generate_trend_signal,
-    TradeExecutor, TradeResult, TradeSide, TradingSignal,
+    TradeExecutor, NormalizedTradeResult, TradeStage, TradeSide, TradingSignal,
 };
 use crate::intent::{IntentRegistry, TradeIntent, TradeIntentState};
 use crate::portfolio::{Portfolio, PortfolioSnapshot};
@@ -34,7 +35,7 @@ impl BotRunner {
     /// Create new bot runner
     pub fn new(client: Arc<ControlPlaneClient>, config: Config) -> Self {
         // Initialize portfolio with starting cash
-        let portfolio = Portfolio::new(rust_decimal::Decimal::from(10000));
+        let portfolio = Portfolio::new(Decimal::from(10000));
         
         Self {
             client,
@@ -145,6 +146,7 @@ impl BotRunner {
                 &self.config.data_retrieval_url,
                 &self.config.solana_rpc_url,
                 self.config.keypair_path.clone(),
+                config.execution, // Pass execution config
             ) {
                 Ok(executor) => {
                     // Initialize reconciler with same executor
@@ -184,6 +186,7 @@ impl BotRunner {
                 "algorithm": config.algorithm_mode,
                 "risk_caps": config.risk_caps,
                 "trading_mode": config.trading_mode,
+                "execution": config.execution,
             })),
             timestamp: chrono::Utc::now(),
         };
@@ -289,12 +292,12 @@ impl BotRunner {
                     // Update portfolio based on trade result
                     self.update_portfolio_from_trade(&result, &token, &usdc_info);
                     
-                    // Report trade
-                    self.report_trade(&intent, &result, config.trading_mode).await;
+                    // Emit standardized events based on trade stage
+                    self.emit_trade_events(&intent, &result, &config).await;
                     
                     info!(
-                        "Trade #{} for {} | Intent: {} | Success: {} | TX: {:?}",
-                        self.trade_count, token.symbol, intent.id, result.success, result.tx_hash
+                        "Trade #{} for {} | Intent: {} | Stage: {:?} | TX: {:?}",
+                        self.trade_count, token.symbol, intent.id, result.stage_reached, result.signature
                     );
                 }
                 Ok(None) => {
@@ -309,14 +312,138 @@ impl BotRunner {
         Ok(())
     }
 
+    /// Emit standardized trade events based on trade stage
+    async fn emit_trade_events(
+        &self,
+        intent: &TradeIntent,
+        result: &NormalizedTradeResult,
+        config: &BotConfig,
+    ) {
+        use crate::executor::TradeStage;
+
+        // Always emit trade_intent_created first
+        let created_event = EventInput {
+            event_type: "trade_intent_created".to_string(),
+            message: format!("Trade intent created for {}", intent.id),
+            metadata: Some(serde_json::json!({
+                "intent_id": intent.id.to_string(),
+                "bot_id": self.config.bot_id.to_string(),
+                "input_mint": result.input_mint,
+                "output_mint": result.output_mint,
+                "in_amount": result.quote.in_amount,
+                "side": format!("{:?}", result.side),
+                "mode": format!("{:?}", config.trading_mode),
+                "algorithm": intent.algorithm,
+                "confidence": intent.confidence,
+                "rationale": intent.rationale,
+            })),
+            timestamp: chrono::Utc::now(),
+        };
+        self.client.send_events(vec![created_event]).await.ok();
+
+        // Emit stage-specific event
+        match result.stage_reached {
+            TradeStage::Blocked => {
+                let error = result.error.as_ref();
+                let reason_code = error
+                    .map(|e| e.code.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                
+                let blocked_event = EventInput {
+                    event_type: "trade_blocked".to_string(),
+                    message: error
+                        .map(|e| e.message.clone())
+                        .unwrap_or_else(|| "Trade blocked".to_string()),
+                    metadata: Some(serde_json::json!({
+                        "intent_id": intent.id.to_string(),
+                        "reason_code": reason_code,
+                        "input_mint": result.input_mint,
+                        "output_mint": result.output_mint,
+                        "in_amount": result.quote.in_amount,
+                        "price_impact_pct": result.quote.price_impact_pct,
+                        "shield_verdict": result.shield_result.as_ref().map(|s| format!("{:?}", s.verdict)),
+                    })),
+                    timestamp: chrono::Utc::now(),
+                };
+                self.client.send_events(vec![blocked_event]).await.ok();
+            }
+            
+            TradeStage::Submitted => {
+                let submitted_event = EventInput {
+                    event_type: "trade_submitted".to_string(),
+                    message: format!("Trade submitted: {:?}", result.signature),
+                    metadata: Some(serde_json::json!({
+                        "intent_id": intent.id.to_string(),
+                        "signature": result.signature,
+                        "input_mint": result.input_mint,
+                        "output_mint": result.output_mint,
+                        "in_amount": result.quote.in_amount,
+                        "expected_out": result.quote.expected_out,
+                        "price_impact_pct": result.quote.price_impact_pct,
+                    })),
+                    timestamp: chrono::Utc::now(),
+                };
+                self.client.send_events(vec![submitted_event]).await.ok();
+            }
+            
+            TradeStage::Confirmed => {
+                let confirmed_event = EventInput {
+                    event_type: "trade_confirmed".to_string(),
+                    message: format!("Trade confirmed: {:?}", result.signature),
+                    metadata: Some(serde_json::json!({
+                        "intent_id": intent.id.to_string(),
+                        "signature": result.signature,
+                        "input_mint": result.input_mint,
+                        "output_mint": result.output_mint,
+                        "in_amount": result.quote.in_amount,
+                        "out_amount": result.execution.out_amount_raw,
+                        "executed_price": result.execution.realized_price.to_string(),
+                        "price_impact_pct": result.quote.price_impact_pct,
+                        "slippage_bps": result.execution.slippage_bps_estimate,
+                        "mode": format!("{:?}", config.trading_mode),
+                    })),
+                    timestamp: chrono::Utc::now(),
+                };
+                self.client.send_events(vec![confirmed_event]).await.ok();
+            }
+            
+            TradeStage::Failed => {
+                let error = result.error.as_ref();
+                let stage = error
+                    .map(|e| e.stage.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let code = error
+                    .map(|e| e.code.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                
+                let failed_event = EventInput {
+                    event_type: "trade_failed".to_string(),
+                    message: error
+                        .map(|e| e.message.clone())
+                        .unwrap_or_else(|| "Trade failed".to_string()),
+                    metadata: Some(serde_json::json!({
+                        "intent_id": intent.id.to_string(),
+                        "stage": stage,
+                        "error_code": code,
+                        "input_mint": result.input_mint,
+                        "output_mint": result.output_mint,
+                        "in_amount": result.quote.in_amount,
+                    })),
+                    timestamp: chrono::Utc::now(),
+                };
+                self.client.send_events(vec![failed_event]).await.ok();
+            }
+        }
+    }
+
     /// Update portfolio based on trade result
     fn update_portfolio_from_trade(
         &mut self,
-        result: &TradeResult,
+        result: &NormalizedTradeResult,
         token: &TokenInfo,
         usdc: &TokenInfo,
     ) {
-        if !result.success {
+        if result.stage_reached != crate::executor::TradeStage::Confirmed {
             return;
         }
 
@@ -326,46 +453,46 @@ impl BotRunner {
         if is_buy {
             // Bought token with USDC
             // Reduce cash
-            let spent = crate::amount::from_raw_amount(result.in_amount, usdc.decimals);
-            let new_cash = self.portfolio.cash_usdc_raw.saturating_sub(result.in_amount);
+            let spent = crate::amount::from_raw_amount(result.quote.in_amount, usdc.decimals);
+            let new_cash = self.portfolio.cash_usdc_raw.saturating_sub(result.quote.in_amount);
             self.portfolio.update_cash(new_cash, "buy trade");
             
             // Add/update position
-            let received = result.out_amount;
-            let price = spent / crate::amount::from_raw_amount(received, token.decimals);
-            self.portfolio.update_position(
-                &token.mint,
-                &token.symbol,
-                received,
-                price,
-                token.decimals,
-            );
+            let received = result.execution.out_amount_raw;
+            if received > 0 {
+                let price = spent / crate::amount::from_raw_amount(received, token.decimals);
+                self.portfolio.update_position(
+                    &token.mint,
+                    &token.symbol,
+                    received,
+                    price,
+                    token.decimals,
+                );
+            }
         } else {
             // Sold token for USDC
             // Remove/reduce position
-            let sold = result.in_amount;
+            let sold = result.quote.in_amount;
             let current_pos = self.portfolio.get_position(&token.mint)
                 .map(|p| p.quantity_raw)
                 .unwrap_or(0);
             
             if sold >= current_pos {
                 // Full close
-                self.portfolio.close_position(&token.mint,
-                    token.decimals
-                );
+                self.portfolio.close_position(&token.mint, token.decimals);
             } else {
                 // Partial close
                 self.portfolio.update_position(
                     &token.mint,
                     &token.symbol,
                     current_pos - sold,
-                    rust_decimal::Decimal::ZERO, // Keep same avg entry
+                    Decimal::ZERO, // Keep same avg entry
                     token.decimals,
                 );
             }
             
             // Add to cash
-            let received_usdc = self.portfolio.cash_usdc_raw + result.out_amount;
+            let received_usdc = self.portfolio.cash_usdc_raw + result.execution.out_amount_raw;
             self.portfolio.update_cash(received_usdc, "sell trade");
         }
     }
@@ -376,13 +503,13 @@ impl BotRunner {
         token: &TokenInfo,
         usdc: &TokenInfo,
         config: &BotConfig,
-    ) -> anyhow::Result<Option<(TradeIntent, TradeResult)>> {
+    ) -> anyhow::Result<Option<(TradeIntent, NormalizedTradeResult)>> {
         // Get executor reference
         let executor = self.executor.as_ref().unwrap();
         
         // Calculate position size
-        let max_position_pct = rust_decimal::Decimal::from(config.risk_caps.max_position_size_percent)
-            / rust_decimal::Decimal::from(100);
+        let max_position_pct = Decimal::from(config.risk_caps.max_position_size_percent)
+            / Decimal::from(100);
         
         // Get current equity from portfolio snapshot
         let snapshot = self.portfolio.snapshot();
@@ -403,11 +530,15 @@ impl BotRunner {
         }
 
         // Check for existing equivalent intent (idempotency)
-        if let Some(existing_id) = self.intent_registry.find_equivalent(
+        // Enhanced per principal engineer feedback: include mode + strategy_version
+        // to prevent incorrectly suppressing legitimate repeated trades
+        if let Some(existing_id) = self.intent_registry.find_equivalent_with_context(
             &self.config.bot_id.to_string(),
             &usdc.mint,
             &token.mint,
             usdc_amount,
+            Some(&format!("{:?}", config.trading_mode)), // Include mode (paper/live)
+            Some(&config.version_id.to_string()), // Config version as strategy fingerprint
         ) {
             debug!("Equivalent intent {} already exists, skipping", existing_id);
             return Ok(None);
@@ -470,13 +601,7 @@ impl BotRunner {
             }
         }
 
-        // Check price impact
-        if quote.price_impact_pct > 2.0 {
-            warn!("Price impact too high: {}%", quote.price_impact_pct);
-            return Ok(None);
-        }
-
-        // Create trade intent
+        // Create trade intent BEFORE execution (so we always have an intent_id)
         let intent = self.intent_registry.create(
             &self.config.bot_id.to_string(),
             &usdc.mint,
@@ -494,76 +619,60 @@ impl BotRunner {
             TradeSide::Sell => (&token.mint, &usdc.mint),
         };
 
-        // Execute trade
+        // Execute trade with intent_id for tracking
         let result = executor.execute_trade(
+            &intent.id.to_string(),
             input_mint,
             output_mint,
             usdc_amount,
             side,
             config.trading_mode,
-        ).await?;
+        ).await;
 
-        // Update intent state
-        if result.success {
-            self.intent_registry.update_state(
-                &intent.id.to_string(),
-                TradeIntentState::Confirmed {
-                    signature: result.tx_hash.clone().unwrap_or_default(),
-                    out_amount: result.out_amount,
-                },
-            ).ok();
-        } else {
-            self.intent_registry.update_state(
-                &intent.id.to_string(),
-                TradeIntentState::Failed {
-                    stage: "execution".to_string(),
-                    error: result.message.clone(),
-                },
-            ).ok();
-        }
+        // Update intent state based on result
+        self.update_intent_state(&intent, &result);
 
         Ok(Some((intent, result)))
     }
 
-    /// Report trade to control plane
-    async fn report_trade(
-        &self,
+    /// Update intent state based on normalized trade result
+    fn update_intent_state(
+        &mut self,
         intent: &TradeIntent,
-        result: &TradeResult,
-        trading_mode: TradingMode,
+        result: &NormalizedTradeResult,
     ) {
-        let event_type = if result.success {
-            "trade_executed"
-        } else {
-            "trade_failed"
+        use crate::executor::TradeStage;
+        
+        let state = match result.stage_reached {
+            TradeStage::Blocked => {
+                let reason = result.error.as_ref()
+                    .map(|e| format!("{}: {}", e.stage, e.code))
+                    .unwrap_or_else(|| "blocked".to_string());
+                TradeIntentState::ShieldCheckFailed { reason }
+            }
+            TradeStage::Submitted => {
+                TradeIntentState::Submitted {
+                    signature: result.signature.clone().unwrap_or_default(),
+                }
+            }
+            TradeStage::Confirmed => {
+                TradeIntentState::Confirmed {
+                    signature: result.signature.clone().unwrap_or_default(),
+                    out_amount: result.execution.out_amount_raw,
+                }
+            }
+            TradeStage::Failed => {
+                let stage = result.error.as_ref()
+                    .map(|e| e.stage.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error = result.error.as_ref()
+                    .map(|e| e.message.clone())
+                    .unwrap_or_else(|| "failed".to_string());
+                TradeIntentState::Failed { stage, error }
+            }
         };
-
-        let metadata = serde_json::json!({
-            "intent_id": intent.id.to_string(),
-            "input_mint": result.input_mint,
-            "output_mint": result.output_mint,
-            "in_amount": result.in_amount,
-            "out_amount": result.out_amount,
-            "executed_price": result.executed_price.to_string(),
-            "pnl": result.pnl.map(|p| p.to_string()),
-            "fee_usd": result.fee_usd.map(|f| f.to_string()),
-            "tx_hash": result.tx_hash,
-            "mode": format!("{:?}", trading_mode),
-            "shield_safe": result.shield_result.as_ref().map(|s| s.safe),
-            "confidence": intent.confidence,
-            "algorithm": intent.algorithm,
-        });
-
-        let event = EventInput {
-            event_type: event_type.to_string(),
-            message: result.message.clone(),
-            metadata: Some(metadata),
-            timestamp: chrono::Utc::now(),
-        };
-
-        if let Err(e) = self.client.send_events(vec![event]).await {
-            warn!("Failed to report trade: {}", e);
-        }
+        
+        self.intent_registry.update_state(&intent.id.to_string(), state).ok();
     }
 
     /// Send heartbeat with metrics

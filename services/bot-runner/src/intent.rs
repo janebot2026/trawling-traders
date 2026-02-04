@@ -31,6 +31,8 @@ pub struct TradeIntent {
     pub rationale: String,
     pub state: TradeIntentState,
     pub created_at: Instant,
+    /// Strategy version fingerprint (e.g., config version ID) to differentiate rebroadcasts
+    pub strategy_version: Option<String>,
 }
 
 /// Intent registry for tracking trade attempts
@@ -59,6 +61,28 @@ impl IntentRegistry {
         confidence: f64,
         rationale: &str,
     ) -> TradeIntent {
+        self.create_with_version(
+            bot_id, input_mint, output_mint, in_amount, 
+            mode, algorithm, confidence, rationale, None
+        )
+    }
+    
+    /// Create a new trade intent with strategy version
+    /// 
+    /// Per principal engineer feedback: include mode + version to prevent
+    /// incorrectly suppressing legitimate repeated trades after config changes
+    pub fn create_with_version(
+        &mut self,
+        bot_id: &str,
+        input_mint: &str,
+        output_mint: &str,
+        in_amount: u64,
+        mode: &str,
+        algorithm: &str,
+        confidence: f64,
+        rationale: &str,
+        strategy_version: Option<String>,
+    ) -> TradeIntent {
         let intent = TradeIntent {
             id: uuid::Uuid::new_v4(),
             bot_id: bot_id.to_string(),
@@ -71,6 +95,7 @@ impl IntentRegistry {
             rationale: rationale.to_string(),
             state: TradeIntentState::Created,
             created_at: Instant::now(),
+            strategy_version,
         };
         
         self.intents.insert(intent.id.to_string(), intent.clone());
@@ -105,6 +130,10 @@ impl IntentRegistry {
     
     /// Check if an equivalent intent already exists (idempotency check)
     /// 
+    /// Per principal engineer feedback, equivalence now includes:
+    /// - mode (paper/live)
+    /// - strategy_version (config version fingerprint)
+    /// 
     /// Returns the existing intent ID if found
     pub fn find_equivalent(
         &self,
@@ -113,32 +142,97 @@ impl IntentRegistry {
         output_mint: &str,
         in_amount: u64,
     ) -> Option<String> {
+        // Backward-compatible version without mode/version
         for (id, intent) in &self.intents {
-            // Check if intent is recent and equivalent
-            if intent.created_at.elapsed() < Duration::from_secs(300) // 5 min window
-                && intent.bot_id == bot_id
-                && intent.input_mint == input_mint
-                && intent.output_mint == output_mint
-                && intent.in_amount == in_amount
-            {
-                // Check if it's already finalized
-                match &intent.state {
-                    TradeIntentState::Confirmed { .. } |
-                    TradeIntentState::Failed { .. } => {
-                        debug!("Found equivalent finalized intent: {}", id);
-                        return Some(id.clone());
-                    }
-                    _ => {
-                        // Pending intent, check if stale
-                        if intent.created_at.elapsed() > Duration::from_secs(60) {
-                            warn!("Found stale pending intent: {}", id);
-                            return Some(id.clone());
-                        }
-                    }
-                }
+            if self.is_intent_equivalent(
+                intent, bot_id, input_mint, output_mint, in_amount, None, None
+            ) {
+                return Some(id.clone());
             }
         }
         None
+    }
+    
+    /// Enhanced equivalence check with mode and strategy version
+    /// 
+    /// Prevents incorrectly suppressing legitimate repeated trades after:
+    /// - Mode switches (paper -> live)
+    /// - Config updates (new strategy version)
+    pub fn find_equivalent_with_context(
+        &self,
+        bot_id: &str,
+        input_mint: &str,
+        output_mint: &str,
+        in_amount: u64,
+        mode: Option<&str>,
+        strategy_version: Option<&str>,
+    ) -> Option<String> {
+        for (id, intent) in &self.intents {
+            if self.is_intent_equivalent(
+                intent, bot_id, input_mint, output_mint, in_amount, mode, strategy_version
+            ) {
+                return Some(id.clone());
+            }
+        }
+        None
+    }
+    
+    /// Internal equivalence check logic
+    fn is_intent_equivalent(
+        &self,
+        intent: &TradeIntent,
+        bot_id: &str,
+        input_mint: &str,
+        output_mint: &str,
+        in_amount: u64,
+        mode: Option<&str>,
+        strategy_version: Option<&str>,
+    ) -> bool {
+        // Must be recent (5 min window)
+        if intent.created_at.elapsed() >= Duration::from_secs(300) {
+            return false;
+        }
+        
+        // Core match criteria
+        if intent.bot_id != bot_id
+            || intent.input_mint != input_mint
+            || intent.output_mint != output_mint
+            || intent.in_amount != in_amount
+        {
+            return false;
+        }
+        
+        // Mode check (if provided)
+        if let Some(req_mode) = mode {
+            if intent.mode != req_mode {
+                return false; // Different mode = different intent
+            }
+        }
+        
+        // Strategy version check (if provided)
+        if let Some(req_version) = strategy_version {
+            if intent.strategy_version.as_deref() != Some(req_version) {
+                return false; // Different version = different intent
+            }
+        }
+        
+        // Check if intent is already finalized
+        match &intent.state {
+            TradeIntentState::Confirmed { .. } |
+            TradeIntentState::Failed { .. } => {
+                debug!("Found equivalent finalized intent: {}", intent.id);
+                return true;
+            }
+            _ => {
+                // Pending intent, check if stale
+                if intent.created_at.elapsed() > Duration::from_secs(60) {
+                    warn!("Found stale pending intent: {}", intent.id);
+                    return true;
+                }
+                // Recent pending intent - not equivalent, wait for it
+                false
+            }
+        }
     }
     
     /// Clean up old intents
@@ -277,5 +371,64 @@ mod tests {
             2_000_000_000,
         );
         assert!(not_equiv.is_none());
+    }
+    
+    #[test]
+    fn test_find_equivalent_with_mode() {
+        let mut registry = IntentRegistry::new();
+        
+        // Create paper trade intent
+        let intent_paper = registry.create_with_version(
+            "bot-123",
+            "SOL_MINT",
+            "USDC_MINT",
+            1_000_000_000,
+            "paper", // paper mode
+            "trend",
+            0.75,
+            "test",
+            Some("v1".to_string()),
+        );
+        
+        registry.update_state(
+            &intent_paper.id.to_string(),
+            TradeIntentState::Confirmed {
+                signature: "abc".to_string(),
+                out_amount: 100,
+            },
+        ).unwrap();
+        
+        // Same params but live mode - should NOT match (per principal engineer feedback)
+        let live_check = registry.find_equivalent_with_context(
+            "bot-123",
+            "SOL_MINT",
+            "USDC_MINT",
+            1_000_000_000,
+            Some("live"), // different mode
+            Some("v1"),
+        );
+        assert!(live_check.is_none(), "Paper and live should not be equivalent");
+        
+        // Same params, paper mode, different version - should NOT match
+        let version_check = registry.find_equivalent_with_context(
+            "bot-123",
+            "SOL_MINT",
+            "USDC_MINT",
+            1_000_000_000,
+            Some("paper"),
+            Some("v2"), // different version
+        );
+        assert!(version_check.is_none(), "Different versions should not be equivalent");
+        
+        // Exact match - should find equivalent
+        let exact_match = registry.find_equivalent_with_context(
+            "bot-123",
+            "SOL_MINT",
+            "USDC_MINT",
+            1_000_000_000,
+            Some("paper"),
+            Some("v1"),
+        );
+        assert!(exact_match.is_some(), "Exact match should be found");
     }
 }

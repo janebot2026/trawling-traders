@@ -273,6 +273,7 @@ impl HoldingsReconciler {
             );
             
             // Add with zero avg entry (don't know cost basis)
+            // Per principal engineer feedback: tag as unknown_cost_basis
             portfolio.positions.insert(
                 new.mint.clone(),
                 crate::portfolio::Position {
@@ -282,6 +283,7 @@ impl HoldingsReconciler {
                     avg_entry_price_usdc: rust_decimal::Decimal::ZERO,
                     current_price_usdc: None,
                     last_updated: chrono::Utc::now(),
+                    unknown_cost_basis: true, // Flag for PnL handling
                 }
             );
         }
