@@ -139,51 +139,94 @@ pub async fn create_bot(
     Ok(Json(bot))
 }
 
-/// Spawn bot droplet on DigitalOcean
-/// 
-/// Uses claw-spawn when available (v0.2.0 with sqlx 0.8 support)
-async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, config_id: Uuid) {
-    // TODO: When claw-spawn 0.2.0 is released:
-    // use claw_spawn::{DropletConfig, spawn_droplet};
-    // 
-    // let config = DropletConfig {
-    //     name: format!("trawler-{}", bot_id),
-    //     region: "nyc1",
-    //     size: "s-1vcpu-1gb",
-    //     image: "openclaw-base",
-    //     user_data: format!(
-    //         "#!/bin/bash\n/bin/openclaw-agent --bot-id={} --config-url=https://api.trawlingtraders.com/v1/bot/{}/config",
-    //         bot_id, bot_id
-    //     ),
-    // };
-    // 
-    // match spawn_droplet(config).await {
-    //     Ok(droplet) => {
-    //         // Update bot with droplet info
-    //         sqlx::query(
-    //             "UPDATE bots SET droplet_id = $1, ip_address = $2, status = 'online' WHERE id = $3"
-    //         )
-    //         .bind(droplet.id)
-    //         .bind(droplet.ip_address)
-    //         .bind(bot_id)
-    //         .execute(&state.db)
-    //         .await
-    //         .ok();
-    //     }
-    //     Err(e) => {
-    //         warn!("Failed to spawn droplet for bot {}: {}", bot_id, e);
-    //         sqlx::query("UPDATE bots SET status = 'error' WHERE id = $1")
-    //             .bind(bot_id)
-    //             .execute(&state.db)
-    //             .await
-    //             .ok();
-    //     }
-    // }
+/// Spawn bot droplet on DigitalOcean using claw-spawn
+async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, _config_id: Uuid) {
+    // Get DO token from env
+    let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
+        Ok(token) => token,
+        Err(_) => {
+            warn!("DIGITALOCEAN_TOKEN not set, skipping droplet provisioning for bot {}", bot_id);
+            return;
+        }
+    };
     
-    info!(
-        "Bot {}: DO provisioning queued (claw-spawn 0.2.0 required)",
-        bot_id
+    // Create DO client from claw-spawn
+    let do_client = match claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
+        Ok(client) => Arc::new(client),
+        Err(e) => {
+            warn!("Failed to create DO client for bot {}: {}", bot_id, e);
+            return;
+        }
+    };
+    
+    // Generate droplet name
+    let id_str = bot_id.to_string();
+    let droplet_name = format!("trawler-{}", &id_str[..8.min(id_str.len())]);
+    
+    // Build user data script
+    let control_plane_url = std::env::var("CONTROL_PLANE_URL")
+        .unwrap_or_else(|_| "https://api.trawlingtraders.com".to_string());
+    
+    let user_data = format!(r##"#!/bin/bash
+set -e
+
+export BOT_ID="{}"
+export CONTROL_PLANE_URL="{}"
+
+# Install OpenClaw agent
+curl -fsSL https://openclaw.ai/install.sh | bash
+
+# Configure agent
+cat > /etc/openclaw/agent.toml << 'EOFCFG'
+[agent]
+name = "trawler-{}"
+mode = "bot"
+
+[sync]
+config_url = "{}/v1/bot/{}/config"
+heartbeat_url = "{}/v1/bot/{}/heartbeat"
+events_url = "{}/v1/bot/{}/events"
+interval_secs = 30
+EOFCFG
+
+# Start agent
+systemctl enable openclaw-agent
+systemctl start openclaw-agent
+"##, 
+        bot_id,
+        control_plane_url,
+        bot_name,
+        control_plane_url, bot_id,
+        control_plane_url, bot_id,
+        control_plane_url, bot_id
     );
+    
+    // Create droplet request
+    let droplet_req = claw_spawn::domain::DropletCreateRequest {
+        name: droplet_name,
+        region: "nyc3".to_string(),
+        size: "s-1vcpu-2gb".to_string(),
+        image: "ubuntu-22-04-x64".to_string(),
+        user_data,
+        tags: vec!["trawling-traders".to_string(), format!("bot-{}", bot_id)],
+    };
+    
+    // Create droplet
+    match do_client.create_droplet(droplet_req).await {
+        Ok(droplet) => {
+            info!(
+                "Bot {}: Created droplet {} (id: {}), waiting for active...",
+                bot_id, droplet.name, droplet.id
+            );
+            
+            // TODO: Update bot with droplet_id in DB
+            // This requires passing the DB pool to this async task
+            // For now, just log success
+        }
+        Err(e) => {
+            warn!("Bot {}: Failed to create droplet: {}", bot_id, e);
+        }
+    }
 }
 
 /// GET /bots/:id - Get bot details with config
@@ -351,8 +394,7 @@ pub async fn bot_action(
     
     info!("Bot {} action: {:?} -> {}", bot_id, req.action, new_status);
     
-    // TODO: Trigger actual action (pause container, redeploy droplet, etc.)
-    // This will use claw-spawn for Destroy/Redeploy actions
+    // TODO: Trigger actual action via claw-spawn for Destroy/Redeploy
     
     Ok(StatusCode::OK)
 }

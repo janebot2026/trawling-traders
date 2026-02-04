@@ -60,8 +60,8 @@ bigdecimal = { version = "0.4", features = ["serde"] }
 # Cedros Pay integration
 cedros-pay = "0.1.0"
 
-# DigitalOcean provisioning - stub only until 0.2.0 released
-# claw-spawn = "0.1.0"  # Disabled: sqlx 0.7 vs 0.8 conflict
+# DigitalOcean provisioning - SQLx 0.8 compatible
+claw-spawn = "0.1.1"
 
 # Shared types
 data-retrieval = { path = "../data-retrieval" }
