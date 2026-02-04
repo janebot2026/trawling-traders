@@ -1,0 +1,1 @@
+cargo:rustc-env=MIME_TYPES_GENERATED_PATH=/home/jane/workspace/trawling-traders/services/control-plane/target/debug/build/mime_guess-da98dbcaa4a26a49/out/mime_types_generated.rs

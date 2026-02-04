@@ -57,8 +57,8 @@ base64 = "0.21"
 rust_decimal = { version = "1.40", features = ["serde", "maths"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 
-# Cedros Pay integration
-cedros-pay = "0.1.0"
+# Cedros Pay integration - v1.1.0 with SQLx 0.8 support
+cedros-pay = "1.1.0"
 
 # DigitalOcean provisioning - SQLx 0.8 compatible
 claw-spawn = "0.1.1"
