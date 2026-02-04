@@ -49,23 +49,16 @@ setup: ## Check/install dependencies
 	@echo ""
 	@echo "$(GREEN)✅ Setup complete!$(RESET)"
 
-db: ## Start PostgreSQL database
+db: ## Start PostgreSQL database (Docker)
 	@echo "$(BLUE)🐘 Starting PostgreSQL...$(RESET)"
-	@if pg_isready -q 2>/dev/null; then \
-		echo "$(GREEN)PostgreSQL already running$(RESET)"; \
-	elif command -v brew >/dev/null 2>&1; then \
-		brew services start postgresql@16 2>/dev/null || brew services start postgresql 2>/dev/null || echo "$(YELLOW)⚠️  Could not start PostgreSQL via brew$(RESET)"; \
-	elif command -v pg_ctl >/dev/null 2>&1; then \
-		pg_ctl start -D "$${PGDATA:-/var/lib/postgresql/data}" -l /tmp/postgres.log 2>/dev/null || echo "$(YELLOW)⚠️  Could not start PostgreSQL via pg_ctl$(RESET)"; \
-	else \
-		echo "$(YELLOW)⚠️  Please start PostgreSQL manually$(RESET)"; \
-	fi
+	@docker compose up -d postgres
+	@echo "$(YELLOW)Waiting for PostgreSQL to be ready...$(RESET)"
+	@until docker compose exec -T postgres pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
 	@echo "$(GREEN)✓ PostgreSQL started$(RESET)"
 
 migrate: ## Run database migrations
 	@echo "$(BLUE)🔄 Running migrations...$(RESET)"
-	@sleep 2  # Give postgres time to be ready
-	cd services/control-plane && cargo sqlx migrate run --database-url postgres://postgres:postgres@localhost/trawling_traders || (echo "$(YELLOW)⚠️  Creating database first...$(RESET)" && createdb -U postgres trawling_traders && cargo sqlx migrate run --database-url postgres://postgres:postgres@localhost/trawling_traders)
+	cd services/control-plane && cargo sqlx migrate run --database-url postgres://postgres:postgres@localhost:5432/trawling_traders
 	@echo "$(GREEN)✓ Migrations complete$(RESET)"
 
 dev: ## Show service startup commands
@@ -132,18 +125,14 @@ clean: ## Clean build artifacts
 stop: ## Stop all services and database
 	@echo "$(BLUE)🛑 Stopping services...$(RESET)"
 	-tmux kill-session -t tt 2>/dev/null || true
-	@if command -v brew >/dev/null 2>&1; then \
-		brew services stop postgresql@16 2>/dev/null || brew services stop postgresql 2>/dev/null || true; \
-	elif command -v pg_ctl >/dev/null 2>&1; then \
-		pg_ctl stop -D "$${PGDATA:-/var/lib/postgresql/data}" 2>/dev/null || true; \
-	fi
+	-docker compose down 2>/dev/null || true
 	@echo "$(GREEN)✓ Services stopped$(RESET)"
 
 status: ## Check service status
 	@echo "$(BLUE)📊 Service Status:$(RESET)"
 	@echo ""
-	@printf "PostgreSQL:           "
-	@pg_isready -q 2>/dev/null && echo "$(GREEN)up ✓$(RESET)" || echo "$(RED)down ✗$(RESET)"
+	@printf "PostgreSQL (Docker):  "
+	@docker compose exec -T postgres pg_isready -U postgres >/dev/null 2>&1 && echo "$(GREEN)up ✓$(RESET)" || echo "$(RED)down ✗$(RESET)"
 	@printf "Data Retrieval:8080:  "
 	@curl -s http://localhost:8080/healthz > /dev/null 2>&1 && echo "$(GREEN)up ✓$(RESET)" || echo "$(RED)down ✗$(RESET)"
 	@printf "Control Plane:3000:   "
