@@ -11,6 +11,7 @@ pub mod middleware;
 pub mod cedros;
 pub mod secrets;
 pub mod observability;
+pub mod provisioning;
 
 use std::sync::Arc;
 use axum::{
@@ -19,6 +20,7 @@ use axum::{
 };
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
+use tokio::sync::Semaphore;
 
 pub use models::*;
 pub use db::Db;
@@ -33,6 +35,8 @@ pub struct AppState {
     pub metrics: MetricsCollector,
     pub rate_limiter: middleware::rate_limit::RateLimiter,
     pub bot_rate_limiter: middleware::rate_limit::RateLimiter,
+    /// Concurrency limit for droplet provisioning (max 3 concurrent)
+    pub droplet_semaphore: Arc<Semaphore>,
 }
 
 impl AppState {
@@ -43,6 +47,7 @@ impl AppState {
             metrics: MetricsCollector::new(),
             rate_limiter: middleware::rate_limit::RateLimiter::new(60, 100),
             bot_rate_limiter: middleware::rate_limit::RateLimiter::new(60, 120),
+            droplet_semaphore: Arc::new(Semaphore::new(3)), // Max 3 concurrent provisions
         }
     }
 }

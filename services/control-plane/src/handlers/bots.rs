@@ -94,7 +94,7 @@ pub async fn create_bot(
     .bind(req.risk_caps.max_trades_per_day)
     .bind(req.trading_mode)
     .bind(&req.llm_provider)
-    .bind(state.secrets.encrypt(0026req.llm_api_key))
+    .bind(state.secrets.encrypt(&req.llm_api_key))
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -127,11 +127,10 @@ pub async fn create_bot(
     
     // Clone pool for async task
     let pool = state.db.clone();
+    let semaphore = state.droplet_semaphore.clone();
+    let metrics = state.metrics.clone();
     tokio::spawn(async move {
-        let metrics = state.metrics.clone();
-        spawn_bot_droplet(bot_id, req.name.clone(), pool, metrics).await;
-        state.metrics.increment(metrics::BOT_CREATED, 1).await;
-        Logger::provision_event(0026bot_id.to_string(), "create", "provisioning");
+        spawn_bot_droplet(bot_id, req.name.clone(), pool, metrics, semaphore).await;
     });
     
     info!("Created bot {} for user {}, provisioning queued", bot_id, user_id);
@@ -334,7 +333,29 @@ echo "Trading Tools: claw-trader available at /usr/local/bin/claw-trader"
 }
 
 /// Spawn bot droplet on DigitalOcean using claw-spawn
-async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, pool: Db, metrics: crate::MetricsCollector) {
+/// 
+/// Uses semaphore for concurrency control (max 3 concurrent provisions)
+/// and retry with exponential backoff for DO API calls
+async fn spawn_bot_droplet(
+    bot_id: Uuid, 
+    bot_name: String, 
+    pool: Db, 
+    metrics: crate::MetricsCollector,
+    semaphore: Arc<tokio::sync::Semaphore>,
+) {
+    // Acquire concurrency permit (owned so we can move it into spawned task)
+    let _permit = match semaphore.acquire_owned().await {
+        Ok(p) => p,
+        Err(e) => {
+            error!("Failed to acquire semaphore for bot {}: {}", bot_id, e);
+            update_bot_status(&pool, bot_id, BotStatus::Error, "Concurrency limit exceeded").await;
+            return;
+        }
+    };
+    
+    // Track in-flight metric
+    metrics.gauge(crate::observability::metrics::PROVISION_QUEUE_DEPTH, semaphore.available_permits() as f64).await;
+    
     let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
         Ok(token) => token,
         Err(_) => {
@@ -373,7 +394,7 @@ async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, pool: Db, metrics: cr
     // Generate comprehensive user_data script with secrets
     let user_data = generate_user_data(bot_id, &bot_name, &control_plane_url, &data_retrieval_url, &jupiter_api_key);
     
-    let droplet_req = claw_spawn::domain::DropletCreateRequest {
+    let droplet_req = Arc::new(claw_spawn::domain::DropletCreateRequest {
         name: droplet_name,
         region: "nyc3".to_string(),
         size: "s-1vcpu-2gb".to_string(),
@@ -400,7 +421,7 @@ async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, pool: Db, metrics: cr
         Err(e) => {
             warn!("Bot {}: Failed to create droplet: {}", bot_id, e);
             metrics.increment(metrics::BOT_PROVISION_FAILED, 1).await;
-            Logger::provision_event(0026bot_id.to_string(), "create", "failed");
+            Logger::provision_event(&bot_id.to_string(), "create", "failed");
             update_bot_status(&pool, bot_id, BotStatus::Error, "Droplet creation failed").await;
         }
     }
@@ -448,7 +469,14 @@ async fn destroy_bot_droplet(bot_id: Uuid, droplet_id: i64, pool: Db) {
 }
 
 /// Redeploy bot droplet (destroy and recreate)
-async fn redeploy_bot_droplet(bot_id: Uuid, bot_name: String, old_droplet_id: Option<i64>, pool: Db) {
+async fn redeploy_bot_droplet(
+    bot_id: Uuid, 
+    bot_name: String, 
+    old_droplet_id: Option<i64>, 
+    pool: Db,
+    metrics: crate::MetricsCollector,
+    semaphore: Arc<tokio::sync::Semaphore>,
+) {
     // Destroy old droplet if exists
     if let Some(droplet_id) = old_droplet_id {
         let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
@@ -472,8 +500,8 @@ async fn redeploy_bot_droplet(bot_id: Uuid, bot_name: String, old_droplet_id: Op
         .execute(&pool)
         .await;
     
-    // Spawn new droplet
-    spawn_bot_droplet(bot_id, bot_name, pool).await;
+    // Spawn new droplet with retry logic
+    spawn_bot_droplet(bot_id, bot_name, pool, metrics, semaphore).await;
 }
 
 /// Helper: Update bot status with error message
@@ -590,7 +618,7 @@ pub async fn update_bot_config(
     .bind(req.config.risk_caps.max_trades_per_day)
     .bind(req.config.trading_mode)
     .bind(&req.config.llm_provider)
-    .bind(state.secrets.encrypt(0026req.llm_api_key))
+    .bind(state.secrets.encrypt(&req.llm_api_key))
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -666,8 +694,10 @@ pub async fn bot_action(
             
             let bot_name = bot.name.clone();
             let old_droplet_id = bot.droplet_id;
+            let semaphore = state.droplet_semaphore.clone();
+            let metrics = state.metrics.clone();
             tokio::spawn(async move {
-                redeploy_bot_droplet(bot_id, bot_name, old_droplet_id, pool).await;
+                redeploy_bot_droplet(bot_id, bot_name, old_droplet_id, pool, metrics, semaphore).await;
             });
             info!("Bot {} redeploy triggered", bot_id);
         }

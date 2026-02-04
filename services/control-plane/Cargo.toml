@@ -62,6 +62,7 @@ cedros-pay = "1.1.0"
 
 # DigitalOcean provisioning - SQLx 0.8 compatible
 claw-spawn = "0.1.1"
+rand = "0.8"
 
 # Shared types
 data-retrieval = { path = "../data-retrieval" }
