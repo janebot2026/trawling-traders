@@ -1,4 +1,4 @@
-.PHONY: all help setup dev db migrate check test clean stop status
+.PHONY: all help setup dev db migrate check test clean stop status logs logs-data logs-control logs-mobile
 
 # Default target - runs everything
 all: setup db migrate dev-tmux
@@ -87,15 +87,18 @@ dev-tmux: ## Start all services in tmux panes (interactive)
 
 data: ## Start data retrieval service (port 8080)
 	@echo "$(GREEN)📊 Starting Data Retrieval on port 8080...$(RESET)"
-	cd services/data-retrieval && cargo run
+	@mkdir -p logs
+	cd services/data-retrieval && cargo run 2>&1 | tee ../../logs/data-retrieval.log
 
 control: ## Start control plane API (port 3000)
 	@echo "$(GREEN)🎛️  Starting Control Plane on port 3000...$(RESET)"
-	cd services/control-plane && DATABASE_URL=$${DATABASE_URL:-postgres://postgres:postgres@localhost/trawling_traders} cargo run
+	@mkdir -p logs
+	cd services/control-plane && DATABASE_URL=$${DATABASE_URL:-postgres://postgres:postgres@localhost/trawling_traders} cargo run 2>&1 | tee ../../logs/control-plane.log
 
 mobile: ## Start mobile app
 	@echo "$(GREEN)📱 Starting Mobile App...$(RESET)"
-	cd apps/mobile && npm run start
+	@mkdir -p logs
+	cd apps/mobile && npm run start 2>&1 | tee ../../logs/mobile.log
 
 bot-runner: ## Run bot-runner locally for testing
 	@echo "$(GREEN)🤖 Starting Bot Runner...$(RESET)"
@@ -140,3 +143,16 @@ status: ## Check service status
 	@echo ""
 	@echo "$(YELLOW)tmux sessions:$(RESET)"
 	@tmux ls 2>/dev/null | grep tt || echo "  (none)"
+
+logs: ## Tail all service logs
+	@echo "$(BLUE)📋 Tailing all logs (Ctrl+C to stop)...$(RESET)"
+	@tail -f logs/*.log 2>/dev/null || echo "$(YELLOW)No logs yet. Run 'make' first.$(RESET)"
+
+logs-data: ## View data retrieval logs
+	@tail -f logs/data-retrieval.log 2>/dev/null || echo "$(YELLOW)No data-retrieval logs yet.$(RESET)"
+
+logs-control: ## View control plane logs
+	@tail -f logs/control-plane.log 2>/dev/null || echo "$(YELLOW)No control-plane logs yet.$(RESET)"
+
+logs-mobile: ## View mobile app logs
+	@tail -f logs/mobile.log 2>/dev/null || echo "$(YELLOW)No mobile logs yet.$(RESET)"
