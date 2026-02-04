@@ -1,0 +1,38 @@
+[package]
+name = "bot-runner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Tracing
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Decimal for prices
+rust_decimal = { version = "1.40", features = ["serde", "maths"] }
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Config
+config = "0.13"
+
+[dev-dependencies]
+tokio-test = "0.4"
