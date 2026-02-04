@@ -9,6 +9,8 @@ pub mod handlers {
 pub mod db;
 pub mod middleware;
 pub mod cedros;
+pub mod secrets;
+pub mod observability;
 
 use std::sync::Arc;
 use axum::{
@@ -20,11 +22,29 @@ use tower_http::trace::TraceLayer;
 
 pub use models::*;
 pub use db::Db;
+pub use secrets::SecretsManager;
+pub use observability::{MetricsCollector, Logger};
 
 /// Application state shared across handlers
 #[derive(Clone)]
 pub struct AppState {
     pub db: Db,
+    pub secrets: SecretsManager,
+    pub metrics: MetricsCollector,
+    pub rate_limiter: middleware::rate_limit::RateLimiter,
+    pub bot_rate_limiter: middleware::rate_limit::RateLimiter,
+}
+
+impl AppState {
+    pub fn new(db: Db) -> Self {
+        Self {
+            db,
+            secrets: SecretsManager::new(),
+            metrics: MetricsCollector::new(),
+            rate_limiter: middleware::rate_limit::RateLimiter::new(60, 100),
+            bot_rate_limiter: middleware::rate_limit::RateLimiter::new(60, 120),
+        }
+    }
 }
 
 /// Build the API router
@@ -34,16 +54,29 @@ pub async fn app(state: Arc<AppState>) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
     
-    // App-facing routes (require auth)
+    // App-facing routes (require auth + subscription + rate limit)
     let app_routes = Router::new()
         .route("/me", get(handlers::bots::get_current_user))
-        .route("/bots", get(handlers::bots::list_bots).post(handlers::bots::create_bot))
+        .route("/bots", get(handlers::bots::list_bots))
+        .route("/bots", post(handlers::bots::create_bot)
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                middleware::subscription::bot_create_limit_middleware
+            )))
         .route("/bots/:id", get(handlers::bots::get_bot))
         .route("/bots/:id/config", patch(handlers::bots::update_bot_config))
         .route("/bots/:id/actions", post(handlers::bots::bot_action))
         .route("/bots/:id/metrics", get(handlers::bots::get_metrics))
         .route("/bots/:id/events", get(handlers::bots::get_events))
         .route("/simulate-signal", post(handlers::simulate::simulate_signal))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::subscription::subscription_middleware
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::rate_limit::rate_limit_middleware
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::auth_middleware
@@ -58,10 +91,13 @@ pub async fn app(state: Arc<AppState>) -> Router {
         .route("/bot/:id/wallet", post(handlers::sync::report_wallet))
         .route("/bot/:id/heartbeat", post(handlers::sync::heartbeat))
         .route("/bot/:id/events", post(handlers::sync::ingest_events))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::rate_limit::bot_rate_limit_middleware
+        ))
         .with_state(state.clone());
     
     // Cedros Pay routes - try full integration, fallback to placeholder
-    // These routes have their own state (Cedros Pay internal)
     let pay_routes = match cedros::full_router(state.db.clone()).await {
         Ok(router) => {
             tracing::info!("Cedros Pay full integration active");
@@ -73,7 +109,7 @@ pub async fn app(state: Arc<AppState>) -> Router {
         }
     };
     
-    // Build combined router without state (each nested router has its own)
+    // Build combined router
     Router::new()
         .nest("/v1", app_routes)
         .nest("/v1", bot_routes)

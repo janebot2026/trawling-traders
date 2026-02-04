@@ -28,8 +28,12 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     info!("✓ Migrations applied");
     
-    // Create app state
-    let state = Arc::new(control_plane::AppState { db: db.clone() });
+    // Create app state with all components
+    let state = Arc::new(control_plane::AppState::new(db.clone()));
+    info!("✓ App state initialized (secrets: {}, metrics: {})", 
+        if state.secrets.is_encryption_active() { "encrypted" } else { "plaintext" },
+        "active"
+    );
     
     // Build router
     let app = build_router(state, db.clone()).await?;
@@ -62,15 +66,28 @@ async fn build_router(
         .allow_methods(Any)
         .allow_headers(Any);
     
-    // App-facing routes (require auth)
+    // App-facing routes (require auth + subscription + rate limit)
     let app_routes = Router::new()
         .route("/me", get(control_plane::handlers::bots::get_current_user))
-        .route("/bots", get(control_plane::handlers::bots::list_bots).post(control_plane::handlers::bots::create_bot))
+        .route("/bots", get(control_plane::handlers::bots::list_bots))
+        .route("/bots", post(control_plane::handlers::bots::create_bot)
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                control_plane::middleware::subscription::bot_create_limit_middleware
+            )))
         .route("/bots/:id", get(control_plane::handlers::bots::get_bot))
         .route("/bots/:id/config", patch(control_plane::handlers::bots::update_bot_config))
         .route("/bots/:id/actions", post(control_plane::handlers::bots::bot_action))
         .route("/bots/:id/metrics", get(control_plane::handlers::bots::get_metrics))
         .route("/bots/:id/events", get(control_plane::handlers::bots::get_events))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            control_plane::middleware::subscription::subscription_middleware
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            control_plane::middleware::rate_limit::rate_limit_middleware
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             control_plane::middleware::auth_middleware
@@ -85,10 +102,13 @@ async fn build_router(
         .route("/bot/:id/wallet", post(control_plane::handlers::sync::report_wallet))
         .route("/bot/:id/heartbeat", post(control_plane::handlers::sync::heartbeat))
         .route("/bot/:id/events", post(control_plane::handlers::sync::ingest_events))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            control_plane::middleware::rate_limit::bot_rate_limit_middleware
+        ))
         .with_state(state.clone());
     
     // Cedros Pay routes - try full integration, fallback to placeholder
-    // These have their own internal state
     let cedros_routes = match control_plane::cedros::full_router(pool).await {
         Ok(router) => {
             info!("✓ Cedros Pay full integration active");
@@ -101,7 +121,6 @@ async fn build_router(
     };
     
     // Build combined router
-    // Note: Each nested router has its own state, so we don't set global state
     let router = Router::new()
         .nest("/v1", app_routes)
         .nest("/v1", bot_routes)
