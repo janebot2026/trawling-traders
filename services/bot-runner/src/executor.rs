@@ -11,6 +11,7 @@ use tracing::{debug, error, info, warn};
 use crate::config::TradingMode;
 
 /// Trade executor using claw-trader-cli
+#[derive(Clone)]
 pub struct TradeExecutor {
     data_retrieval_url: String,
     solana_rpc_url: String,
@@ -53,7 +54,8 @@ impl TradeExecutor {
     }
 
     /// Run claw-trader command and parse JSON output
-    async fn run_claw_trader(&self, 
+    pub async fn run_claw_trader(
+        &self,
         args: &[&str],
     ) -> anyhow::Result<serde_json::Value> {
         let mut cmd = Command::new(&self.claw_trader_path);

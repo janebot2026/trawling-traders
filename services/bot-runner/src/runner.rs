@@ -1,6 +1,6 @@
 //! Bot Runner - Main orchestration loop
+use rust_decimal::prelude::ToPrimitive;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
@@ -8,12 +8,14 @@ use tracing::{debug, error, info, warn};
 
 use crate::amount::{get_tokens_for_focus, to_raw_amount, TokenInfo};
 use crate::client::{ControlPlaneClient, EventInput, MetricInput};
-use crate::config::{AssetFocus, BotConfig, TradingMode, AlgorithmMode, Strictness};
+use crate::config::{BotConfig, TradingMode, AlgorithmMode, Strictness};
 use crate::executor::{
     generate_breakout_signal, generate_reversion_signal, generate_trend_signal,
     TradeExecutor, TradeResult, TradeSide, TradingSignal,
 };
 use crate::intent::{IntentRegistry, TradeIntent, TradeIntentState};
+use crate::portfolio::{Portfolio, PortfolioSnapshot};
+use crate::reconciler::HoldingsReconciler;
 use crate::Config;
 
 /// Main bot runner that manages the trading loop
@@ -23,22 +25,25 @@ pub struct BotRunner {
     current_config: Option<BotConfig>,
     executor: Option<TradeExecutor>,
     intent_registry: IntentRegistry,
-    equity: rust_decimal::Decimal,
-    total_pnl: rust_decimal::Decimal,
+    portfolio: Portfolio,
+    reconciler: Option<HoldingsReconciler>,
     trade_count: u32,
 }
 
 impl BotRunner {
     /// Create new bot runner
     pub fn new(client: Arc<ControlPlaneClient>, config: Config) -> Self {
+        // Initialize portfolio with starting cash
+        let portfolio = Portfolio::new(rust_decimal::Decimal::from(10000));
+        
         Self {
             client,
             config,
             current_config: None,
             executor: None,
             intent_registry: IntentRegistry::new(),
-            equity: rust_decimal::Decimal::from(10000), // Starting equity
-            total_pnl: rust_decimal::Decimal::ZERO,
+            portfolio,
+            reconciler: None,
             trade_count: 0,
         }
     }
@@ -47,6 +52,7 @@ impl BotRunner {
     pub async fn run(mut self) -> anyhow::Result<()> {
         info!("Bot runner starting main loop...");
         info!("Keypair path: {:?}", self.config.keypair_path);
+        info!("Wallet address: {}", self.config.wallet_address);
 
         // Config polling interval (30 seconds)
         let mut config_interval = interval(Duration::from_secs(30));
@@ -56,6 +62,9 @@ impl BotRunner {
         
         // Trading interval (60 seconds - check for signals every minute)
         let mut trading_interval = interval(Duration::from_secs(60));
+        
+        // Reconciliation interval (5 minutes)
+        let mut reconcile_interval = interval(Duration::from_secs(300));
         
         // Intent cleanup interval (5 minutes)
         let mut cleanup_interval = interval(Duration::from_secs(300));
@@ -80,6 +89,11 @@ impl BotRunner {
                 _ = trading_interval.tick() => {
                     if let Err(e) = self.run_trading_cycle().await {
                         error!("Trading cycle error: {}", e);
+                    }
+                }
+                _ = reconcile_interval.tick() => {
+                    if let Err(e) = self.reconcile_holdings().await {
+                        error!("Reconciliation error: {}", e);
                     }
                 }
                 _ = cleanup_interval.tick() => {
@@ -133,7 +147,14 @@ impl BotRunner {
                 self.config.keypair_path.clone(),
             ) {
                 Ok(executor) => {
+                    // Initialize reconciler with same executor
+                    let reconciler = HoldingsReconciler::new(
+                        executor.clone(),
+                        self.config.wallet_address.clone(),
+                    );
+                    
                     self.executor = Some(executor);
+                    self.reconciler = Some(reconciler);
                 }
                 Err(e) => {
                     error!("Failed to initialize executor: {}", e);
@@ -172,6 +193,67 @@ impl BotRunner {
         Ok(())
     }
 
+    /// Reconcile holdings with on-chain state
+    async fn reconcile_holdings(
+        &mut self,
+    ) -> anyhow::Result<()> {
+        // Take ownership of reconciler temporarily to avoid borrow issues
+        if let Some(mut reconciler) = self.reconciler.take() {
+            info!("Running holdings reconciliation...");
+            
+            match reconciler.reconcile(&self.portfolio).await {
+                Ok(result) => {
+                    // Send portfolio snapshot
+                    let snapshot = self.portfolio.snapshot();
+                    self.send_portfolio_snapshot(&snapshot).await;
+                    
+                    // Apply corrections if significant discrepancies
+                    if !result.discrepancies.is_empty() || !result.missing_on_chain.is_empty() {
+                        info!("Applying {} corrections to portfolio", 
+                            result.discrepancies.len() + result.missing_on_chain.len());
+                        reconciler.apply_to_portfolio(&result, &mut self.portfolio);
+                    }
+                }
+                Err(e) => {
+                    warn!("Reconciliation failed: {}", e);
+                }
+            }
+            
+            // Put reconciler back
+            self.reconciler = Some(reconciler);
+        }
+        Ok(())
+    }
+
+    /// Send portfolio snapshot to control plane
+    async fn send_portfolio_snapshot(
+        &self,
+        snapshot: &PortfolioSnapshot,
+    ) {
+        let metadata = serde_json::json!({
+            "cash_usdc": snapshot.cash_usdc.to_string(),
+            "total_equity": snapshot.total_equity.to_string(),
+            "unrealized_pnl": snapshot.unrealized_pnl.to_string(),
+            "position_count": snapshot.positions.len(),
+        });
+
+        let event = EventInput {
+            event_type: "portfolio_snapshot".to_string(),
+            message: format!(
+                "Portfolio: ${} equity, ${} unrealized PnL, {} positions",
+                snapshot.total_equity,
+                snapshot.unrealized_pnl,
+                snapshot.positions.len()
+            ),
+            metadata: Some(metadata),
+            timestamp: chrono::Utc::now(),
+        };
+
+        if let Err(e) = self.client.send_events(vec![event]).await {
+            warn!("Failed to send portfolio snapshot: {}", e);
+        }
+    }
+
     /// Run one trading cycle - check signals and execute trades
     async fn run_trading_cycle(
         &mut self,
@@ -204,11 +286,8 @@ impl BotRunner {
                 Ok(Some((intent, result))) => {
                     self.trade_count += 1;
                     
-                    // Update PnL tracking
-                    if let Some(pnl) = result.pnl {
-                        self.total_pnl += pnl;
-                        self.equity += pnl;
-                    }
+                    // Update portfolio based on trade result
+                    self.update_portfolio_from_trade(&result, &token, &usdc_info);
                     
                     // Report trade
                     self.report_trade(&intent, &result, config.trading_mode).await;
@@ -230,6 +309,67 @@ impl BotRunner {
         Ok(())
     }
 
+    /// Update portfolio based on trade result
+    fn update_portfolio_from_trade(
+        &mut self,
+        result: &TradeResult,
+        token: &TokenInfo,
+        usdc: &TokenInfo,
+    ) {
+        if !result.success {
+            return;
+        }
+
+        // Determine if this was a buy or sell
+        let is_buy = result.input_mint == usdc.mint;
+
+        if is_buy {
+            // Bought token with USDC
+            // Reduce cash
+            let spent = crate::amount::from_raw_amount(result.in_amount, usdc.decimals);
+            let new_cash = self.portfolio.cash_usdc_raw.saturating_sub(result.in_amount);
+            self.portfolio.update_cash(new_cash, "buy trade");
+            
+            // Add/update position
+            let received = result.out_amount;
+            let price = spent / crate::amount::from_raw_amount(received, token.decimals);
+            self.portfolio.update_position(
+                &token.mint,
+                &token.symbol,
+                received,
+                price,
+                token.decimals,
+            );
+        } else {
+            // Sold token for USDC
+            // Remove/reduce position
+            let sold = result.in_amount;
+            let current_pos = self.portfolio.get_position(&token.mint)
+                .map(|p| p.quantity_raw)
+                .unwrap_or(0);
+            
+            if sold >= current_pos {
+                // Full close
+                self.portfolio.close_position(&token.mint,
+                    token.decimals
+                );
+            } else {
+                // Partial close
+                self.portfolio.update_position(
+                    &token.mint,
+                    &token.symbol,
+                    current_pos - sold,
+                    rust_decimal::Decimal::ZERO, // Keep same avg entry
+                    token.decimals,
+                );
+            }
+            
+            // Add to cash
+            let received_usdc = self.portfolio.cash_usdc_raw + result.out_amount;
+            self.portfolio.update_cash(received_usdc, "sell trade");
+        }
+    }
+
     /// Evaluate a token and execute trade if signal is strong enough
     async fn evaluate_and_trade(
         &mut self,
@@ -243,13 +383,22 @@ impl BotRunner {
         // Calculate position size
         let max_position_pct = rust_decimal::Decimal::from(config.risk_caps.max_position_size_percent)
             / rust_decimal::Decimal::from(100);
-        let position_value_usd = self.equity * max_position_pct;
+        
+        // Get current equity from portfolio snapshot
+        let snapshot = self.portfolio.snapshot();
+        let position_value_usd = snapshot.total_equity * max_position_pct;
         
         // Convert to raw USDC amount
         let usdc_amount = to_raw_amount(position_value_usd, usdc.decimals)
             .map_err(|e| anyhow::anyhow!("Invalid position size: {}", e))?;
         
         if usdc_amount == 0 {
+            return Ok(None);
+        }
+
+        // Check if we have sufficient balance for a buy
+        if !self.portfolio.can_spend_usdc(usdc_amount) {
+            debug!("Insufficient USDC balance for trade");
             return Ok(None);
         }
 
@@ -302,6 +451,23 @@ impl BotRunner {
 
         if !should_trade {
             return Ok(None);
+        }
+
+        // Check if we can sell (for sell signals)
+        if side == TradeSide::Sell {
+            let token_qty = self.portfolio.get_position(&token.mint)
+                .map(|p| p.quantity_raw)
+                .unwrap_or(0);
+            
+            // Estimate how much we'd need to sell
+            let estimated_qty = (position_value_usd / price)
+                .to_u64()
+                .unwrap_or(0);
+            
+            if token_qty < estimated_qty {
+                debug!("Insufficient {} balance to sell", token.symbol);
+                return Ok(None);
+            }
         }
 
         // Check price impact
@@ -410,11 +576,14 @@ impl BotRunner {
             "configuring"
         };
 
+        // Get portfolio snapshot for metrics
+        let snapshot = self.portfolio.snapshot();
+
         // Build metrics
         let metrics = Some(vec![MetricInput {
             timestamp: chrono::Utc::now(),
-            equity: self.equity,
-            pnl: self.total_pnl,
+            equity: snapshot.total_equity,
+            pnl: snapshot.unrealized_pnl + snapshot.realized_pnl,
         }]);
 
         let response = self.client.heartbeat(status, metrics).await?;

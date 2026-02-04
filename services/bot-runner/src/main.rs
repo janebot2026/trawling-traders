@@ -6,6 +6,7 @@
 //! 3. Runs trading algorithms (Brain)
 //! 4. Executes trades on Solana via claw-trader-cli
 //! 5. Reports heartbeats/metrics back to control-plane
+//! 6. Reconciles holdings with on-chain state
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,10 +18,13 @@ mod client;
 mod config;
 mod executor;
 mod intent;
+mod portfolio;
+mod reconciler;
 mod runner;
 
 pub use client::ControlPlaneClient;
 pub use config::BotConfig;
+pub use portfolio::Portfolio;
 pub use runner::BotRunner;
 
 /// Bot runner entry point
@@ -60,6 +64,7 @@ pub struct Config {
     pub solana_rpc_url: String,
     pub agent_wallet: Option<String>,
     pub keypair_path: PathBuf,
+    pub wallet_address: String,
 }
 
 fn load_config() -> anyhow::Result<Config> {
@@ -83,6 +88,11 @@ fn load_config() -> anyhow::Result<Config> {
     let keypair_path = std::env::var("AGENT_WALLET_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/opt/trawling-traders/.config/solana/id.json"));
+    
+    // Get wallet address from env or derive from keypair
+    let wallet_address = std::env::var("WALLET_ADDRESS")
+        .or_else(|_| agent_wallet.clone().ok_or_else(|| anyhow::anyhow!("No wallet address")))
+        .unwrap_or_else(|_| "unknown".to_string());
 
     Ok(Config {
         bot_id,
@@ -91,6 +101,7 @@ fn load_config() -> anyhow::Result<Config> {
         solana_rpc_url,
         agent_wallet,
         keypair_path,
+        wallet_address,
     })
 }
 

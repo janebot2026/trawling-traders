@@ -1,6 +1,5 @@
 //! Bot Configuration
 
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,6 +17,7 @@ pub struct BotConfig {
     pub strictness: Strictness,
     pub trading_mode: TradingMode,
     pub risk_caps: RiskCaps,
+    pub execution: ExecutionConfig,
     pub llm_provider: String,
     pub llm_api_key: String,
 }
@@ -44,6 +44,7 @@ impl BotConfig {
                 max_drawdown_percent: config.agent_config.max_drawdown_percent,
                 max_trades_per_day: config.agent_config.max_trades_per_day,
             },
+            execution: config.execution.unwrap_or_default(),
             llm_provider: config.llm_config.provider,
             llm_api_key: config.llm_config.api_key,
         }
@@ -56,6 +57,8 @@ struct BotConfigInner {
     agent_config: AgentConfigInner,
     #[serde(rename = "trading_params")]
     trading_params: TradingParamsInner,
+    #[serde(rename = "execution")]
+    execution: Option<ExecutionConfig>,
     #[serde(rename = "llm_config")]
     llm_config: LlmConfigInner,
 }
@@ -130,10 +133,43 @@ pub enum TradingMode {
     Live,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 pub struct RiskCaps {
     pub max_position_size_percent: i32,
     pub max_daily_loss_usd: i32,
     pub max_drawdown_percent: i32,
     pub max_trades_per_day: i32,
 }
+
+/// Execution configuration (impact, slippage, timeouts)
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
+pub struct ExecutionConfig {
+    /// Max price impact percentage (e.g., 2.0 for 2%)
+    #[serde(default = "default_max_price_impact_pct")]
+    pub max_price_impact_pct: f64,
+    /// Max slippage in basis points (e.g., 100 for 1%)
+    #[serde(default = "default_max_slippage_bps")]
+    pub max_slippage_bps: u32,
+    /// Confirmation timeout in seconds
+    #[serde(default = "default_confirm_timeout_secs")]
+    pub confirm_timeout_secs: u64,
+    /// Quote cache TTL in seconds
+    #[serde(default = "default_quote_cache_secs")]
+    pub quote_cache_secs: u64,
+}
+
+impl Default for ExecutionConfig {
+    fn default() -> Self {
+        Self {
+            max_price_impact_pct: default_max_price_impact_pct(),
+            max_slippage_bps: default_max_slippage_bps(),
+            confirm_timeout_secs: default_confirm_timeout_secs(),
+            quote_cache_secs: default_quote_cache_secs(),
+        }
+    }
+}
+
+fn default_max_price_impact_pct() -> f64 { 2.0 }
+fn default_max_slippage_bps() -> u32 { 100 }
+fn default_confirm_timeout_secs() -> u64 { 60 }
+fn default_quote_cache_secs() -> u64 { 10 }
