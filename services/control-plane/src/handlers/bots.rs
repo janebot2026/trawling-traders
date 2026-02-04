@@ -159,46 +159,46 @@ echo "Bot Name: $BOT_NAME"
 echo "Control Plane: $CONTROL_PLANE_URL"
 
 # Update system
-echo "[1/10] Updating system packages..."
+echo "[1/9] Updating system packages..."
 apt-get update
 apt-get install -y curl git build-essential pkg-config libssl-dev nodejs npm
 
 # Install Rust
-echo "[2/10] Installing Rust..."
+echo "[2/9] Installing Rust..."
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
 # Install OpenClaw
-echo "[3/10] Installing OpenClaw..."
+echo "[3/9] Installing OpenClaw..."
 curl -fsSL https://openclaw.ai/install.sh | bash
 
 # Create workspace directory
 mkdir -p "$WORKSPACE_DIR"
 cd "$WORKSPACE_DIR"
 
-# Install downrigger (trading-focused agent setup)
-echo "[4/10] Installing downrigger..."
+# Install downrigger (trading-focused agent setup tool)
+echo "[4/9] Installing downrigger..."
 git clone https://github.com/janebot2026/downrigger.git
 cd downrigger
 npm install
 npm link
 cd "$WORKSPACE_DIR"
 
-# Run downrigger init for trading agent configuration
-echo "[5/10] Running downrigger init..."
+# Run downrigger init for trading agent configuration (one-time setup)
+echo "[5/9] Running downrigger init..."
 downrigger init --workspace-dir "$WORKSPACE_DIR/workspace" --agent-name "$BOT_NAME" --yes
 
 # Install claw-trader-cli (the trading execution tool)
-echo "[6/10] Installing claw-trader-cli..."
+echo "[6/9] Installing claw-trader-cli..."
 git clone https://github.com/janebot2026/claw-trader-cli.git
 cd claw-trader-cli
 cargo build --release
 cp target/release/jup-cli /usr/local/bin/
-cp target/release/jup-cli /usr/local/bin/claw-trader
+ln -sf /usr/local/bin/jup-cli /usr/local/bin/claw-trader
 cd "$WORKSPACE_DIR"
 
 # Configure claw-trader-cli for the bot
-echo "[7/10] Configuring claw-trader-cli..."
+echo "[7/9] Configuring claw-trader-cli..."
 mkdir -p "$WORKSPACE_DIR/.config/claw-trader"
 cat > "$WORKSPACE_DIR/.config/claw-trader/config.toml" << 'EOF'
 [api]
@@ -208,51 +208,27 @@ ultra_base_url = "https://api.jup.ag/ultra/v1"
 default_slippage_bps = 50
 max_slippage_bps = 100
 confirmation_commitment = "confirmed"
+paper_trading_default = true
 
 [agent]
 enabled = true
 auto_approve = false
-paper_trading_default = true
 EOF
 
 # Install bot-runner
-echo "[8/10] Installing bot-runner..."
+echo "[8/9] Installing bot-runner..."
 git clone https://github.com/janebot2026/trawling-traders.git
 cd trawling-traders/services/bot-runner
 cargo build --release
 cp target/release/bot-runner /usr/local/bin/
 cd "$WORKSPACE_DIR"
 
-# Create systemd service for downrigger (OpenClaw agent)
-echo "[9/10] Creating downrigger service..."
-cat > /etc/systemd/system/downrigger.service << 'EOFSERVICE'
-[Unit]
-Description=Trawling Traders Downrigger Agent
-After=network.target openclaw-agent.service
-Requires=openclaw-agent.service
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/trawling-traders/workspace
-Environment="BOT_ID={bot_id}"
-Environment="CONTROL_PLANE_URL={control_plane_url}"
-Environment="WORKSPACE_DIR=/opt/trawling-traders/workspace"
-Environment="CLAW_TRADER_CONFIG=/opt/trawling-traders/.config/claw-trader"
-ExecStart=/usr/local/bin/downrigger run
-Restart=always
-RestartSec=30
-
-[Install]
-WantedBy=multi-user.target
-EOFSERVICE
-
 # Create bot-runner systemd service
-echo "[10/10] Creating bot-runner service..."
+echo "[9/9] Creating bot-runner service..."
 cat > /etc/systemd/system/bot-runner.service << 'EOFSERVICE'
 [Unit]
 Description=Trawling Traders Bot Runner
-After=network.target downrigger.service
+After=network.target openclaw-agent.service
 
 [Service]
 Type=simple
@@ -263,6 +239,7 @@ Environment="DATA_RETRIEVAL_URL={control_plane_url}"
 Environment="SOLANA_RPC_URL=https://api.devnet.solana.com"
 Environment="RUST_LOG=info"
 Environment="CLAW_TRADER_PATH=/usr/local/bin/claw-trader"
+Environment="CLAW_TRADER_CONFIG=/opt/trawling-traders/.config/claw-trader"
 ExecStart=/usr/local/bin/bot-runner
 Restart=always
 RestartSec=10
@@ -279,8 +256,6 @@ curl -X POST "$CONTROL_PLANE_URL/v1/bot/{bot_id}/register" \
 
 # Enable and start services
 systemctl daemon-reload
-systemctl enable downrigger
-systemctl start downrigger
 systemctl enable bot-runner
 systemctl start bot-runner
 systemctl enable openclaw-agent
@@ -289,8 +264,9 @@ systemctl start openclaw-agent
 echo "=== Trawler Provisioning Complete ==="
 echo "Bot ID: $BOT_ID"
 echo "Status: online"
-echo "Services: downrigger (OpenClaw agent), bot-runner, openclaw-agent"
-echo "Trading Tools: claw-trader (jup-cli)"
+echo "Services: bot-runner, openclaw-agent"
+echo "Trading Tools: claw-trader (jup-cli) available at /usr/local/bin/claw-trader"
+echo "Setup Tool: downrigger (already ran init)"
 "##,
         bot_id, bot_name, control_plane_url,
         bot_id = bot_id,
