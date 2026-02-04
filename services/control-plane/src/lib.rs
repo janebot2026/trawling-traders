@@ -4,6 +4,7 @@ pub mod models;
 pub mod handlers {
     pub mod bots;
     pub mod sync;
+    pub mod simulate;
 }
 pub mod db;
 pub mod middleware;
@@ -18,7 +19,6 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 pub use models::*;
-pub use handlers::*;
 pub use db::Db;
 
 /// Application state shared across handlers
@@ -42,6 +42,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/bots/:id/actions", post(handlers::bots::bot_action))
         .route("/bots/:id/metrics", get(handlers::bots::get_metrics))
         .route("/bots/:id/events", get(handlers::bots::get_events))
+        .route("/simulate-signal", post(handlers::simulate::simulate_signal))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::auth_middleware

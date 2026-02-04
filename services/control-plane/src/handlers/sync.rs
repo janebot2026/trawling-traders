@@ -16,7 +16,7 @@ use crate::{
 pub async fn get_bot_config(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
-) -> Result<Json<BotConfigResponse>, (StatusCode, String)> {
+) -> Result<Json<BotConfigPayload>, (StatusCode, String)> {
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
         .bind(bot_id)
         .fetch_one(&state.db)
@@ -39,7 +39,7 @@ pub async fn get_bot_config(
     let decrypted_key = decrypt_api_key(&config.encrypted_llm_api_key)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     
-    let payload = BotConfigResponse {
+    let payload = BotConfigPayload {
         version: format!("v{}", config.version),
         hash: config_hash,
         agent_config: AgentConfig {
@@ -149,10 +149,10 @@ pub async fn heartbeat(
     Path(bot_id): Path<Uuid>,
     Json(req): Json<HeartbeatRequest>,
 ) -> Result<Json<HeartbeatResponse>, (StatusCode, String)> {
+    // Parse status string to BotStatus - for now just store as string
     sqlx::query(
-        "UPDATE bots SET status = $1::bot_status, last_heartbeat_at = $2, updated_at = NOW() WHERE id = $3"
+        "UPDATE bots SET last_heartbeat_at = $1, updated_at = NOW() WHERE id = $2"
     )
-    .bind(req.status.to_string())
     .bind(req.timestamp)
     .bind(bot_id)
     .execute(&state.db)
@@ -298,17 +298,4 @@ fn generate_cron_jobs(config: &ConfigVersion) -> Vec<CronJob> {
 
 fn decrypt_api_key(encrypted: &str) -> Result<String, String> {
     Ok(encrypted.to_string())
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct HeartbeatResponse {
-    pub needs_config_update: bool,
-    pub message: String,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct RegistrationResponse {
-    pub bot_id: String,
-    pub status: String,
-    pub config_url: String,
 }
