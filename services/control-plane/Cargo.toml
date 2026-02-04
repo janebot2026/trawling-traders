@@ -54,7 +54,7 @@ aes-gcm = "0.10"
 base64 = "0.21"
 
 # Decimal for prices - use rust_decimal for logic, bigdecimal for sqlx DB
-rust_decimal = { version = "1.40", features = ["serde"] }
+rust_decimal = { version = "1.40", features = ["serde", "maths"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 
 # Cedros Pay integration

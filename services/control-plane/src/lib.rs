@@ -1,3 +1,5 @@
+pub mod algorithms;
+pub mod brain;
 pub mod models;
 pub mod handlers {
     pub mod bots;
@@ -31,7 +33,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
     
-    // App-facing routes (require auth - protected by Cedros Login JWT)
+    // App-facing routes (require auth)
     let app_routes = Router::new()
         .route("/me", get(handlers::bots::get_current_user))
         .route("/bots", get(handlers::bots::list_bots).post(handlers::bots::create_bot))
@@ -45,7 +47,7 @@ pub fn app(state: Arc<AppState>) -> Router {
             middleware::auth_middleware
         ));
     
-    // Bot-facing routes (internal, from VPS - different auth mechanism)
+    // Bot-facing routes (internal, from VPS)
     let bot_routes = Router::new()
         .route("/bot/:id/register", post(handlers::sync::register_bot))
         .route("/bot/:id/config", get(handlers::sync::get_bot_config))
@@ -57,7 +59,7 @@ pub fn app(state: Arc<AppState>) -> Router {
     // Cedros Pay routes (payments and subscriptions)
     let cedros_routes = cedros::routes();
     
-    // Mount all routes under /v1/ (not /api/v1/ since domain is api.trawlingtraders.com)
+    // Mount all routes under /v1/
     Router::new()
         .nest("/v1", app_routes)
         .nest("/v1", bot_routes)
