@@ -4,18 +4,19 @@
 //! 1. Polls control-plane for configuration
 //! 2. Fetches price data from data-retrieval
 //! 3. Runs trading algorithms (Brain)
-//! 4. Executes trades on Solana
+//! 4. Executes trades on Solana via claw-trader-cli
 //! 5. Reports heartbeats/metrics back to control-plane
 
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::time::{interval, sleep};
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use uuid::Uuid;
 
+mod amount;
 mod client;
 mod config;
 mod executor;
+mod intent;
 mod runner;
 
 pub use client::ControlPlaneClient;
@@ -58,6 +59,7 @@ pub struct Config {
     pub data_retrieval_url: String,
     pub solana_rpc_url: String,
     pub agent_wallet: Option<String>,
+    pub keypair_path: PathBuf,
 }
 
 fn load_config() -> anyhow::Result<Config> {
@@ -76,6 +78,11 @@ fn load_config() -> anyhow::Result<Config> {
         .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
 
     let agent_wallet = std::env::var("AGENT_WALLET").ok();
+    
+    // Get keypair path from env or use default
+    let keypair_path = std::env::var("AGENT_WALLET_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/opt/trawling-traders/.config/solana/id.json"));
 
     Ok(Config {
         bot_id,
@@ -83,6 +90,7 @@ fn load_config() -> anyhow::Result<Config> {
         data_retrieval_url,
         solana_rpc_url,
         agent_wallet,
+        keypair_path,
     })
 }
 
