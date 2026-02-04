@@ -4,15 +4,17 @@ use axum::{
     Json,
 };
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use uuid::Uuid;
 use chrono::Utc;
+use sqlx::PgPool;
 
 use crate::{
     models::User,
     models::*,
     middleware::AuthContext,
     AppState,
+    db::Db,
 };
 
 /// GET /bots - List all bots for authenticated user
@@ -20,7 +22,6 @@ pub async fn list_bots(
     State(state): State<Arc<AppState>>,
     Extension(auth): Extension<AuthContext>,
 ) -> Result<Json<ListBotsResponse>, (StatusCode, String)> {
-    // Parse user_id from JWT (stored as string in auth context)
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
     
@@ -43,16 +44,13 @@ pub async fn create_bot(
     Extension(auth): Extension<AuthContext>,
     Json(req): Json<CreateBotRequest>,
 ) -> Result<Json<Bot>, (StatusCode, String)> {
-    // Validate request
     if let Err(errors) = req.validate() {
         return Err((StatusCode::BAD_REQUEST, errors.to_string()));
     }
     
-    // Parse user_id from JWT
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
     
-    // Check subscription limits
     let bot_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM bots WHERE user_id = $1 AND status != 'destroying'"
     )
@@ -61,15 +59,10 @@ pub async fn create_bot(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    // TODO: Get max_bots from subscription
     if bot_count >= 4 {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "Maximum bot limit reached".to_string()
-        ));
+        return Err((StatusCode::FORBIDDEN, "Maximum bot limit reached".to_string()));
     }
     
-    // Create config version first
     let config_id = Uuid::new_v4();
     let custom_assets_json = req.custom_assets.map(|a| serde_json::to_value(a).unwrap());
     
@@ -84,8 +77,8 @@ pub async fn create_bot(
         "#
     )
     .bind(config_id)
-    .bind(Uuid::nil()) // Will update after bot creation
-    .bind(1) // version 1
+    .bind(Uuid::nil())
+    .bind(1)
     .bind(&req.name)
     .bind(req.persona)
     .bind(req.asset_focus)
@@ -98,12 +91,11 @@ pub async fn create_bot(
     .bind(req.risk_caps.max_trades_per_day)
     .bind(req.trading_mode)
     .bind(&req.llm_provider)
-    .bind("encrypted_key_placeholder") // TODO: Actually encrypt
+    .bind("encrypted_key_placeholder")
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    // Create bot
     let bot_id = Uuid::new_v4();
     
     let bot = sqlx::query_as::<_, Bot>(
@@ -123,7 +115,6 @@ pub async fn create_bot(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    // Update config version with actual bot_id
     sqlx::query("UPDATE config_versions SET bot_id = $1 WHERE id = $2")
         .bind(bot_id)
         .bind(config_id)
@@ -131,8 +122,11 @@ pub async fn create_bot(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    // Trigger DO provisioning (async, don't wait)
-    tokio::spawn(spawn_bot_droplet(bot_id, req.name.clone(), config_id));
+    // Clone pool for async task
+    let pool = state.db.clone();
+    tokio::spawn(async move {
+        spawn_bot_droplet(bot_id, req.name.clone(), pool).await;
+    });
     
     info!("Created bot {} for user {}, provisioning queued", bot_id, user_id);
     
@@ -140,68 +134,55 @@ pub async fn create_bot(
 }
 
 /// Spawn bot droplet on DigitalOcean using claw-spawn
-async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, _config_id: Uuid) {
-    // Get DO token from env
+async fn spawn_bot_droplet(bot_id: Uuid, bot_name: String, pool: Db) {
     let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
         Ok(token) => token,
         Err(_) => {
             warn!("DIGITALOCEAN_TOKEN not set, skipping droplet provisioning for bot {}", bot_id);
+            update_bot_status(&pool, bot_id, BotStatus::Error, "No DO token configured").await;
             return;
         }
     };
     
-    // Create DO client from claw-spawn
     let do_client = match claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
         Ok(client) => Arc::new(client),
         Err(e) => {
             warn!("Failed to create DO client for bot {}: {}", bot_id, e);
+            update_bot_status(&pool, bot_id, BotStatus::Error, "DO client creation failed").await;
             return;
         }
     };
     
-    // Generate droplet name
     let id_str = bot_id.to_string();
     let droplet_name = format!("trawler-{}", &id_str[..8.min(id_str.len())]);
     
-    // Build user data script
     let control_plane_url = std::env::var("CONTROL_PLANE_URL")
         .unwrap_or_else(|_| "https://api.trawlingtraders.com".to_string());
     
     let user_data = format!(r##"#!/bin/bash
 set -e
-
 export BOT_ID="{}"
 export CONTROL_PLANE_URL="{}"
-
-# Install OpenClaw agent
 curl -fsSL https://openclaw.ai/install.sh | bash
-
-# Configure agent
 cat > /etc/openclaw/agent.toml << 'EOFCFG'
 [agent]
 name = "trawler-{}"
 mode = "bot"
-
 [sync]
 config_url = "{}/v1/bot/{}/config"
 heartbeat_url = "{}/v1/bot/{}/heartbeat"
 events_url = "{}/v1/bot/{}/events"
 interval_secs = 30
 EOFCFG
-
-# Start agent
 systemctl enable openclaw-agent
 systemctl start openclaw-agent
-"##, 
-        bot_id,
-        control_plane_url,
-        bot_name,
+"##,
+        bot_id, control_plane_url, bot_name,
         control_plane_url, bot_id,
         control_plane_url, bot_id,
         control_plane_url, bot_id
     );
     
-    // Create droplet request
     let droplet_req = claw_spawn::domain::DropletCreateRequest {
         name: droplet_name,
         region: "nyc3".to_string(),
@@ -211,21 +192,117 @@ systemctl start openclaw-agent
         tags: vec!["trawling-traders".to_string(), format!("bot-{}", bot_id)],
     };
     
-    // Create droplet
     match do_client.create_droplet(droplet_req).await {
         Ok(droplet) => {
-            info!(
-                "Bot {}: Created droplet {} (id: {}), waiting for active...",
-                bot_id, droplet.name, droplet.id
-            );
+            info!("Bot {}: Created droplet {} (id: {})", bot_id, droplet.name, droplet.id);
             
-            // TODO: Update bot with droplet_id in DB
-            // This requires passing the DB pool to this async task
-            // For now, just log success
+            // Update bot with droplet_id
+            if let Err(e) = sqlx::query(
+                "UPDATE bots SET droplet_id = $1, status = 'online', updated_at = NOW() WHERE id = $2"
+            )
+            .bind(droplet.id)
+            .bind(bot_id)
+            .execute(&pool)
+            .await {
+                error!("Failed to update bot {} with droplet_id: {}", bot_id, e);
+            }
         }
         Err(e) => {
             warn!("Bot {}: Failed to create droplet: {}", bot_id, e);
+            update_bot_status(&pool, bot_id, BotStatus::Error, "Droplet creation failed").await;
         }
+    }
+}
+
+/// Destroy bot droplet on DigitalOcean
+async fn destroy_bot_droplet(bot_id: Uuid, droplet_id: i64, pool: Db) {
+    let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
+        Ok(token) => token,
+        Err(_) => {
+            warn!("DIGITALOCEAN_TOKEN not set, cannot destroy droplet for bot {}", bot_id);
+            return;
+        }
+    };
+    
+    let do_client = match claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
+        Ok(client) => Arc::new(client),
+        Err(e) => {
+            warn!("Failed to create DO client for destroy: {}", e);
+            return;
+        }
+    };
+    
+    match do_client.destroy_droplet(droplet_id).await {
+        Ok(_) => {
+            info!("Bot {}: Destroyed droplet {}", bot_id, droplet_id);
+            
+            // Mark bot as destroyed
+            if let Err(e) = sqlx::query(
+                "UPDATE bots SET status = 'destroying', droplet_id = NULL, updated_at = NOW() WHERE id = $1"
+            )
+            .bind(bot_id)
+            .execute(&pool)
+            .await {
+                error!("Failed to update bot {} status after destroy: {}", bot_id, e);
+            }
+        }
+        Err(claw_spawn::infrastructure::DigitalOceanError::NotFound(_)) => {
+            info!("Bot {}: Droplet {} already destroyed or not found", bot_id, droplet_id);
+        }
+        Err(e) => {
+            error!("Bot {}: Failed to destroy droplet {}: {}", bot_id, droplet_id, e);
+        }
+    }
+}
+
+/// Redeploy bot droplet (destroy and recreate)
+async fn redeploy_bot_droplet(bot_id: Uuid, bot_name: String, old_droplet_id: Option<i64>, pool: Db) {
+    // Destroy old droplet if exists
+    if let Some(droplet_id) = old_droplet_id {
+        let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
+            Ok(token) => token,
+            Err(_) => {
+                warn!("DIGITALOCEAN_TOKEN not set, skipping redeploy for bot {}", bot_id);
+                update_bot_status(&pool, bot_id, BotStatus::Error, "No DO token").await;
+                return;
+            }
+        };
+        
+        if let Ok(do_client) = claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
+            let _ = do_client.destroy_droplet(droplet_id).await;
+            info!("Bot {}: Destroyed old droplet {} for redeploy", bot_id, droplet_id);
+        }
+    }
+    
+    // Clear droplet_id and spawn new
+    let _ = sqlx::query("UPDATE bots SET droplet_id = NULL WHERE id = $1")
+        .bind(bot_id)
+        .execute(&pool)
+        .await;
+    
+    // Spawn new droplet
+    spawn_bot_droplet(bot_id, bot_name, pool).await;
+}
+
+/// Helper: Update bot status with error message
+async fn update_bot_status(pool: &Db, bot_id: Uuid, status: BotStatus, _error: &str) {
+    let status_str = match status {
+        BotStatus::Provisioning => "provisioning",
+        BotStatus::Online => "online",
+        BotStatus::Offline => "offline",
+        BotStatus::Paused => "paused",
+        BotStatus::Error => "error",
+        BotStatus::Destroying => "destroying",
+    };
+    
+    if let Err(e) = sqlx::query(
+        "UPDATE bots SET status = $1::bot_status, updated_at = NOW() WHERE id = $2"
+    )
+    .bind(status_str)
+    .bind(bot_id)
+    .execute(pool)
+    .await {
+        error!("Failed to update bot {} status: {}", bot_id, e);
     }
 }
 
@@ -244,7 +321,6 @@ pub async fn get_bot(
             _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         })?;
     
-    // Verify bot belongs to authenticated user
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
     
@@ -252,14 +328,11 @@ pub async fn get_bot(
         return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
     }
     
-    // Get current config
-    let config = sqlx::query_as::<_, ConfigVersion>(
-        "SELECT * FROM config_versions WHERE id = $1"
-    )
-    .bind(bot.desired_version_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let config = sqlx::query_as::<_, ConfigVersion>("SELECT * FROM config_versions WHERE id = $1")
+        .bind(bot.desired_version_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
     Ok(Json(BotResponse { bot, config }))
 }
@@ -271,7 +344,6 @@ pub async fn update_bot_config(
     Path(bot_id): Path<Uuid>,
     Json(req): Json<UpdateBotConfigRequest>,
 ) -> Result<Json<ConfigVersion>, (StatusCode, String)> {
-    // First verify bot belongs to user
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
     
@@ -288,7 +360,6 @@ pub async fn update_bot_config(
         return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
     }
     
-    // Get current version
     let current_version: i32 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(version), 0) FROM config_versions WHERE bot_id = $1"
     )
@@ -300,7 +371,6 @@ pub async fn update_bot_config(
     let new_version = current_version + 1;
     let config_id = Uuid::new_v4();
     
-    // Create new config version
     let custom_assets_json = req.config.custom_assets.map(|a| serde_json::to_value(a).unwrap());
     
     sqlx::query(
@@ -333,7 +403,6 @@ pub async fn update_bot_config(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    // Update bot to point to new version
     sqlx::query(
         "UPDATE bots SET desired_version_id = $1, config_status = 'pending', updated_at = NOW() WHERE id = $2"
     )
@@ -361,7 +430,6 @@ pub async fn bot_action(
     Path(bot_id): Path<Uuid>,
     Json(req): Json<BotActionRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Verify bot belongs to user
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
     
@@ -378,23 +446,54 @@ pub async fn bot_action(
         return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
     }
     
-    let (new_status, _action_message) = match req.action {
-        BotAction::Pause => ("paused", "Bot paused"),
-        BotAction::Resume => ("online", "Bot resumed"),
-        BotAction::Redeploy => ("provisioning", "Bot redeploy triggered"),
-        BotAction::Destroy => ("destroying", "Bot destroy triggered"),
-    };
+    let pool = state.db.clone();
     
-    sqlx::query("UPDATE bots SET status = $1::bot_status, updated_at = NOW() WHERE id = $2")
-        .bind(new_status)
-        .bind(bot_id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    
-    info!("Bot {} action: {:?} -> {}", bot_id, req.action, new_status);
-    
-    // TODO: Trigger actual action via claw-spawn for Destroy/Redeploy
+    match req.action {
+        BotAction::Pause => {
+            sqlx::query("UPDATE bots SET status = 'paused'::bot_status, updated_at = NOW() WHERE id = $1")
+                .bind(bot_id)
+                .execute(&state.db)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            info!("Bot {} paused", bot_id);
+        }
+        BotAction::Resume => {
+            sqlx::query("UPDATE bots SET status = 'online'::bot_status, updated_at = NOW() WHERE id = $1")
+                .bind(bot_id)
+                .execute(&state.db)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            info!("Bot {} resumed", bot_id);
+        }
+        BotAction::Redeploy => {
+            sqlx::query("UPDATE bots SET status = 'provisioning'::bot_status, updated_at = NOW() WHERE id = $1")
+                .bind(bot_id)
+                .execute(&state.db)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            
+            let bot_name = bot.name.clone();
+            let old_droplet_id = bot.droplet_id;
+            tokio::spawn(async move {
+                redeploy_bot_droplet(bot_id, bot_name, old_droplet_id, pool).await;
+            });
+            info!("Bot {} redeploy triggered", bot_id);
+        }
+        BotAction::Destroy => {
+            sqlx::query("UPDATE bots SET status = 'destroying'::bot_status, updated_at = NOW() WHERE id = $1")
+                .bind(bot_id)
+                .execute(&state.db)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            
+            if let Some(droplet_id) = bot.droplet_id {
+                tokio::spawn(async move {
+                    destroy_bot_droplet(bot_id, droplet_id, pool).await;
+                });
+            }
+            info!("Bot {} destroy triggered", bot_id);
+        }
+    }
     
     Ok(StatusCode::OK)
 }
@@ -405,7 +504,6 @@ pub async fn get_metrics(
     Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<MetricsResponse>, (StatusCode, String)> {
-    // Verify bot belongs to user
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
     
@@ -422,7 +520,6 @@ pub async fn get_metrics(
         return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
     }
     
-    // Query using MetricDb (BigDecimal) then convert to Metric (Decimal)
     let metrics_db = sqlx::query_as::<_, MetricDb>(
         r#"
         SELECT * FROM metrics 
@@ -437,7 +534,6 @@ pub async fn get_metrics(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    // Convert MetricDb to Metric
     let metrics: Vec<Metric> = metrics_db.into_iter().map(Metric::from).collect();
     
     Ok(Json(MetricsResponse {
@@ -452,7 +548,6 @@ pub async fn get_events(
     Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<EventsResponse>, (StatusCode, String)> {
-    // Verify bot belongs to user
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
     
@@ -479,7 +574,7 @@ pub async fn get_events(
     
     Ok(Json(EventsResponse {
         events,
-        next_cursor: None, // TODO: Implement cursor pagination
+        next_cursor: None,
     }))
 }
 
@@ -489,11 +584,9 @@ use validator::Validate;
 pub async fn get_current_user(
     Extension(auth): Extension<AuthContext>,
 ) -> Result<Json<User>, (StatusCode, String)> {
-    // Parse user_id from JWT
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
     
-    // Return user info from JWT claims
     let user = User {
         id: user_id,
         email: auth.email.unwrap_or_else(|| "user@example.com".to_string()),

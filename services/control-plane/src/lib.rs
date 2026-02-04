@@ -22,12 +22,13 @@ pub use models::*;
 pub use db::Db;
 
 /// Application state shared across handlers
+#[derive(Clone)]
 pub struct AppState {
     pub db: Db,
 }
 
 /// Build the API router
-pub fn app(state: Arc<AppState>) -> Router {
+pub async fn app(state: Arc<AppState>) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -46,7 +47,8 @@ pub fn app(state: Arc<AppState>) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::auth_middleware
-        ));
+        ))
+        .with_state(state.clone());
     
     // Bot-facing routes (internal, from VPS)
     let bot_routes = Router::new()
@@ -55,19 +57,29 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/bot/:id/config_ack", post(handlers::sync::ack_config))
         .route("/bot/:id/wallet", post(handlers::sync::report_wallet))
         .route("/bot/:id/heartbeat", post(handlers::sync::heartbeat))
-        .route("/bot/:id/events", post(handlers::sync::ingest_events));
+        .route("/bot/:id/events", post(handlers::sync::ingest_events))
+        .with_state(state.clone());
     
-    // Cedros Pay routes (payments and subscriptions)
-    let cedros_routes = cedros::routes();
+    // Cedros Pay routes - try full integration, fallback to placeholder
+    // These routes have their own state (Cedros Pay internal)
+    let pay_routes = match cedros::full_router(state.db.clone()).await {
+        Ok(router) => {
+            tracing::info!("Cedros Pay full integration active");
+            router
+        }
+        Err(e) => {
+            tracing::warn!("Cedros Pay full integration failed ({}), using placeholder", e);
+            cedros::placeholder_routes()
+        }
+    };
     
-    // Mount all routes under /v1/
+    // Build combined router without state (each nested router has its own)
     Router::new()
         .nest("/v1", app_routes)
         .nest("/v1", bot_routes)
-        .nest("/v1", cedros_routes)
+        .nest("/v1/pay", pay_routes)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
-        .with_state(state)
 }
 
 pub async fn get_current_user() -> Result<String, String> {

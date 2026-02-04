@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(control_plane::AppState { db: db.clone() });
     
     // Build router
-    let app = build_router(state).await?;
+    let app = build_router(state, db.clone()).await?;
     
     // Start server
     let port = std::env::var("PORT")
@@ -51,6 +51,7 @@ async fn main() -> anyhow::Result<()> {
 /// Build the complete router
 async fn build_router(
     state: Arc<control_plane::AppState>,
+    pool: sqlx::PgPool,
 ) -> anyhow::Result<axum::Router> {
     use axum::{Router, routing::{get, post, patch}};
     use tower_http::cors::{Any, CorsLayer};
@@ -73,7 +74,8 @@ async fn build_router(
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             control_plane::middleware::auth_middleware
-        ));
+        ))
+        .with_state(state.clone());
     
     // Bot-facing routes (internal, from VPS)
     let bot_routes = Router::new()
@@ -82,23 +84,30 @@ async fn build_router(
         .route("/bot/:id/config_ack", post(control_plane::handlers::sync::ack_config))
         .route("/bot/:id/wallet", post(control_plane::handlers::sync::report_wallet))
         .route("/bot/:id/heartbeat", post(control_plane::handlers::sync::heartbeat))
-        .route("/bot/:id/events", post(control_plane::handlers::sync::ingest_events));
+        .route("/bot/:id/events", post(control_plane::handlers::sync::ingest_events))
+        .with_state(state.clone());
     
-    // Cedros placeholder routes
-    // TODO: Full Cedros Pay integration requires:
-    // 1. Create separate PostgresPool via cedros_pay::storage::PostgresPool::new()
-    // 2. Create SchemaMapping with table names
-    // 3. Build router via cedros_pay::router()
-    let cedros_routes = control_plane::cedros::routes();
+    // Cedros Pay routes - try full integration, fallback to placeholder
+    // These have their own internal state
+    let cedros_routes = match control_plane::cedros::full_router(pool).await {
+        Ok(router) => {
+            info!("✓ Cedros Pay full integration active");
+            router
+        }
+        Err(e) => {
+            info!("⚠ Cedros Pay using placeholder mode: {}", e);
+            control_plane::cedros::placeholder_routes()
+        }
+    };
     
-    // Build router
+    // Build combined router
+    // Note: Each nested router has its own state, so we don't set global state
     let router = Router::new()
         .nest("/v1", app_routes)
         .nest("/v1", bot_routes)
-        .nest("/v1", cedros_routes)
+        .nest("/v1/pay", cedros_routes)
         .layer(cors)
-        .layer(TraceLayer::new_for_http())
-        .with_state(state);
+        .layer(TraceLayer::new_for_http());
     
     Ok(router)
 }
