@@ -58,14 +58,25 @@ async fn register_bot(client: &ControlPlaneClient) -> anyhow::Result<()> {
     // Get wallet address if available
     let wallet = std::env::var("AGENT_WALLET").ok();
     
-    match client.register(wallet).await {
+    match client.register(wallet.clone()).await {
         Ok(_) => {
             info!("✓ Bot registered with control plane");
+            // Also report wallet separately if we have it
+            if let Some(addr) = wallet {
+                if let Err(e) = client.report_wallet(&addr).await {
+                    warn!("Wallet report failed (non-critical): {}", e);
+                }
+            }
             Ok(())
         }
         Err(e) => {
-            // Already registered is OK
+            // Already registered is OK, but still try to report wallet
             warn!("Registration response: {}", e);
+            if let Some(addr) = wallet {
+                if let Err(e) = client.report_wallet(&addr).await {
+                    warn!("Wallet report failed (non-critical): {}", e);
+                }
+            }
             Ok(())
         }
     }

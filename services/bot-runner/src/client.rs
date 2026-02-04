@@ -57,6 +57,33 @@ impl ControlPlaneClient {
         }
     }
 
+    /// Report wallet address to control plane (for post-registration update)
+    pub async fn report_wallet(
+        &self,
+        wallet_address: &str,
+    ) -> anyhow::Result<()> {
+        let url = format!("{}/v1/bot/{}/wallet", self.base_url, self.bot_id);
+        
+        let req = WalletReportRequest {
+            wallet_address: wallet_address.to_string(),
+        };
+
+        let response = self.client
+            .post(&url)
+            .json(&req)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            info!("Wallet address reported: {}", wallet_address);
+            Ok(())
+        } else {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            Err(anyhow::anyhow!("Wallet report failed: {} - {}", status, text))
+        }
+    }
+
     /// Poll for config updates
     pub async fn get_config(
         &self,
@@ -177,6 +204,11 @@ impl ControlPlaneClient {
 #[derive(Debug, Clone, Serialize)]
 struct RegisterRequest {
     agent_wallet: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WalletReportRequest {
+    wallet_address: String,
 }
 
 #[derive(Debug, Deserialize)]
