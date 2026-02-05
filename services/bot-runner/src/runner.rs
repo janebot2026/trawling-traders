@@ -160,7 +160,7 @@ impl BotRunner {
                 }
                 Err(e) => {
                     error!("Failed to initialize executor: {}", e);
-                    return Ok(());
+                    return Err(anyhow::anyhow!("Executor initialization failed: {}", e));
                 }
             }
         }
