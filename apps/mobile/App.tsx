@@ -6,6 +6,7 @@ import { CedrosProvider } from '@cedros/pay-react-native';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { CEDROS_CONFIG, CEDROS_PAY_CONFIG } from './src/config/api';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { NetworkProvider } from './src/context/NetworkContext';
 
 export default function App() {
   return (
@@ -13,8 +14,10 @@ export default function App() {
       <CedrosLoginProvider config={CEDROS_CONFIG}>
         <CedrosProvider config={CEDROS_PAY_CONFIG}>
           <SafeAreaProvider>
-            <AppNavigator />
-            <StatusBar style="auto" />
+            <NetworkProvider>
+              <AppNavigator />
+              <StatusBar style="auto" />
+            </NetworkProvider>
           </SafeAreaProvider>
         </CedrosProvider>
       </CedrosLoginProvider>

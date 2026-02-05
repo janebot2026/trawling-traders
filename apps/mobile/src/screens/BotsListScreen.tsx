@@ -16,9 +16,10 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import type { Bot } from '@trawling-traders/types';
-import { api } from '@trawling-traders/api-client';
+import { api, NetworkError } from '@trawling-traders/api-client';
 import { OceanBackground } from '../components/OceanBackground';
 import { lightTheme } from '../theme';
+import { useNetworkStatus } from '../context/NetworkContext';
 
 // LOB Avatar - default bot image
 const LOB_AVATAR = require('../../assets/lob-avatar.png');
@@ -140,25 +141,35 @@ const BotCard = React.memo(function BotCard({ bot, onPress, index }: { bot: Bot;
 export function BotsListScreen() {
   const navigation = useNavigation<BotsListScreenNavigationProp>();
   const insets = useSafeAreaInsets();
+  const { isOnline, checkConnection } = useNetworkStatus();
   const [bots, setBots] = useState<Bot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [botCount, setBotCount] = useState(0);
   const [maxBots, setMaxBots] = useState(4);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchBots = useCallback(async () => {
+    setLoadError(null);
     try {
       const response = await api.bot.listBots();
       setBots(response.bots);
       setBotCount(response.total);
     } catch (error) {
-      console.error('Failed to fetch bots:', error);
-      Alert.alert('Error', 'Failed to load bots. Is the server running?');
+      if (__DEV__) {
+        console.error('Failed to fetch bots:', error);
+      }
+      // Show specific message for network errors
+      if (error instanceof NetworkError || !isOnline) {
+        setLoadError('No internet connection. Pull down to retry.');
+      } else {
+        setLoadError('Failed to load bots. Pull down to retry.');
+      }
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [isOnline]);
 
   // useFocusEffect handles both initial load and refocus
   // (removed duplicate useEffect to prevent double fetching)
@@ -168,8 +179,10 @@ export function BotsListScreen() {
     }, [fetchBots])
   );
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setIsRefreshing(true);
+    // Check network status before attempting fetch
+    await checkConnection();
     fetchBots();
   };
 
@@ -252,16 +265,26 @@ export function BotsListScreen() {
             />
           }
           ListEmptyComponent={
-            <View style={styles.empty}>
-              <Image source={LOB_AVATAR} style={styles.emptyAvatar} />
-              <Text style={styles.emptyText}>No trawlers deployed yet</Text>
-              <Text style={styles.emptySubtext}>
-                Deploy your first LOB to start trawling the markets
-              </Text>
-              <TouchableOpacity style={styles.emptyButton} onPress={handleCreateBot}>
-                <Text style={styles.emptyButtonText}>Deploy First Trawler</Text>
-              </TouchableOpacity>
-            </View>
+            loadError ? (
+              <View style={styles.empty}>
+                <Text style={styles.errorIcon}>{isOnline ? '⚠️' : '📡'}</Text>
+                <Text style={styles.emptyText}>{loadError}</Text>
+                <TouchableOpacity style={styles.retryButton} onPress={handleRefresh}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.empty}>
+                <Image source={LOB_AVATAR} style={styles.emptyAvatar} />
+                <Text style={styles.emptyText}>No trawlers deployed yet</Text>
+                <Text style={styles.emptySubtext}>
+                  Deploy your first LOB to start trawling the markets
+                </Text>
+                <TouchableOpacity style={styles.emptyButton} onPress={handleCreateBot}>
+                  <Text style={styles.emptyButtonText}>Deploy First Trawler</Text>
+                </TouchableOpacity>
+              </View>
+            )
           }
         />
       </View>
@@ -492,6 +515,22 @@ const styles = StyleSheet.create({
   emptyButtonText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  errorIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  retryButton: {
+    marginTop: 24,
+    backgroundColor: lightTheme.colors.wave[600],
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '600',
   },
 });
