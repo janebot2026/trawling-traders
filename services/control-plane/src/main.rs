@@ -211,12 +211,20 @@ async fn build_router(
         }
     };
 
+    // Health check routes (no auth)
+    let health_routes = Router::new()
+        .route("/healthz", get(control_plane::health::healthz))
+        .route("/readyz", get(control_plane::health::readyz))
+        .route("/health", get(control_plane::health::health_detail))
+        .with_state(state.clone());
+
     // Build combined router
     let router = Router::new()
         .nest("/v1", app_routes)
         .nest("/v1", bot_routes)
         .nest("/v1/admin", admin_routes)
         .nest("/v1/pay", cedros_routes)
+        .nest("/v1", health_routes)
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 
