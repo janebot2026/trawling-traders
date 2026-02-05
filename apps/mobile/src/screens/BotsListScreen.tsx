@@ -24,8 +24,8 @@ const LOB_AVATAR = require('../../assets/lob-avatar.png');
 
 type BotsListScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
 
-// Animated bot card
-function BotCard({ bot, onPress, index }: { bot: Bot; onPress: () => void; index: number }) {
+// Animated bot card - memoized to prevent unnecessary re-renders
+const BotCard = React.memo(function BotCard({ bot, onPress, index }: { bot: Bot; onPress: () => void; index: number }) {
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
   const slideAnim = React.useRef(new Animated.Value(30)).current;
 
@@ -44,7 +44,7 @@ function BotCard({ bot, onPress, index }: { bot: Bot; onPress: () => void; index
         useNativeDriver: true,
       }),
     ]).start();
-  }, [index]);
+  }, [index, fadeAnim, slideAnim]);
 
   const pnl = bot.todayPnl || 0;
   const totalPnl = bot.totalPnl || 0;
@@ -134,7 +134,7 @@ function BotCard({ bot, onPress, index }: { bot: Bot; onPress: () => void; index
       </TouchableOpacity>
     </Animated.View>
   );
-}
+});
 
 export function BotsListScreen() {
   const navigation = useNavigation<BotsListScreenNavigationProp>();
