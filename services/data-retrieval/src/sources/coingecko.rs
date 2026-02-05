@@ -181,15 +181,18 @@ impl CoinGeckoClient {
                 format!("Missing data for coin: {}", coin_id)
             ))?;
         
+        // Note: CoinGecko API returns JSON numbers (not strings), so f64 intermediate
+        // is unavoidable - precision loss inherent to JSON numeric representation.
+        // For higher precision, use Binance WebSocket which provides string prices.
         let price = data.get("usd")
             .or_else(|| data.get(&vs_currency))
             .and_then(|v| v.as_f64())
             .ok_or_else(|| DataRetrievalError::InvalidResponse(
                 "Missing price data".to_string()
             ))?;
-        
+
         let symbol = format!("{}/{}", asset.to_uppercase(), quote.to_uppercase());
-        
+
         Ok(PricePoint {
             symbol,
             price: Decimal::try_from(price)
