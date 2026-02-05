@@ -491,8 +491,14 @@ impl BotRunner {
                 );
             }
             
-            // Add to cash
-            let received_usdc = self.portfolio.cash_usdc_raw + result.execution.out_amount_raw;
+            // Add to cash (saturating to prevent overflow)
+            let received_usdc = self.portfolio.cash_usdc_raw
+                .saturating_add(result.execution.out_amount_raw);
+            if received_usdc == u64::MAX && result.execution.out_amount_raw > 0 {
+                tracing::warn!(
+                    "Cash balance saturated at u64::MAX during sell - potential overflow avoided"
+                );
+            }
             self.portfolio.update_cash(received_usdc, "sell trade");
         }
     }
