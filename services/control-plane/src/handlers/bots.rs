@@ -173,12 +173,13 @@ pub async fn create_bot(
     tx.commit().await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    // Clone pool for async task
+    // Clone state for async task
     let pool = state.db.clone();
+    let secrets = state.secrets.clone();
     let semaphore = state.droplet_semaphore.clone();
     let metrics = state.metrics.clone();
     tokio::spawn(async move {
-        spawn_bot_droplet(bot_id, req.name.clone(), pool, metrics, semaphore).await;
+        spawn_bot_droplet(bot_id, req.name.clone(), pool, secrets, metrics, semaphore).await;
     });
     
     info!("Created bot {} for user {}, provisioning queued", bot_id, user_id);
@@ -407,16 +408,19 @@ echo "Note: Secrets stored securely at $SECRETS_FILE"
 }
 
 /// Spawn bot droplet on DigitalOcean using claw-spawn
-/// 
+///
 /// Uses semaphore for concurrency control (max 3 concurrent provisions)
 /// and retry with exponential backoff for DO API calls
 async fn spawn_bot_droplet(
-    bot_id: Uuid, 
-    bot_name: String, 
-    pool: Db, 
+    bot_id: Uuid,
+    bot_name: String,
+    pool: Db,
+    secrets: crate::SecretsManager,
     metrics: crate::MetricsCollector,
     semaphore: Arc<tokio::sync::Semaphore>,
 ) {
+    use crate::config::{self, keys};
+
     // Track in-flight metric before acquiring permit
     let available_permits = semaphore.available_permits();
 
@@ -431,11 +435,12 @@ async fn spawn_bot_droplet(
     };
 
     metrics.gauge(crate::observability::metrics::PROVISION_QUEUE_DEPTH, available_permits as f64).await;
-    
-    let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
-        Ok(token) => token,
-        Err(_) => {
-            warn!("DIGITALOCEAN_TOKEN not set, skipping droplet provisioning for bot {}", bot_id);
+
+    // Get DO token from platform_config (encrypted)
+    let do_token = match config::get_config_decrypted(&pool, &secrets, keys::DIGITALOCEAN_TOKEN).await {
+        Some(token) if !token.is_empty() => token,
+        _ => {
+            warn!("digitalocean_token not configured, skipping droplet provisioning for bot {}", bot_id);
             update_bot_status(&pool, bot_id, BotStatus::Error, "No DO token configured").await;
             return;
         }
@@ -452,9 +457,13 @@ async fn spawn_bot_droplet(
     
     let id_str = bot_id.to_string();
     let droplet_name = format!("trawler-{}", &id_str[..8.min(id_str.len())]);
-    
-    let control_plane_url = std::env::var("CONTROL_PLANE_URL")
-        .unwrap_or_else(|_| "https://api.trawlingtraders.com".to_string());
+
+    // Get control plane URL from platform_config
+    let control_plane_url = config::get_config_or(
+        &pool,
+        keys::CONTROL_PLANE_URL,
+        "https://api.trawlingtraders.com"
+    ).await;
 
     // Fetch bot's bootstrap token from database
     let bootstrap_token = match sqlx::query_scalar::<_, Option<String>>(
@@ -514,11 +523,13 @@ async fn spawn_bot_droplet(
 }
 
 /// Destroy bot droplet on DigitalOcean
-async fn destroy_bot_droplet(bot_id: Uuid, droplet_id: i64, pool: Db) {
-    let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
-        Ok(token) => token,
-        Err(_) => {
-            warn!("DIGITALOCEAN_TOKEN not set, cannot destroy droplet for bot {}", bot_id);
+async fn destroy_bot_droplet(bot_id: Uuid, droplet_id: i64, pool: Db, secrets: crate::SecretsManager) {
+    use crate::config::{self, keys};
+
+    let do_token = match config::get_config_decrypted(&pool, &secrets, keys::DIGITALOCEAN_TOKEN).await {
+        Some(token) if !token.is_empty() => token,
+        _ => {
+            warn!("digitalocean_token not configured, cannot destroy droplet for bot {}", bot_id);
             return;
         }
     };
@@ -556,38 +567,41 @@ async fn destroy_bot_droplet(bot_id: Uuid, droplet_id: i64, pool: Db) {
 
 /// Redeploy bot droplet (destroy and recreate)
 async fn redeploy_bot_droplet(
-    bot_id: Uuid, 
-    bot_name: String, 
-    old_droplet_id: Option<i64>, 
+    bot_id: Uuid,
+    bot_name: String,
+    old_droplet_id: Option<i64>,
     pool: Db,
+    secrets: crate::SecretsManager,
     metrics: crate::MetricsCollector,
     semaphore: Arc<tokio::sync::Semaphore>,
 ) {
+    use crate::config::{self, keys};
+
     // Destroy old droplet if exists
     if let Some(droplet_id) = old_droplet_id {
-        let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
-            Ok(token) => token,
-            Err(_) => {
-                warn!("DIGITALOCEAN_TOKEN not set, skipping redeploy for bot {}", bot_id);
+        let do_token = match config::get_config_decrypted(&pool, &secrets, keys::DIGITALOCEAN_TOKEN).await {
+            Some(token) if !token.is_empty() => token,
+            _ => {
+                warn!("digitalocean_token not configured, skipping redeploy for bot {}", bot_id);
                 update_bot_status(&pool, bot_id, BotStatus::Error, "No DO token").await;
                 return;
             }
         };
-        
+
         if let Ok(do_client) = claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
             let _ = do_client.destroy_droplet(droplet_id).await;
             info!("Bot {}: Destroyed old droplet {} for redeploy", bot_id, droplet_id);
         }
     }
-    
+
     // Clear droplet_id and spawn new
     let _ = sqlx::query("UPDATE bots SET droplet_id = NULL WHERE id = $1")
         .bind(bot_id)
         .execute(&pool)
         .await;
-    
+
     // Spawn new droplet with retry logic
-    spawn_bot_droplet(bot_id, bot_name, pool, metrics, semaphore).await;
+    spawn_bot_droplet(bot_id, bot_name, pool, secrets, metrics, semaphore).await;
 }
 
 /// Helper: Update bot status with error message
@@ -737,10 +751,11 @@ pub async fn bot_action(
             
             let bot_name = bot.name.clone();
             let old_droplet_id = bot.droplet_id;
+            let secrets = state.secrets.clone();
             let semaphore = state.droplet_semaphore.clone();
             let metrics = state.metrics.clone();
             tokio::spawn(async move {
-                redeploy_bot_droplet(bot_id, bot_name, old_droplet_id, pool, metrics, semaphore).await;
+                redeploy_bot_droplet(bot_id, bot_name, old_droplet_id, pool, secrets, metrics, semaphore).await;
             });
             info!("Bot {} redeploy triggered", bot_id);
         }
@@ -751,10 +766,11 @@ pub async fn bot_action(
                 .execute(&state.db)
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-            
+
             if let Some(droplet_id) = bot.droplet_id {
+                let secrets = state.secrets.clone();
                 tokio::spawn(async move {
-                    destroy_bot_droplet(bot_id, droplet_id, pool).await;
+                    destroy_bot_droplet(bot_id, droplet_id, pool, secrets).await;
                 });
             }
             info!("Bot {} destroy triggered", bot_id);

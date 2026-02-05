@@ -107,8 +107,13 @@ impl WebhookNotifier {
     ) -> anyhow::Result<()> {
         let (subject, body) = self.format_email_content(alert, severity);
         
+        // Note: alert_email_to is read from env var as fallback
+        // For dynamic config, use the admin dashboard at /v1/admin/config
+        let email_to = std::env::var("ALERT_EMAIL_TO")
+            .unwrap_or_else(|_| "alerts@trawlingtraders.com".to_string());
+
         let payload = serde_json::json!({
-            "to": std::env::var("ALERT_EMAIL_TO").unwrap_or_else(|_| "alerts@trawlingtraders.com".to_string()),
+            "to": email_to,
             "subject": subject,
             "body": body,
             "severity": severity.as_str(),

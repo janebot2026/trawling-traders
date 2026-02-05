@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     );
     
     // Spawn orphan cleanup background task
-    control_plane::provisioning::spawn_cleanup_task(db.clone());
+    control_plane::provisioning::spawn_cleanup_task(db.clone(), state.secrets.clone());
     info!("✓ Orphan cleanup task spawned");
 
     // Spawn data retention cleanup task (events/metrics older than 30/90 days)

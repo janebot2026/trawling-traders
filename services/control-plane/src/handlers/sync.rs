@@ -446,12 +446,25 @@ pub async fn get_bot_secrets(
         return Err((StatusCode::FORBIDDEN, "Bootstrap token already used (concurrent)".to_string()));
     }
 
-    // Retrieve secrets from environment
-    let jupiter_api_key = std::env::var("JUPITER_API_KEY").unwrap_or_default();
-    let data_retrieval_url = std::env::var("DATA_RETRIEVAL_URL")
-        .unwrap_or_else(|_| "https://data.trawling-traders.com".to_string());
-    let solana_rpc_url = std::env::var("SOLANA_RPC_URL")
-        .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
+    // Retrieve secrets from platform_config database
+    use crate::config::{self, keys};
+
+    let jupiter_api_key = config::get_config_decrypted_or(
+        &state.db,
+        &state.secrets,
+        keys::JUPITER_API_KEY,
+        ""
+    ).await;
+    let data_retrieval_url = config::get_config_or(
+        &state.db,
+        keys::DATA_RETRIEVAL_URL,
+        "https://data.trawling-traders.com"
+    ).await;
+    let solana_rpc_url = config::get_config_or(
+        &state.db,
+        keys::SOLANA_RPC_URL,
+        "https://api.devnet.solana.com"
+    ).await;
 
     info!("Bot {} retrieved secrets successfully", bot_id);
     Logger::bot_event(&bot_id.to_string(), "secrets_retrieved", "Bootstrap secrets fetched");

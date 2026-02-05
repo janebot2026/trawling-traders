@@ -1,5 +1,6 @@
 pub mod algorithms;
 pub mod brain;
+pub mod config;
 pub mod models;
 pub mod handlers {
     pub mod admin;

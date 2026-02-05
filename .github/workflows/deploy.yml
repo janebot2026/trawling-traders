@@ -215,25 +215,16 @@ jobs:
               docker stop trawling-traders-control-plane 2>/dev/null || true
               docker rm trawling-traders-control-plane 2>/dev/null || true
 
+              # Only 3 true secrets as ENV - everything else is in platform_config DB table
+              # Stripe config is managed via cedros-pay admin at /v1/pay/admin/config
               docker run -d --restart unless-stopped \
                 --name trawling-traders-control-plane \
                 --network trawling-traders-network \
                 -p 127.0.0.1:3001:3000 \
-                --env ENVIRONMENT="${{ secrets.ENVIRONMENT }}" \
                 --env PORT=3000 \
                 --env DATABASE_URL="${{ secrets.DATABASE_URL }}" \
                 --env JWT_SECRET="${{ secrets.JWT_SECRET }}" \
-                --env JWT_ISSUER="${{ secrets.JWT_ISSUER }}" \
                 --env SECRETS_ENCRYPTION_KEY="${{ secrets.SECRETS_ENCRYPTION_KEY }}" \
-                --env DIGITALOCEAN_TOKEN="${{ secrets.DIGITALOCEAN_TOKEN }}" \
-                --env SOLANA_RPC_URL="${{ secrets.SOLANA_RPC_URL }}" \
-                --env JUPITER_API_KEY="${{ secrets.JUPITER_API_KEY }}" \
-                --env CONTROL_PLANE_URL="${{ secrets.CONTROL_PLANE_URL }}" \
-                --env DATA_RETRIEVAL_URL="http://trawling-traders-data-retrieval:8080" \
-                --env DISCORD_ALERT_WEBHOOK="${{ secrets.DISCORD_ALERT_WEBHOOK }}" \
-                --env STRIPE_SECRET_KEY="${{ secrets.STRIPE_SECRET_KEY }}" \
-                --env STRIPE_PUBLISHABLE_KEY="${{ secrets.STRIPE_PUBLISHABLE_KEY }}" \
-                --env STRIPE_WEBHOOK_SECRET="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
                 ${{ env.CONTROL_PLANE_IMAGE }}
 
               echo "control-plane deployed successfully"

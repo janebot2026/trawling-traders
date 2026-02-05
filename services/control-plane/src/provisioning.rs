@@ -271,7 +271,9 @@ pub async fn cleanup_orphaned_bot(
     status: &str,
     _droplet_id: Option<i64>,  // We re-fetch current droplet_id inside the transaction
     pool: &sqlx::PgPool,
+    secrets: &crate::SecretsManager,
 ) -> anyhow::Result<()> {
+    use crate::config::{self, keys};
     // Use advisory lock based on bot_id to prevent race with user-initiated destroy.
     // The advisory lock key is derived from the UUID's lower 64 bits.
     let lock_key = bot_id.as_u128() as i64;
@@ -326,9 +328,11 @@ pub async fn cleanup_orphaned_bot(
 
             // If we have a droplet_id, try to destroy it
             if let Some(did) = current_droplet_id {
-                if let Ok(do_token) = std::env::var("DIGITALOCEAN_TOKEN") {
-                    if let Ok(client) = claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
-                        let _ = client.destroy_droplet(did).await;
+                if let Some(do_token) = config::get_config_decrypted(pool, secrets, keys::DIGITALOCEAN_TOKEN).await {
+                    if !do_token.is_empty() {
+                        if let Ok(client) = claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
+                            let _ = client.destroy_droplet(did).await;
+                        }
                     }
                 }
             }
@@ -347,9 +351,11 @@ pub async fn cleanup_orphaned_bot(
 
             // Try to destroy droplet if exists
             if let Some(did) = current_droplet_id {
-                if let Ok(do_token) = std::env::var("DIGITALOCEAN_TOKEN") {
-                    if let Ok(client) = claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
-                        let _ = client.destroy_droplet(did).await;
+                if let Some(do_token) = config::get_config_decrypted(pool, secrets, keys::DIGITALOCEAN_TOKEN).await {
+                    if !do_token.is_empty() {
+                        if let Ok(client) = claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
+                            let _ = client.destroy_droplet(did).await;
+                        }
                     }
                 }
             }
@@ -372,7 +378,7 @@ pub async fn cleanup_orphaned_bot(
 }
 
 /// Spawn a background task to periodically clean up orphaned bots
-pub fn spawn_cleanup_task(pool: sqlx::PgPool) {
+pub fn spawn_cleanup_task(pool: sqlx::PgPool, secrets: crate::SecretsManager) {
     tokio::spawn(async move {
         let config = CleanupConfig::default();
         let mut interval = tokio::time::interval(Duration::from_secs(60)); // Run every minute
@@ -383,7 +389,7 @@ pub fn spawn_cleanup_task(pool: sqlx::PgPool) {
             match find_orphaned_bots(&pool, &config).await {
                 Ok(orphans) => {
                     for (bot_id, status, droplet_id) in orphans {
-                        if let Err(e) = cleanup_orphaned_bot(bot_id, &status, droplet_id, &pool).await {
+                        if let Err(e) = cleanup_orphaned_bot(bot_id, &status, droplet_id, &pool, &secrets).await {
                             error!("Failed to cleanup orphaned bot {}: {}", bot_id, e);
                         }
                     }
