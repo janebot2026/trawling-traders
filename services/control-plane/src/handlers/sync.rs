@@ -171,11 +171,10 @@ pub async fn heartbeat(
 ) -> Result<Json<HeartbeatResponse>, (StatusCode, String)> {
     let start = std::time::Instant::now();
     
-    // Parse status string to BotStatus - for now just store as string
+    // Use server timestamp for heartbeat to prevent clock skew issues
     sqlx::query(
-        "UPDATE bots SET last_heartbeat_at = $1, updated_at = NOW() WHERE id = $2"
+        "UPDATE bots SET last_heartbeat_at = NOW(), updated_at = NOW() WHERE id = $1"
     )
-    .bind(req.timestamp)
     .bind(bot_id)
     .execute(&state.db)
     .await
