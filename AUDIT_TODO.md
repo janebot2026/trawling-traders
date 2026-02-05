@@ -28,14 +28,16 @@
 - **Verification:** cargo check passes; JWT_SECRET env var required for startup
 - **Note:** Uses HS256 algorithm. Set JWT_SECRET (min 32 bytes) and optionally JWT_ISSUER
 
-### [ ] CP-02: Secrets never encrypted
+### [x] CP-02: Secrets never encrypted
 - **Files:** `services/control-plane/src/secrets.rs`
 - **Planned Fix:**
   - Implement AES-256-GCM encryption in `encrypt()`
   - Implement matching decryption in `decrypt()`
   - Use proper nonce handling with base64 encoding
 - **Test Plan:** Verify encrypted != plaintext; verify decrypt(encrypt(x)) == x
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** 4 unit tests pass (roundtrip, unique nonces, tamper detection, passthrough)
+- **Note:** Requires SECRETS_ENCRYPTION_KEY env var (64 hex chars = 32 bytes)
 
 ### [ ] CP-04: Secrets exposed in droplet user-data
 - **Files:** `services/control-plane/src/handlers/bots.rs`
@@ -604,11 +606,11 @@
 
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
-| Critical | 8 | 1 | 7 |
+| Critical | 8 | 2 | 6 |
 | High | 16 | 1 | 15 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **2** | **69** |
+| **Total** | **71** | **3** | **68** |
 
 ---
 
@@ -628,4 +630,5 @@
 | ID | Commit | Date | Notes |
 |----|--------|------|-------|
 | MB-20 | 29739829 | 2026-02-04 | Fixed missing `>` in JSX self-closing tag |
+| CP-01 | 4064feeb | 2026-02-04 | Implemented proper JWT signature verification with HS256 |
 
