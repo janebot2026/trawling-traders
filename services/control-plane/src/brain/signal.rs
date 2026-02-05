@@ -30,7 +30,7 @@ pub enum SignalStrength {
 pub struct Signal {
     pub signal_type: SignalType,
     pub strength: SignalStrength,
-    pub confidence: f32,
+    pub confidence: f64,
     pub symbol: String,
     pub price: Decimal,
     pub timestamp: DateTime<Utc>,
@@ -66,7 +66,7 @@ impl Signal {
     pub fn buy(
         symbol: String,
         price: Decimal,
-        confidence: f32,
+        confidence: f64,
         mode: String,
         reason: String,
     ) -> Self {
@@ -99,7 +99,7 @@ impl Signal {
     pub fn sell(
         symbol: String,
         price: Decimal,
-        confidence: f32,
+        confidence: f64,
         mode: String,
         reason: String,
     ) -> Self {
@@ -144,7 +144,7 @@ impl Signal {
         self
     }
 
-    pub fn is_actionable(&self, min_confidence: f32) -> bool {
+    pub fn is_actionable(&self, min_confidence: f64) -> bool {
         self.confidence >= min_confidence && self.signal_type != SignalType::Hold
     }
 }

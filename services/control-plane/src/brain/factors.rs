@@ -16,9 +16,9 @@ pub struct FactorResult {
     /// Whether gate passed (if this factor is a gate)
     pub gate_passed: bool,
     /// Contribution to score (-1.0 to 1.0)
-    pub score_contrib: f32,
+    pub score_contrib: f64,
     /// Confidence contribution
-    pub confidence_contrib: f32,
+    pub confidence_contrib: f64,
 }
 
 /// Available factor types

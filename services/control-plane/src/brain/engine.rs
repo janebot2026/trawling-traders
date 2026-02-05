@@ -94,9 +94,9 @@ impl BrainEngine {
         let spread = (fast - slow).abs();
         let mut confidence = if slow > Decimal::ZERO {
             let ratio = spread / slow;
-            // Convert to f32 for confidence calc
-            let ratio_f32 = ratio.to_string().parse::<f32>().unwrap_or(0.0);
-            ratio_f32.min(0.5) * 2.0
+            // Convert to f64 for confidence calc
+            let ratio_f64 = ratio.to_string().parse::<f64>().unwrap_or(0.0);
+            ratio_f64.min(0.5) * 2.0
         } else {
             0.0
         };
@@ -163,8 +163,8 @@ impl BrainEngine {
         }
         
         let rsi_val = rsi.unwrap();
-        let oversold: f32 = 30.0;
-        let overbought: f32 = 70.0;
+        let oversold: f64 = 30.0;
+        let overbought: f64 = 70.0;
         
         // Calculate confidence
         let mut confidence = if rsi_val < oversold {
@@ -252,12 +252,12 @@ impl BrainEngine {
         let reason: String;
         
         if price > resistance {
-            let breakout_strength = ((price - resistance) / range).to_string().parse::<f32>().unwrap_or(0.0);
+            let breakout_strength = ((price - resistance) / range).to_string().parse::<f64>().unwrap_or(0.0);
             confidence = breakout_strength.min(0.5) * 2.0;
             reason = format!("Upside breakout above {:.2}", resistance);
             signal_type = SignalType::Buy;
         } else if price < support {
-            let breakdown_strength = ((support - price) / range).to_string().parse::<f32>().unwrap_or(0.0);
+            let breakdown_strength = ((support - price) / range).to_string().parse::<f64>().unwrap_or(0.0);
             confidence = breakdown_strength.min(0.5) * 2.0;
             reason = format!("Downside breakdown below {:.2}", support);
             signal_type = SignalType::Sell;
@@ -336,7 +336,7 @@ impl BrainEngine {
         &self,
         candles: &[Candle],
         period: usize,
-    ) -> Option<f32> {
+    ) -> Option<f64> {
         if candles.len() < period + 1 {
             return None;
         }
@@ -346,11 +346,11 @@ impl BrainEngine {
         
         for i in (candles.len() - period)..candles.len() {
             let change = candles[i].close - candles[i - 1].close;
-            let change_f32 = change.to_string().parse::<f32>().unwrap_or(0.0);
-            if change_f32 > 0.0 {
-                gains += change_f32;
+            let change_f64 = change.to_string().parse::<f64>().unwrap_or(0.0);
+            if change_f64 > 0.0 {
+                gains += change_f64;
             } else {
-                losses += change_f32.abs();
+                losses += change_f64.abs();
             }
         }
         
@@ -382,7 +382,7 @@ impl BrainEngine {
     fn check_volume(
         &self,
         candles: &[Candle],
-        threshold: f32,
+        threshold: f64,
     ) -> bool {
         if candles.len() < 2 {
             return false;
@@ -397,14 +397,14 @@ impl BrainEngine {
             return false;
         }
         
-        let ratio = (current / avg).to_string().parse::<f32>().unwrap_or(0.0);
+        let ratio = (current / avg).to_string().parse::<f64>().unwrap_or(0.0);
         ratio >= threshold
     }
 
     fn apply_strictness(
         &self,
-        confidence: f32,
-    ) -> f32 {
+        confidence: f64,
+    ) -> f64 {
         let multiplier = match self.config.algo.strictness {
             Strictness::Low => 1.0,
             Strictness::Medium => 0.9,
@@ -413,7 +413,7 @@ impl BrainEngine {
         (confidence * multiplier).min(0.95)
     }
 
-    fn min_confidence(&self) -> f32 {
+    fn min_confidence(&self) -> f64 {
         match self.config.algo.strictness {
             Strictness::Low => 0.45,
             Strictness::Medium => 0.60,
@@ -428,10 +428,10 @@ impl BrainEngine {
             Strictness::Medium => 0.75,
             Strictness::High => 0.5,
         };
-        let max_from_risk = self.config.trade.risk_caps.max_position_size_percent as f32 / 100.0;
+        let max_from_risk = self.config.trade.risk_caps.max_position_size_percent as f64 / 100.0;
         
         let size = base * strictness_factor * max_from_risk;
-        // Convert f32 to Decimal via string parsing
+        // Convert f64 to Decimal via string parsing
         Decimal::from_str(&size.to_string()).unwrap_or(Decimal::ZERO)
     }
 }

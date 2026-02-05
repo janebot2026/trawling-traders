@@ -66,7 +66,7 @@ pub struct SignalContext {
 #[derive(Debug, serde::Serialize)]
 pub struct ConfidenceFactor {
     pub factor: String,
-    pub contribution: f32,
+    pub contribution: f64,
 }
 
 /// POST /simulate-signal - Dry run signal generation

@@ -40,7 +40,7 @@ pub struct IdentityConfig {
     /// Trading mission/style description
     pub mission: String,
     /// Temperament: 0.0 = cautious, 1.0 = bold
-    pub temperament: f32,
+    pub temperament: f64,
 }
 
 impl Default for IdentityConfig {
