@@ -6,7 +6,6 @@ import {
   ViewStyle,
   TouchableOpacity,
 } from 'react-native';
-import { lightTheme, darkTheme } from '../theme';
 
 interface AnimatedCardProps {
   children: React.ReactNode;
