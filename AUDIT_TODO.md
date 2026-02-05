@@ -88,13 +88,15 @@
 - **Test Plan:** Monitor memory over extended period with diverse symbols
 - **Status:** Not started
 
-### [ ] DR-04: Division by zero in price aggregation
+### [x] DR-04: Division by zero in price aggregation
 - **Files:** `services/data-retrieval/src/lib.rs`
 - **Planned Fix:**
   - Guard against zero total_weight
   - Return error if all sources have zero confidence
 - **Test Plan:** Test aggregation with all-zero confidence values
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Returns SourceUnhealthy error when total_weight < epsilon
 
 ---
 
@@ -610,11 +612,11 @@
 
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
-| Critical | 8 | 5 | 3 |
+| Critical | 8 | 6 | 2 |
 | High | 16 | 1 | 15 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **6** | **65** |
+| **Total** | **71** | **7** | **64** |
 
 ---
 
@@ -637,4 +639,6 @@
 | CP-01 | 4064feeb | 2026-02-04 | Implemented proper JWT signature verification with HS256 |
 | CP-02 | 0cf0d9d5 | 2026-02-04 | Implemented AES-256-GCM encryption with 4 unit tests |
 | BR-01 | 67ee0fb3 | 2026-02-04 | Replaced pkill -f with targeted PID kill using libc |
+| BR-05 | 54a165bc | 2026-02-04 | Used saturating_add to prevent cash overflow |
+| DR-04 | (pending) | 2026-02-04 | Guard against zero total_weight in price aggregation |
 

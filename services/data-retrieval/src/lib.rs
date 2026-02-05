@@ -217,7 +217,14 @@ impl PriceAggregator {
         let total_weight: f64 = prices.iter()
             .map(|p| p.confidence.unwrap_or(0.5))
             .sum();
-        
+
+        // Guard against division by zero if all sources have zero confidence
+        if total_weight < f64::EPSILON {
+            return Err(DataRetrievalError::SourceUnhealthy(
+                "All sources have zero confidence".to_string()
+            ));
+        }
+
         let weighted_sum: rust_decimal::Decimal = prices
             .iter()
             .map(|p| {
@@ -225,8 +232,10 @@ impl PriceAggregator {
                 p.price * rust_decimal::Decimal::try_from(weight).unwrap_or_default()
             })
             .sum();
-        
-        let aggregated_price = weighted_sum / rust_decimal::Decimal::try_from(total_weight).unwrap_or_default();
+
+        let total_weight_decimal = rust_decimal::Decimal::try_from(total_weight)
+            .map_err(|_| DataRetrievalError::SourceUnhealthy("Invalid weight value".to_string()))?;
+        let aggregated_price = weighted_sum / total_weight_decimal;
         
         // Calculate spread
         let prices_f64: Vec<f64> = prices
