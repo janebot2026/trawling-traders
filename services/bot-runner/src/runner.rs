@@ -5,6 +5,7 @@ use rust_decimal::prelude::ToPrimitive;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
+use tokio::signal;
 use tracing::{debug, error, info, warn};
 
 use crate::amount::{get_tokens_for_focus, to_raw_amount, TokenInfo};
@@ -49,7 +50,7 @@ impl BotRunner {
         }
     }
 
-    /// Run the main bot loop
+    /// Run the main bot loop with graceful shutdown handling
     pub async fn run(mut self) -> anyhow::Result<()> {
         info!("Bot runner starting main loop...");
         info!("Keypair path: {:?}", self.config.keypair_path);
@@ -57,16 +58,16 @@ impl BotRunner {
 
         // Config polling interval (30 seconds)
         let mut config_interval = interval(Duration::from_secs(30));
-        
+
         // Heartbeat interval (30 seconds)
         let mut heartbeat_interval = interval(Duration::from_secs(30));
-        
+
         // Trading interval (60 seconds - check for signals every minute)
         let mut trading_interval = interval(Duration::from_secs(60));
-        
+
         // Reconciliation interval (5 minutes)
         let mut reconcile_interval = interval(Duration::from_secs(300));
-        
+
         // Intent cleanup interval (5 minutes)
         let mut cleanup_interval = interval(Duration::from_secs(300));
 
@@ -75,8 +76,37 @@ impl BotRunner {
             error!("Initial config poll error: {}", e);
         }
 
+        // Run main loop with shutdown handling
+        let shutdown_reason = self.run_main_loop(
+            &mut config_interval,
+            &mut heartbeat_interval,
+            &mut trading_interval,
+            &mut reconcile_interval,
+            &mut cleanup_interval,
+        ).await;
+
+        info!("Shutdown triggered: {}", shutdown_reason);
+
+        // Graceful shutdown: send final events and cleanup
+        self.graceful_shutdown(&shutdown_reason).await
+    }
+
+    /// Main loop separated for cleaner shutdown handling
+    async fn run_main_loop(
+        &mut self,
+        config_interval: &mut tokio::time::Interval,
+        heartbeat_interval: &mut tokio::time::Interval,
+        trading_interval: &mut tokio::time::Interval,
+        reconcile_interval: &mut tokio::time::Interval,
+        cleanup_interval: &mut tokio::time::Interval,
+    ) -> String {
         loop {
             tokio::select! {
+                // Handle SIGINT (Ctrl+C)
+                _ = signal::ctrl_c() => {
+                    info!("Received SIGINT, initiating graceful shutdown...");
+                    return "SIGINT".to_string();
+                }
                 _ = config_interval.tick() => {
                     if let Err(e) = self.poll_config().await {
                         error!("Config poll error: {}", e);
@@ -102,6 +132,34 @@ impl BotRunner {
                 }
             }
         }
+    }
+
+    /// Perform graceful shutdown: send final events and cleanup
+    async fn graceful_shutdown(&self, reason: &str) -> anyhow::Result<()> {
+        info!("Performing graceful shutdown...");
+
+        // Send shutdown event to control plane
+        let event = crate::client::EventInput {
+            event_type: "bot_shutdown".to_string(),
+            message: "Bot shutting down gracefully".to_string(),
+            metadata: Some(serde_json::json!({
+                "trade_count": self.trade_count,
+                "reason": reason
+            })),
+            timestamp: chrono::Utc::now(),
+        };
+
+        if let Err(e) = self.client.send_events(vec![event]).await {
+            warn!("Failed to send shutdown event: {}", e);
+        }
+
+        // Send final heartbeat
+        if let Err(e) = self.send_heartbeat().await {
+            warn!("Failed to send final heartbeat: {}", e);
+        }
+
+        info!("Graceful shutdown complete");
+        Ok(())
     }
 
     /// Poll for config updates
