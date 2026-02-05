@@ -149,7 +149,12 @@ export function CreateBotScreen() {
         llmApiKey: llmApiKey.trim(),
       });
       Alert.alert('Success', 'Trawler deployed!');
-      navigation.navigate('Main');
+      // Small delay to ensure server has committed the new bot before navigating
+      // This prevents the race condition where BotsList fetches before commit
+      await new Promise(resolve => setTimeout(resolve, 300));
+      // Use goBack() to return to the previous screen (Main/Bots tab)
+      // This triggers useFocusEffect in BotsListScreen to refresh the list
+      navigation.goBack();
     } catch (error) {
       Alert.alert('Error', 'Failed to deploy trawler');
     } finally {

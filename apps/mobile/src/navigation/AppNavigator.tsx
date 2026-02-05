@@ -15,7 +15,7 @@ import { ProfileScreen } from '../screens/ProfileScreen';
 export type RootStackParamList = {
   Auth: undefined;
   Subscribe: undefined;
-  Main: undefined;
+  Main: { refresh?: boolean } | undefined;
   CreateBot: undefined;
   BotDetail: { botId: string };
   BotSettings: { botId: string };
