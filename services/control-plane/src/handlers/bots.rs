@@ -141,11 +141,14 @@ pub async fn create_bot(
 
     let bot_id = Uuid::new_v4();
 
+    // Generate secure bootstrap token for one-time secrets retrieval
+    let bootstrap_token = generate_bootstrap_token();
+
     let bot = sqlx::query_as::<_, Bot>(
         r#"
         INSERT INTO bots (
-            id, user_id, name, status, persona, region, desired_version_id, config_status
-        ) VALUES ($1, $2, $3, 'provisioning', $4, 'nyc1', $5, 'pending')
+            id, user_id, name, status, persona, region, desired_version_id, config_status, bootstrap_token
+        ) VALUES ($1, $2, $3, 'provisioning', $4, 'nyc1', $5, 'pending', $6)
         RETURNING *
         "#
     )
@@ -154,6 +157,7 @@ pub async fn create_bot(
     .bind(&req.name)
     .bind(req.persona)
     .bind(config_id)
+    .bind(&bootstrap_token)
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -183,18 +187,18 @@ pub async fn create_bot(
 }
 
 /// Generate cloud-init user_data script for droplet provisioning
-/// 
-/// FIXES APPLIED:
-/// - Secrets injection: JUPITER_API_KEY, DATA_RETRIEVAL_URL from control-plane env
-/// - Wallet generation: claw-trader creates wallet if not exists
-/// - Wallet reporting: POST wallet address back to control plane
-/// - Proper env vars for bot-runner
+///
+/// SECURITY: Secrets are NOT embedded in user-data. Instead, the bot uses a
+/// one-time bootstrap token to fetch secrets from the control plane API after boot.
+/// This prevents secrets from being exposed in:
+/// - DigitalOcean metadata service
+/// - cloud-init logs
+/// - Droplet console access
 fn generate_user_data(
     bot_id: Uuid,
     bot_name: &str,
     control_plane_url: &str,
-    data_retrieval_url: &str,
-    jupiter_api_key: &str,
+    bootstrap_token: &str,
 ) -> String {
     format!(r##"#!/bin/bash
 set -euo pipefail
@@ -205,18 +209,18 @@ export DEBIAN_FRONTEND=noninteractive
 export BOT_ID="{}"
 export BOT_NAME="{}"
 export CONTROL_PLANE_URL="{}"
-export DATA_RETRIEVAL_URL="{}"
-export JUPITER_API_KEY="{}"
+export BOOTSTRAP_TOKEN="{}"
 export HOME=/root
 export WORKSPACE_DIR=/opt/trawling-traders
 export KEYPAIR_DIR="$WORKSPACE_DIR/.config/solana"
 export KEYPAIR_PATH="$KEYPAIR_DIR/id.json"
+export SECRETS_FILE="$WORKSPACE_DIR/.secrets"
 
 echo "=== Starting Trawler Provisioning ==="
 echo "Bot ID: $BOT_ID"
 echo "Bot Name: $BOT_NAME"
 echo "Control Plane: $CONTROL_PLANE_URL"
-echo "Data Retrieval: $DATA_RETRIEVAL_URL"
+echo "Note: Secrets will be fetched securely after installation"
 
 # Update system
 echo "[1/10] Updating system packages..."
@@ -281,13 +285,46 @@ if [ -f "$KEYPAIR_PATH" ]; then
     echo "Wallet keypair exists at $KEYPAIR_PATH"
 fi
 
+# Fetch secrets from control plane (one-time bootstrap)
+echo "[8/12] Fetching secrets from control plane..."
+SECRETS_JSON=""
+for i in {{1..5}}; do
+    SECRETS_JSON=$(curl -sf -X POST "$CONTROL_PLANE_URL/v1/bot/$BOT_ID/secrets" \
+        -H "Content-Type: application/json" \
+        -d '{{"bootstrap_token":"'$BOOTSTRAP_TOKEN'"}}') && break
+    echo "Secrets fetch attempt $i failed, retrying in 5s..."
+    sleep 5
+done
+
+if [ -z "$SECRETS_JSON" ]; then
+    echo "FATAL: Failed to fetch secrets from control plane"
+    exit 1
+fi
+
+# Parse secrets and store securely
+JUPITER_API_KEY=$(echo "$SECRETS_JSON" | jq -r '.jupiter_api_key')
+DATA_RETRIEVAL_URL=$(echo "$SECRETS_JSON" | jq -r '.data_retrieval_url')
+SOLANA_RPC_URL=$(echo "$SECRETS_JSON" | jq -r '.solana_rpc_url')
+
+# Store secrets in protected file (readable only by root)
+echo "Storing secrets securely..."
+cat > "$SECRETS_FILE" << EOFSECRETS
+JUPITER_API_KEY=$JUPITER_API_KEY
+DATA_RETRIEVAL_URL=$DATA_RETRIEVAL_URL
+SOLANA_RPC_URL=$SOLANA_RPC_URL
+EOFSECRETS
+chmod 600 "$SECRETS_FILE"
+
+# Clear bootstrap token from environment (one-time use)
+unset BOOTSTRAP_TOKEN
+
 # Configure claw-trader-cli for the bot
-echo "[8/10] Configuring claw-trader-cli..."
+echo "[9/12] Configuring claw-trader-cli..."
 mkdir -p "$WORKSPACE_DIR/.config/claw-trader"
 cat > "$WORKSPACE_DIR/.config/claw-trader/config.toml" << EOF
 [api]
 ultra_base_url = "https://api.jup.ag/ultra/v1"
-api_key = "{}"
+api_key = "$JUPITER_API_KEY"
 
 [trading]
 default_slippage_bps = 50
@@ -299,9 +336,10 @@ paper_trading_default = true
 enabled = true
 auto_approve = false
 EOF
+chmod 600 "$WORKSPACE_DIR/.config/claw-trader/config.toml"
 
 # Install bot-runner
-echo "[9/10] Installing bot-runner..."
+echo "[10/12] Installing bot-runner..."
 git clone https://github.com/janebot2026/trawling-traders.git
 cd trawling-traders/services/bot-runner
 cargo build --release
@@ -309,19 +347,17 @@ cp target/release/bot-runner /usr/local/bin/
 cd "$WORKSPACE_DIR"
 
 # Report wallet address to control plane (retry loop)
-echo "[10/10] Reporting wallet to control plane..."
+echo "[11/12] Reporting wallet to control plane..."
 for i in {{1..5}}; do
-    # Try to get wallet address - bot-runner will also do this on startup
-    # For now, we report what we have (may be empty initially)
-    curl -X POST "$CONTROL_PLANE_URL/v1/bot/{bot_id}/wallet" \
+    curl -X POST "$CONTROL_PLANE_URL/v1/bot/$BOT_ID/wallet" \
         -H "Content-Type: application/json" \
-        -d "{{\"wallet_address\":\"$WALLET_ADDRESS\"}}" && break
+        -d '{{"wallet_address":"'$WALLET_ADDRESS'"}}' && break
     echo "Wallet report attempt $i failed, retrying..."
     sleep 5
 done
 
-# Create bot-runner systemd service
-echo "Creating bot-runner service..."
+# Create bot-runner systemd service (reads secrets from file)
+echo "[12/12] Creating bot-runner service..."
 cat > /etc/systemd/system/bot-runner.service << EOFSERVICE
 [Unit]
 Description=Trawling Traders Bot Runner
@@ -330,15 +366,13 @@ After=network.target openclaw-agent.service
 [Service]
 Type=simple
 User=root
-Environment="BOT_ID={bot_id}"
-Environment="CONTROL_PLANE_URL={control_plane_url}"
-Environment="DATA_RETRIEVAL_URL={data_retrieval_url}"
-Environment="SOLANA_RPC_URL=https://api.devnet.solana.com"
-Environment="JUPITER_API_KEY={jupiter_api_key}"
+EnvironmentFile=$SECRETS_FILE
+Environment="BOT_ID=$BOT_ID"
+Environment="CONTROL_PLANE_URL=$CONTROL_PLANE_URL"
 Environment="RUST_LOG=info"
 Environment="CLAW_TRADER_PATH=/usr/local/bin/claw-trader"
-Environment="CLAW_TRADER_CONFIG=/opt/trawling-traders/.config/claw-trader"
-Environment="AGENT_WALLET_PATH=/opt/trawling-traders/.config/solana/id.json"
+Environment="CLAW_TRADER_CONFIG=$WORKSPACE_DIR/.config/claw-trader"
+Environment="AGENT_WALLET_PATH=$KEYPAIR_PATH"
 ExecStart=/usr/local/bin/bot-runner
 Restart=always
 RestartSec=10
@@ -349,7 +383,7 @@ EOFSERVICE
 
 # Register bot with control plane before starting services
 echo "Registering bot with control plane..."
-curl -X POST "$CONTROL_PLANE_URL/v1/bot/{bot_id}/register" \
+curl -X POST "$CONTROL_PLANE_URL/v1/bot/$BOT_ID/register" \
     -H "Content-Type: application/json" \
     -d '{{"agent_wallet":"'$WALLET_ADDRESS'"}}' || echo "Registration may have failed, bot-runner will retry"
 
@@ -366,13 +400,9 @@ echo "Wallet: $WALLET_ADDRESS"
 echo "Status: online"
 echo "Services: bot-runner, openclaw-agent"
 echo "Trading Tools: claw-trader available at /usr/local/bin/claw-trader"
+echo "Note: Secrets stored securely at $SECRETS_FILE"
 "##,
-        bot_id, bot_name, control_plane_url, data_retrieval_url, jupiter_api_key,
-        jupiter_api_key,
-        bot_id = bot_id,
-        control_plane_url = control_plane_url,
-        data_retrieval_url = data_retrieval_url,
-        jupiter_api_key = jupiter_api_key,
+        bot_id, bot_name, control_plane_url, bootstrap_token
     )
 }
 
@@ -425,20 +455,30 @@ async fn spawn_bot_droplet(
     
     let control_plane_url = std::env::var("CONTROL_PLANE_URL")
         .unwrap_or_else(|_| "https://api.trawlingtraders.com".to_string());
-    
-    // Get secrets from environment
-    let data_retrieval_url = std::env::var("DATA_RETRIEVAL_URL")
-        .unwrap_or_else(|_| "http://localhost:8080".to_string());
-    
-    let jupiter_api_key = std::env::var("JUPITER_API_KEY")
-        .unwrap_or_default();
-    
-    if jupiter_api_key.is_empty() {
-        warn!("JUPITER_API_KEY not set, bot {} may fail to trade", bot_id);
-    }
-    
-    // Generate comprehensive user_data script with secrets
-    let user_data = generate_user_data(bot_id, &bot_name, &control_plane_url, &data_retrieval_url, &jupiter_api_key);
+
+    // Fetch bot's bootstrap token from database
+    let bootstrap_token = match sqlx::query_scalar::<_, Option<String>>(
+        "SELECT bootstrap_token FROM bots WHERE id = $1"
+    )
+    .bind(bot_id)
+    .fetch_one(&pool)
+    .await
+    {
+        Ok(Some(token)) => token,
+        Ok(None) => {
+            error!("Bot {} has no bootstrap token - cannot provision securely", bot_id);
+            update_bot_status(&pool, bot_id, BotStatus::Error, "Missing bootstrap token").await;
+            return;
+        }
+        Err(e) => {
+            error!("Failed to fetch bootstrap token for bot {}: {}", bot_id, e);
+            update_bot_status(&pool, bot_id, BotStatus::Error, "Database error").await;
+            return;
+        }
+    };
+
+    // Generate user_data script with bootstrap token (secrets fetched at runtime)
+    let user_data = generate_user_data(bot_id, &bot_name, &control_plane_url, &bootstrap_token);
     
     let droplet_req = claw_spawn::domain::DropletCreateRequest {
         name: droplet_name,
@@ -796,4 +836,12 @@ pub async fn get_current_user(
     };
     
     Ok(Json(user))
+}
+
+/// Generate a cryptographically secure bootstrap token
+fn generate_bootstrap_token() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let bytes: [u8; 32] = rng.gen();
+    hex::encode(bytes)
 }

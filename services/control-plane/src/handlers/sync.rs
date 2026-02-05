@@ -379,3 +379,86 @@ fn generate_cron_jobs(config: &ConfigVersion) -> Vec<CronJob> {
 fn decrypt_api_key(encrypted: &str, secrets: &crate::SecretsManager) -> Result<String, String> {
     secrets.decrypt(encrypted).map_err(|e| format!("Failed to decrypt API key: {}", e))
 }
+
+/// Request body for secrets endpoint
+#[derive(Debug, serde::Deserialize)]
+pub struct SecretsRequest {
+    pub bootstrap_token: String,
+}
+
+/// Response for secrets endpoint
+#[derive(Debug, serde::Serialize)]
+pub struct SecretsResponse {
+    pub jupiter_api_key: String,
+    pub data_retrieval_url: String,
+    pub solana_rpc_url: String,
+}
+
+/// POST /bot/:id/secrets - Bot retrieves secrets using bootstrap token (one-time)
+///
+/// This endpoint allows a bot to securely fetch deployment secrets after provisioning,
+/// instead of having secrets embedded in cloud-init user-data. The bootstrap token
+/// is single-use and becomes invalid after first retrieval.
+pub async fn get_bot_secrets(
+    State(state): State<Arc<AppState>>,
+    Path(bot_id): Path<Uuid>,
+    Json(request): Json<SecretsRequest>,
+) -> Result<Json<SecretsResponse>, (StatusCode, String)> {
+    // Fetch bot with token validation
+    let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
+        .bind(bot_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+
+    // Validate bootstrap token
+    let stored_token = bot.bootstrap_token.as_ref().ok_or_else(|| {
+        (StatusCode::FORBIDDEN, "No bootstrap token configured for this bot".to_string())
+    })?;
+
+    if stored_token != &request.bootstrap_token {
+        warn!("Invalid bootstrap token attempt for bot {}", bot_id);
+        return Err((StatusCode::UNAUTHORIZED, "Invalid bootstrap token".to_string()));
+    }
+
+    // Check if token was already used
+    if bot.bootstrap_token_used_at.is_some() {
+        warn!("Bootstrap token already used for bot {}", bot_id);
+        return Err((StatusCode::FORBIDDEN, "Bootstrap token already used".to_string()));
+    }
+
+    // Mark token as used (atomic update)
+    let rows_affected = sqlx::query(
+        "UPDATE bots SET bootstrap_token_used_at = NOW(), updated_at = NOW()
+         WHERE id = $1 AND bootstrap_token_used_at IS NULL"
+    )
+    .bind(bot_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .rows_affected();
+
+    if rows_affected == 0 {
+        // Race condition - token was used by another request
+        return Err((StatusCode::FORBIDDEN, "Bootstrap token already used (concurrent)".to_string()));
+    }
+
+    // Retrieve secrets from environment
+    let jupiter_api_key = std::env::var("JUPITER_API_KEY").unwrap_or_default();
+    let data_retrieval_url = std::env::var("DATA_RETRIEVAL_URL")
+        .unwrap_or_else(|_| "https://data.trawling-traders.com".to_string());
+    let solana_rpc_url = std::env::var("SOLANA_RPC_URL")
+        .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
+
+    info!("Bot {} retrieved secrets successfully", bot_id);
+    Logger::bot_event(&bot_id.to_string(), "secrets_retrieved", "Bootstrap secrets fetched");
+
+    Ok(Json(SecretsResponse {
+        jupiter_api_key,
+        data_retrieval_url,
+        solana_rpc_url,
+    }))
+}

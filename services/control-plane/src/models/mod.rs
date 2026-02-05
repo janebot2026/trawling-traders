@@ -173,6 +173,12 @@ pub struct Bot {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_heartbeat_at: Option<DateTime<Utc>>,
+    /// One-time bootstrap token for secure secrets retrieval
+    #[serde(skip_serializing)]
+    pub bootstrap_token: Option<String>,
+    /// When the bootstrap token was used (null = not yet used)
+    #[serde(skip_serializing)]
+    pub bootstrap_token_used_at: Option<DateTime<Utc>>,
 }
 
 /// Configuration version

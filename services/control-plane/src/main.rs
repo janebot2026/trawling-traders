@@ -114,6 +114,7 @@ async fn build_router(
         .route("/bot/{id}/wallet", post(control_plane::handlers::sync::report_wallet))
         .route("/bot/{id}/heartbeat", post(control_plane::handlers::sync::heartbeat))
         .route("/bot/{id}/events", post(control_plane::handlers::sync::ingest_events))
+        .route("/bot/{id}/secrets", post(control_plane::handlers::sync::get_bot_secrets))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             control_plane::middleware::rate_limit::bot_rate_limit_middleware
