@@ -264,10 +264,14 @@ impl BinanceWebSocketClient {
             .ok_or_else(|| DataRetrievalError::InvalidResponse(
                 "Missing timestamp".to_string()
             ))?;
-        
+
+        // Convert millisecond timestamp to DateTime<Utc>
+        let timestamp = chrono::DateTime::from_timestamp_millis(timestamp_ms)
+            .unwrap_or_else(chrono::Utc::now);
+
         let price = price_str.parse::<f64>()
             .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()))?;
-        
+
         // Format symbol as BTC/USDT from BTCUSDT
         let formatted_symbol = if symbol.ends_with("USDT") {
             format!("{}/USDT", &symbol[..symbol.len()-4])
@@ -276,13 +280,13 @@ impl BinanceWebSocketClient {
         } else {
             symbol.to_string()
         };
-        
+
         let price_point = PricePoint {
             symbol: formatted_symbol,
             price: Decimal::try_from(price)
                 .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()))?,
             source: "binance".to_string(),
-            timestamp: chrono::Utc::now(), // Use current time to avoid chrono API issues
+            timestamp,
             confidence: Some(0.95), // Binance is real-time exchange data
         };
         

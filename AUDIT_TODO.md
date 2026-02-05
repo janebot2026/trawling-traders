@@ -171,13 +171,15 @@
 - **Status:** COMPLETED
 - **Verification:** cargo check passes
 
-### [ ] DR-05: Incorrect timestamp handling (uses current time)
+### [x] DR-05: Incorrect timestamp handling (uses current time)
 - **Files:** `services/data-retrieval/src/sources/binance_ws.rs`
 - **Planned Fix:**
   - Use parsed timestamp from trade data instead of `Utc::now()`
   - Parse millisecond timestamp correctly
 - **Test Plan:** Compare trade timestamps vs server time
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Uses DateTime::from_timestamp_millis() with fallback to now()
 
 ### [ ] DR-06: No WebSocket reconnection logic
 - **Files:** `services/data-retrieval/src/lib.rs`
@@ -617,10 +619,10 @@
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
-| High | 16 | 2 | 14 |
+| High | 16 | 3 | 13 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **9** | **62** |
+| **Total** | **71** | **10** | **61** |
 
 ---
 
@@ -647,5 +649,6 @@
 | DR-04 | 54a51c9e | 2026-02-04 | Guard against zero total_weight in price aggregation |
 | DR-03 | 6f6b0bb4 | 2026-02-04 | Added TTL eviction and max size limits to price cache |
 | DR-01 | e4ddb6e3 | 2026-02-04 | Split WebSocket into separate read/write halves |
-| DR-02 | (pending) | 2026-02-04 | Increased price channel capacity from 100 to 10000 |
+| DR-02 | b50edd2f | 2026-02-04 | Increased price channel capacity from 100 to 10000 |
+| DR-05 | (pending) | 2026-02-04 | Use actual trade timestamp instead of Utc::now() |
 
