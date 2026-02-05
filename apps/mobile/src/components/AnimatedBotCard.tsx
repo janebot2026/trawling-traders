@@ -49,7 +49,7 @@ function StatusBadge({ status }: { status: Bot['status'] }) {
       pulse.start();
       return () => pulse.stop();
     }
-  }, [status]);
+  }, [status, pulseAnim]);
   
   return (
     <Animated.View
@@ -106,7 +106,7 @@ export function AnimatedBotCard({ bot, onPress, index = 0 }: AnimatedBotCardProp
         easing: (x) => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2,
       }),
     ]).start();
-  }, [index]);
+  }, [index, fadeAnim, translateY]);
   
   const handlePressIn = () => {
     pressScale(scaleAnim, true);
