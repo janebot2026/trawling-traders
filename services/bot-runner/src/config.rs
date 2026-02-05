@@ -76,12 +76,22 @@ pub struct BotConfig {
 
 impl BotConfig {
     /// Parse config from control plane response
-    pub fn from_response(resp: BotConfigResponse) -> Self {
-        let config: BotConfigInner = serde_json::from_value(resp.config)
-            .unwrap_or_default();
+    ///
+    /// Returns error if config JSON is malformed or version_id is invalid.
+    pub fn from_response(resp: BotConfigResponse) -> anyhow::Result<Self> {
+        let config: BotConfigInner = serde_json::from_value(resp.config.clone())
+            .map_err(|e| {
+                tracing::error!("Failed to parse bot config JSON: {}", e);
+                anyhow::anyhow!("Invalid bot config JSON: {}", e)
+            })?;
 
-        Self {
-            version_id: resp.version_id.parse().unwrap_or_default(),
+        let version_id = resp.version_id.parse().map_err(|e| {
+            tracing::error!("Failed to parse version_id '{}': {}", resp.version_id, e);
+            anyhow::anyhow!("Invalid version_id: {}", e)
+        })?;
+
+        Ok(Self {
+            version_id,
             version: resp.version,
             name: config.agent_config.name,
             persona: config.agent_config.persona,
@@ -98,7 +108,7 @@ impl BotConfig {
             execution: config.execution.unwrap_or_default(),
             llm_provider: config.llm_config.provider,
             llm_api_key: config.llm_config.api_key,
-        }
+        })
     }
 }
 

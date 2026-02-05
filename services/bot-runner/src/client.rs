@@ -142,7 +142,7 @@ impl ControlPlaneClient {
             StatusCode::OK => {
                 let config: BotConfigResponse = response.json().await?;
                 debug!("Received config version: {}", config.version);
-                Ok(Some(BotConfig::from_response(config)))
+                Ok(Some(BotConfig::from_response(config)?))
             }
             StatusCode::NOT_MODIFIED => {
                 debug!("Config unchanged");
