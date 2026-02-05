@@ -27,3 +27,4 @@ pub use executor::{
 pub use intent::{IntentRegistry, TradeIntent, TradeIntentState};
 pub use portfolio::{Portfolio, PortfolioSnapshot, Position};
 pub use runner::BotRunner;
+pub mod state;
