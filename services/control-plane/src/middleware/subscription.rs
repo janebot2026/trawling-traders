@@ -16,8 +16,9 @@ use uuid::Uuid;
 use crate::{middleware::AuthContext, AppState};
 
 /// Subscription tiers
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SubscriptionTier {
+    #[default]
     Free,
     Pro,
     Enterprise,
@@ -65,12 +66,6 @@ impl SubscriptionTier {
 
     pub fn has_feature(&self, feature: &str) -> bool {
         self.features().contains(&feature)
-    }
-}
-
-impl Default for SubscriptionTier {
-    fn default() -> Self {
-        SubscriptionTier::Free
     }
 }
 

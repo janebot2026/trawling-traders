@@ -86,6 +86,12 @@ pub struct PriceAggregator {
     latest_prices: Arc<RwLock<HashMap<String, PricePoint>>>, // symbol -> price
 }
 
+impl Default for PriceAggregator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PriceAggregator {
     pub fn new() -> Self {
         Self {

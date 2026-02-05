@@ -30,10 +30,8 @@ pub fn aggregate_prices(prices: &[PricePoint]) -> Result<AggregatedPrice> {
     // Calculate spread
     let min_price = prices.iter().map(|p| p.price).min().unwrap();
     let max_price = prices.iter().map(|p| p.price).max().unwrap();
-    let avg_price =
-        (min_price + max_price) / rust_decimal::Decimal::try_from(2).unwrap_or_default();
-    let spread = (max_price - min_price) / avg_price
-        * rust_decimal::Decimal::try_from(100).unwrap_or_default();
+    let avg_price = (min_price + max_price) / rust_decimal::Decimal::from(2);
+    let spread = (max_price - min_price) / avg_price * rust_decimal::Decimal::from(100);
 
     let sources = prices
         .iter()
@@ -49,7 +47,7 @@ pub fn aggregate_prices(prices: &[PricePoint]) -> Result<AggregatedPrice> {
     let avg_confidence = total_confidence / prices.len() as f64;
 
     // Warn if spread is high (>1%)
-    if spread > rust_decimal::Decimal::try_from(1).unwrap_or_default() {
+    if spread > rust_decimal::Decimal::from(1) {
         warn!(
             "High price spread detected: {:.2}%",
             spread.to_f64().unwrap_or(0.0)

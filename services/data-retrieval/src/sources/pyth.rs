@@ -75,6 +75,12 @@ pub struct PythClient {
     base_url: String,
 }
 
+impl Default for PythClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PythClient {
     pub fn new() -> Self {
         Self {

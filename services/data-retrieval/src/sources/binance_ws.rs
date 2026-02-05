@@ -258,10 +258,10 @@ impl BinanceWebSocketClient {
             .map_err(|e| DataRetrievalError::InvalidResponse(format!("Invalid price: {}", e)))?;
 
         // Format symbol as BTC/USDT from BTCUSDT
-        let formatted_symbol = if symbol.ends_with("USDT") {
-            format!("{}/USDT", &symbol[..symbol.len() - 4])
-        } else if symbol.ends_with("USD") {
-            format!("{}/USD", &symbol[..symbol.len() - 3])
+        let formatted_symbol = if let Some(base) = symbol.strip_suffix("USDT") {
+            format!("{}/USDT", base)
+        } else if let Some(base) = symbol.strip_suffix("USD") {
+            format!("{}/USD", base)
         } else {
             symbol.to_string()
         };

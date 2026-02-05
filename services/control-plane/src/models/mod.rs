@@ -35,18 +35,13 @@ pub enum AssetFocus {
     Custom,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "strictness", rename_all = "snake_case")]
 pub enum Strictness {
     Low,
+    #[default]
     Medium,
     High,
-}
-
-impl Default for Strictness {
-    fn default() -> Self {
-        Strictness::Medium
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]

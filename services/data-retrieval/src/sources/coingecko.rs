@@ -291,6 +291,7 @@ impl CoinGeckoClient {
     ///
     /// Note: CoinGecko OHLC endpoint only supports specific day values:
     /// - 1, 7, 14, 30, 90, 180, 365, max
+    ///
     /// Candle granularity is automatic based on days:
     /// - 1-2 days: 30min candles
     /// - 3-30 days: 4h candles

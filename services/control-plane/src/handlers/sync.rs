@@ -45,7 +45,7 @@ pub async fn get_bot_config(
         hash: config_hash,
         agent_config: AgentConfig {
             name: config.name.clone(),
-            persona: config.persona.clone(),
+            persona: config.persona,
             max_position_size_percent: config.max_position_size_percent,
             max_daily_loss_usd: config.max_daily_loss_usd,
             max_drawdown_percent: config.max_drawdown_percent,
@@ -53,11 +53,11 @@ pub async fn get_bot_config(
         },
         cron_jobs,
         trading_params: TradingParams {
-            asset_focus: config.asset_focus.clone(),
+            asset_focus: config.asset_focus,
             custom_assets: config.custom_assets.clone(),
-            algorithm_mode: config.algorithm_mode.clone(),
-            strictness: config.strictness.clone(),
-            trading_mode: config.trading_mode.clone(),
+            algorithm_mode: config.algorithm_mode,
+            strictness: config.strictness,
+            trading_mode: config.trading_mode,
         },
         llm_config: LlmConfig {
             provider: config.llm_provider.clone(),
@@ -163,7 +163,7 @@ pub async fn report_wallet(
 
     match result {
         Ok(res) if res.rows_affected() == 0 => {
-            return Err((StatusCode::NOT_FOUND, "Bot not found".to_string()));
+            Err((StatusCode::NOT_FOUND, "Bot not found".to_string()))
         }
         Ok(_) => {
             info!(

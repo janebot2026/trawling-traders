@@ -3,7 +3,6 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn, Level};
-use tracing_subscriber;
 
 /// Application state shared across handlers
 pub struct AppState {

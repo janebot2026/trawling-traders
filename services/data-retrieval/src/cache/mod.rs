@@ -58,6 +58,7 @@ impl RedisCache {
 }
 
 // Stub for when Redis is not available
+#[derive(Default)]
 pub struct NoOpCache;
 
 impl NoOpCache {

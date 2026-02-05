@@ -6,7 +6,7 @@ use crate::models::{AssetFocus, RiskCaps, Strictness, TradingMode};
 use serde::{Deserialize, Serialize};
 
 /// Complete trader brain configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TraderBrainConfig {
     /// Who the bot is (personality layer)
     pub identity: IdentityConfig,
@@ -18,18 +18,6 @@ pub struct TraderBrainConfig {
     pub trade: TradeConfig,
     /// How it decides (algorithm layer)
     pub algo: AlgoConfig,
-}
-
-impl Default for TraderBrainConfig {
-    fn default() -> Self {
-        Self {
-            identity: IdentityConfig::default(),
-            playbook: PlaybookConfig::default(),
-            brain: BrainKnowledgeConfig::default(),
-            trade: TradeConfig::default(),
-            algo: AlgoConfig::default(),
-        }
-    }
 }
 
 /// 1. Identity Layer - Who the bot is
