@@ -79,6 +79,10 @@ async function clearAuthState(): Promise<void> {
 // Default timeout for API requests (30 seconds)
 const DEFAULT_TIMEOUT_MS = 30000;
 
+// Retry configuration
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 1000;
+
 // Timeout error for distinguishing from other errors
 export class TimeoutError extends ApiError {
   constructor(message: string = 'Request timed out') {
@@ -87,11 +91,22 @@ export class TimeoutError extends ApiError {
   }
 }
 
-// HTTP client with auth, automatic token refresh, and timeout
+// Helper to sleep for exponential backoff
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Check if error is retryable (5xx or network error)
+function isRetryableError(status: number): boolean {
+  return status >= 500 && status < 600;
+}
+
+// HTTP client with auth, automatic token refresh, timeout, and retry
 async function fetchApi(
   endpoint: string,
   options: RequestInit = {},
-  isRetry: boolean = false
+  isAuthRetry: boolean = false,
+  retryCount: number = 0
 ): Promise<any> {
   const url = `${API_BASE_URL}${endpoint}`;
 
@@ -122,22 +137,35 @@ async function fetchApi(
     if (error.name === 'AbortError') {
       throw new TimeoutError(`Request to ${endpoint} timed out after ${DEFAULT_TIMEOUT_MS}ms`);
     }
+    // Retry network errors
+    if (retryCount < MAX_RETRIES) {
+      const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, retryCount);
+      await sleep(delay);
+      return fetchApi(endpoint, options, isAuthRetry, retryCount + 1);
+    }
     throw error;
   } finally {
     clearTimeout(timeoutId);
   }
 
   // Handle 401 Unauthorized - attempt token refresh
-  if (response.status === 401 && !isRetry) {
+  if (response.status === 401 && !isAuthRetry) {
     const newToken = await refreshAuthToken();
     if (newToken) {
       // Retry request with new token
-      return fetchApi(endpoint, options, true);
+      return fetchApi(endpoint, options, true, 0);
     } else {
       // Refresh failed - clear auth state and throw
       await clearAuthState();
       throw new AuthExpiredError();
     }
+  }
+
+  // Retry 5xx errors with exponential backoff
+  if (isRetryableError(response.status) && retryCount < MAX_RETRIES) {
+    const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, retryCount);
+    await sleep(delay);
+    return fetchApi(endpoint, options, isAuthRetry, retryCount + 1);
   }
 
   if (!response.ok) {
