@@ -184,9 +184,11 @@ pub async fn heartbeat(
     if let Some(metrics_batch) = req.metrics {
         let batch_len = metrics_batch.len();
         for metric in metrics_batch {
-            // Convert Decimal to BigDecimal for database storage
-            let equity_bd = bigdecimal_from_decimal(metric.equity);
-            let pnl_bd = bigdecimal_from_decimal(metric.pnl);
+            // Convert Decimal to BigDecimal for database storage with proper error handling
+            let equity_bd = bigdecimal_from_decimal(&metric.equity)
+                .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid equity value: {}", e)))?;
+            let pnl_bd = bigdecimal_from_decimal(&metric.pnl)
+                .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid pnl value: {}", e)))?;
 
             sqlx::query(
                 "INSERT INTO metrics (bot_id, timestamp, equity, pnl) VALUES ($1, $2, $3, $4)"

@@ -223,8 +223,15 @@ impl From<MetricDb> for Metric {
             id: db.id,
             bot_id: db.bot_id,
             timestamp: db.timestamp,
-            equity: decimal_from_bigdecimal(db.equity),
-            pnl: decimal_from_bigdecimal(db.pnl),
+            // Use try_ versions that surface errors - log and default to ZERO on failure
+            equity: try_decimal_from_bigdecimal(&db.equity).unwrap_or_else(|| {
+                tracing::warn!("Failed to convert equity BigDecimal to Decimal for metric {}", db.id);
+                Decimal::ZERO
+            }),
+            pnl: try_decimal_from_bigdecimal(&db.pnl).unwrap_or_else(|| {
+                tracing::warn!("Failed to convert pnl BigDecimal to Decimal for metric {}", db.id);
+                Decimal::ZERO
+            }),
         }
     }
 }
@@ -241,12 +248,26 @@ pub struct Event {
 }
 
 // Helper conversions between BigDecimal and Decimal
-pub fn decimal_from_bigdecimal(bd: BigDecimal) -> Decimal {
-    bd.to_string().parse().unwrap_or_default()
+// These return Result to surface conversion errors rather than silently using 0
+
+/// Convert BigDecimal to rust_decimal::Decimal, surfacing parse errors
+pub fn decimal_from_bigdecimal(bd: &BigDecimal) -> Result<Decimal, rust_decimal::Error> {
+    bd.to_string().parse()
 }
 
-pub fn bigdecimal_from_decimal(d: Decimal) -> BigDecimal {
-    d.to_string().parse().unwrap_or_default()
+/// Convert rust_decimal::Decimal to BigDecimal, surfacing parse errors
+pub fn bigdecimal_from_decimal(d: &Decimal) -> Result<BigDecimal, bigdecimal::ParseBigDecimalError> {
+    d.to_string().parse()
+}
+
+/// Fallible conversion for use in contexts that need to propagate errors
+pub fn try_decimal_from_bigdecimal(bd: &BigDecimal) -> Option<Decimal> {
+    decimal_from_bigdecimal(bd).ok()
+}
+
+/// Fallible conversion for use in contexts that need to propagate errors
+pub fn try_bigdecimal_from_decimal(d: &Decimal) -> Option<BigDecimal> {
+    bigdecimal_from_decimal(d).ok()
 }
 
 // Response types for API
