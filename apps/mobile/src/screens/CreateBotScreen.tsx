@@ -19,6 +19,27 @@ import { api } from '@trawling-traders/api-client';
 import { OceanBackground } from '../components/OceanBackground';
 import { lightTheme } from '../theme';
 
+// Validation helper for numeric inputs
+function validateNumericInput(
+  value: string,
+  fieldName: string,
+  min: number,
+  max: number
+): { valid: boolean; value: number; error?: string } {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { valid: false, value: 0, error: `${fieldName} is required` };
+  }
+  const num = parseInt(trimmed, 10);
+  if (isNaN(num)) {
+    return { valid: false, value: 0, error: `${fieldName} must be a number` };
+  }
+  if (num < min || num > max) {
+    return { valid: false, value: num, error: `${fieldName} must be between ${min} and ${max}` };
+  }
+  return { valid: true, value: num };
+}
+
 type CreateBotScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'CreateBot'>;
 
 const PERSONAS: { value: Persona; label: string; description: string }[] = [
@@ -84,6 +105,31 @@ export function CreateBotScreen() {
       return;
     }
 
+    // Validate numeric inputs
+    const positionValidation = validateNumericInput(maxPositionSize, 'Max Position Size', 1, 50);
+    if (!positionValidation.valid) {
+      Alert.alert('Validation Error', positionValidation.error);
+      return;
+    }
+
+    const dailyLossValidation = validateNumericInput(maxDailyLoss, 'Max Daily Loss', 1, 100000);
+    if (!dailyLossValidation.valid) {
+      Alert.alert('Validation Error', dailyLossValidation.error);
+      return;
+    }
+
+    const drawdownValidation = validateNumericInput(maxDrawdown, 'Max Drawdown', 1, 50);
+    if (!drawdownValidation.valid) {
+      Alert.alert('Validation Error', drawdownValidation.error);
+      return;
+    }
+
+    const tradesValidation = validateNumericInput(maxTradesPerDay, 'Max Trades Per Day', 1, 100);
+    if (!tradesValidation.valid) {
+      Alert.alert('Validation Error', tradesValidation.error);
+      return;
+    }
+
     setIsLoading(true);
     try {
       await api.bot.createBot({
@@ -93,10 +139,10 @@ export function CreateBotScreen() {
         algorithmMode,
         strictness,
         riskCaps: {
-          maxPositionSizePercent: parseInt(maxPositionSize) || 5,
-          maxDailyLossUsd: parseInt(maxDailyLoss) || 50,
-          maxDrawdownPercent: parseInt(maxDrawdown) || 10,
-          maxTradesPerDay: parseInt(maxTradesPerDay) || 5,
+          maxPositionSizePercent: positionValidation.value,
+          maxDailyLossUsd: dailyLossValidation.value,
+          maxDrawdownPercent: drawdownValidation.value,
+          maxTradesPerDay: tradesValidation.value,
         },
         tradingMode,
         llmProvider,
