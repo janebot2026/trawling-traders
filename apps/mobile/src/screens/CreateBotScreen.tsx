@@ -151,6 +151,8 @@ export function CreateBotScreen() {
         llmApiKey: llmApiKey.trim(),
       });
       Alert.alert('Success', 'Trawler deployed!');
+      // Clear sensitive data from state immediately after successful submission
+      setLlmApiKey('');
       // Small delay to ensure server has committed the new bot before navigating
       // This prevents the race condition where BotsList fetches before commit
       await new Promise(resolve => setTimeout(resolve, 300));

@@ -146,6 +146,8 @@ export function BotSettingsScreen() {
         },
       });
       setHasChanges(false);
+      // Clear sensitive data from state after successful save
+      setLlmApiKey('');
       Alert.alert('Success', 'Configuration updated!');
       navigation.goBack();
     } catch (error) {
