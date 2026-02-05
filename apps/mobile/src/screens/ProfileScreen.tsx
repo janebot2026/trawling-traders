@@ -11,8 +11,9 @@ import {
   RefreshControl,
   Image,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, CommonActions } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import type { User, Subscription } from '@trawling-traders/types';
 import { api } from '@trawling-traders/api-client';
@@ -67,9 +68,36 @@ export function ProfileScreen() {
         {
           text: 'Sign Out',
           style: 'destructive',
-          onPress: () => {
-            // TODO: Clear session/auth token
-            navigation.navigate('Auth');
+          onPress: async () => {
+            try {
+              // Clear Cedros SDK auth state
+              const { logout } = await import('@cedros/login-react-native');
+              await logout();
+            } catch (e) {
+              // Cedros logout may fail if not initialized, continue anyway
+              console.warn('Cedros logout error:', e);
+            }
+
+            // Clear all stored tokens and user data from AsyncStorage
+            try {
+              await AsyncStorage.multiRemove([
+                '@auth_token',
+                '@refresh_token',
+                '@user_data',
+                '@session_data',
+              ]);
+            } catch (e) {
+              console.warn('AsyncStorage clear error:', e);
+            }
+
+            // Reset navigation stack to Auth screen
+            // This prevents back button from returning to authenticated screens
+            navigation.dispatch(
+              CommonActions.reset({
+                index: 0,
+                routes: [{ name: 'Auth' }],
+              })
+            );
           },
         },
       ]
