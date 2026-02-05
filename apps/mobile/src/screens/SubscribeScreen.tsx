@@ -15,7 +15,9 @@ export function SubscribeScreen() {
   const navigation = useNavigation<SubscribeScreenNavigationProp>();
 
   const handleSubscribeSuccess = (sessionId: string) => {
-    console.log('Subscription initiated:', sessionId);
+    if (__DEV__) {
+      console.log('Subscription initiated:', sessionId);
+    }
     // After successful Stripe checkout redirect, user lands back in app
     // Navigation to Main happens via deep link or success callback
     navigation.navigate('Main');

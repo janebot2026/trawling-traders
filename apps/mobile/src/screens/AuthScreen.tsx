@@ -161,10 +161,12 @@ export function AuthScreen() {
           {/* Cedros Login Form */}
           <Animated.View style={[styles.authContainer, { opacity: featureAnim }]}>
             <EmailLoginForm
-              onSubmit={async (email, password) => {
+              onSubmit={async (email, _password) => {
                 // CedrosLoginProvider handles the auth state
                 // Navigation happens automatically via useEffect above
-                console.log('Login attempt:', email);
+                if (__DEV__) {
+                  console.log('Login attempt:', email);
+                }
               }}
               isLoading={authLoading}
             />
