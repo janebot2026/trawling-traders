@@ -1,5 +1,7 @@
 # Trawling Traders 🎣
 
+[![Production Deploy](https://github.com/janebot2026/trawling-traders/actions/workflows/deploy.yml/badge.svg)](https://github.com/janebot2026/trawling-traders/actions/workflows/deploy.yml)
+
 **Deploy Solana trading agents in minutes.**
 
 Trawl markets. Tune strategies. Track performance.
