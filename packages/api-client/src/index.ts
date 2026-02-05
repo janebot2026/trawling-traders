@@ -91,6 +91,38 @@ export class TimeoutError extends ApiError {
   }
 }
 
+// Network error for connection failures (offline, DNS, etc)
+export class NetworkError extends ApiError {
+  constructor(message: string = 'Network error. Please check your connection.') {
+    super(0, message);
+    this.name = 'NetworkError';
+  }
+}
+
+// Rate limit error for 429 responses
+export class RateLimitError extends ApiError {
+  constructor(public retryAfter?: number) {
+    super(429, 'Too many requests. Please try again later.');
+    this.name = 'RateLimitError';
+  }
+}
+
+// Server error for 5xx responses
+export class ServerError extends ApiError {
+  constructor(status: number, message: string = 'Server error. Please try again.') {
+    super(status, message);
+    this.name = 'ServerError';
+  }
+}
+
+// Forbidden error for 403 responses
+export class ForbiddenError extends ApiError {
+  constructor(message: string = 'Access denied.') {
+    super(403, message);
+    this.name = 'ForbiddenError';
+  }
+}
+
 // Helper to sleep for exponential backoff
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -143,7 +175,8 @@ async function fetchApi(
       await sleep(delay);
       return fetchApi(endpoint, options, isAuthRetry, retryCount + 1);
     }
-    throw error;
+    // Wrap in NetworkError for better error differentiation
+    throw new NetworkError(error.message || 'Network request failed');
   } finally {
     clearTimeout(timeoutId);
   }
@@ -170,7 +203,22 @@ async function fetchApi(
 
   if (!response.ok) {
     const error = await response.text();
-    throw new ApiError(response.status, error || 'API request failed');
+
+    // Differentiate error types for better client-side handling
+    switch (response.status) {
+      case 401:
+        throw new AuthExpiredError(error || 'Authentication required');
+      case 403:
+        throw new ForbiddenError(error || 'Access denied');
+      case 429:
+        const retryAfter = parseInt(response.headers.get('retry-after') || '60', 10);
+        throw new RateLimitError(retryAfter);
+      default:
+        if (response.status >= 500) {
+          throw new ServerError(response.status, error || 'Server error');
+        }
+        throw new ApiError(response.status, error || 'API request failed');
+    }
   }
 
   return response.json();
