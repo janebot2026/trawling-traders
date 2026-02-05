@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Logs
+logs/
+*.log
+
+# Node.js (mobile app)
+node_modules/
+apps/
+packages/
+
+# Rust build artifacts (will be rebuilt in container)
+**/target/
+
+# Test files
+**/tests/
+**/*.test.*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# CI/CD
+.github/
+
+# Misc
+.DS_Store
+Thumbs.db

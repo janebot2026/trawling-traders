@@ -1,0 +1,277 @@
+name: Production Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip tests (use with caution)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      services:
+        description: "Services to deploy"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - "all"
+          - "control-plane"
+          - "data-retrieval"
+
+env:
+  CONTROL_PLANE_IMAGE: hdbdocker/trawling-traders-control-plane:latest
+  DATA_RETRIEVAL_IMAGE: hdbdocker/trawling-traders-data-retrieval:latest
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      control_plane_changed: ${{ steps.changes.outputs.control_plane }}
+      data_retrieval_changed: ${{ steps.changes.outputs.data_retrieval }}
+      deploy_all: ${{ github.event.inputs.services == 'all' || github.event_name == 'push' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --name-only HEAD~1 HEAD | grep -q "^services/control-plane/"; then
+            echo "control_plane=true" >> $GITHUB_OUTPUT
+          else
+            echo "control_plane=false" >> $GITHUB_OUTPUT
+          fi
+          if git diff --name-only HEAD~1 HEAD | grep -q "^services/data-retrieval/"; then
+            echo "data_retrieval=true" >> $GITHUB_OUTPUT
+          else
+            echo "data_retrieval=false" >> $GITHUB_OUTPUT
+          fi
+
+  lint-and-test:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.skip_tests != 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            services/control-plane/target/
+            services/data-retrieval/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting (control-plane)
+        working-directory: services/control-plane
+        run: cargo fmt --check
+
+      - name: Check formatting (data-retrieval)
+        working-directory: services/data-retrieval
+        run: cargo fmt --check
+
+      - name: Run Clippy (control-plane)
+        working-directory: services/control-plane
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run Clippy (data-retrieval)
+        working-directory: services/data-retrieval
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run tests (control-plane)
+        working-directory: services/control-plane
+        run: cargo test --release
+
+      - name: Run tests (data-retrieval)
+        working-directory: services/data-retrieval
+        run: cargo test --release
+
+  build-control-plane:
+    needs: [check-changes, lint-and-test]
+    if: |
+      always() &&
+      (needs.lint-and-test.result == 'success' || needs.lint-and-test.result == 'skipped') &&
+      (needs.check-changes.outputs.deploy_all == 'true' ||
+       needs.check-changes.outputs.control_plane_changed == 'true' ||
+       github.event.inputs.services == 'control-plane')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push control-plane
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./services/control-plane/Dockerfile
+          push: true
+          tags: ${{ env.CONTROL_PLANE_IMAGE }}
+          cache-from: type=gha,scope=control-plane
+          cache-to: type=gha,mode=max,scope=control-plane
+
+  build-data-retrieval:
+    needs: [check-changes, lint-and-test]
+    if: |
+      always() &&
+      (needs.lint-and-test.result == 'success' || needs.lint-and-test.result == 'skipped') &&
+      (needs.check-changes.outputs.deploy_all == 'true' ||
+       needs.check-changes.outputs.data_retrieval_changed == 'true' ||
+       github.event.inputs.services == 'data-retrieval')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push data-retrieval
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./services/data-retrieval/Dockerfile
+          push: true
+          tags: ${{ env.DATA_RETRIEVAL_IMAGE }}
+          cache-from: type=gha,scope=data-retrieval
+          cache-to: type=gha,mode=max,scope=data-retrieval
+
+  deploy:
+    needs: [check-changes, build-control-plane, build-data-retrieval]
+    if: |
+      always() &&
+      (needs.build-control-plane.result == 'success' || needs.build-control-plane.result == 'skipped') &&
+      (needs.build-data-retrieval.result == 'success' || needs.build-data-retrieval.result == 'skipped') &&
+      (needs.build-control-plane.result == 'success' || needs.build-data-retrieval.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            set -e
+            echo "=== Trawling Traders Deployment ==="
+
+            # Login to Docker Hub
+            docker login -u ${{ secrets.DOCKER_USERNAME }} -p '${{ secrets.DOCKER_PASSWORD }}'
+
+            # Create Docker network if it doesn't exist
+            docker network create trawling-traders-network 2>/dev/null || true
+
+            # Ensure PostgreSQL is on the network
+            docker network connect trawling-traders-network trawling-traders-db 2>/dev/null || true
+
+            # Deploy data-retrieval if image was built
+            if docker pull ${{ env.DATA_RETRIEVAL_IMAGE }} 2>/dev/null; then
+              echo "Deploying data-retrieval..."
+              docker stop trawling-traders-data-retrieval 2>/dev/null || true
+              docker rm trawling-traders-data-retrieval 2>/dev/null || true
+
+              docker run -d --restart unless-stopped \
+                --name trawling-traders-data-retrieval \
+                --network trawling-traders-network \
+                -p 127.0.0.1:8081:8080 \
+                --env ENVIRONMENT="${{ secrets.ENVIRONMENT }}" \
+                --env PORT=8080 \
+                ${{ env.DATA_RETRIEVAL_IMAGE }}
+
+              echo "data-retrieval deployed successfully"
+            fi
+
+            # Deploy control-plane if image was built
+            if docker pull ${{ env.CONTROL_PLANE_IMAGE }} 2>/dev/null; then
+              echo "Deploying control-plane..."
+              docker stop trawling-traders-control-plane 2>/dev/null || true
+              docker rm trawling-traders-control-plane 2>/dev/null || true
+
+              docker run -d --restart unless-stopped \
+                --name trawling-traders-control-plane \
+                --network trawling-traders-network \
+                -p 127.0.0.1:3001:3000 \
+                --env ENVIRONMENT="${{ secrets.ENVIRONMENT }}" \
+                --env PORT=3000 \
+                --env DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+                --env JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+                --env JWT_ISSUER="${{ secrets.JWT_ISSUER }}" \
+                --env SECRETS_ENCRYPTION_KEY="${{ secrets.SECRETS_ENCRYPTION_KEY }}" \
+                --env DIGITALOCEAN_TOKEN="${{ secrets.DIGITALOCEAN_TOKEN }}" \
+                --env SOLANA_RPC_URL="${{ secrets.SOLANA_RPC_URL }}" \
+                --env JUPITER_API_KEY="${{ secrets.JUPITER_API_KEY }}" \
+                --env CONTROL_PLANE_URL="${{ secrets.CONTROL_PLANE_URL }}" \
+                --env DATA_RETRIEVAL_URL="http://trawling-traders-data-retrieval:8080" \
+                --env DISCORD_ALERT_WEBHOOK="${{ secrets.DISCORD_ALERT_WEBHOOK }}" \
+                --env STRIPE_SECRET_KEY="${{ secrets.STRIPE_SECRET_KEY }}" \
+                --env STRIPE_PUBLISHABLE_KEY="${{ secrets.STRIPE_PUBLISHABLE_KEY }}" \
+                --env STRIPE_WEBHOOK_SECRET="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
+                ${{ env.CONTROL_PLANE_IMAGE }}
+
+              echo "control-plane deployed successfully"
+            fi
+
+            # Show running containers
+            echo ""
+            echo "=== Running Trawling Traders containers ==="
+            docker ps --filter "name=trawling-traders" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+            # Health check
+            echo ""
+            echo "=== Health Checks ==="
+            sleep 10
+
+            if docker ps --filter "name=trawling-traders-control-plane" --filter "status=running" -q | grep -q .; then
+              echo "control-plane: Running"
+            else
+              echo "control-plane: FAILED - check logs with: docker logs trawling-traders-control-plane"
+            fi
+
+            if docker ps --filter "name=trawling-traders-data-retrieval" --filter "status=running" -q | grep -q .; then
+              echo "data-retrieval: Running"
+            else
+              echo "data-retrieval: FAILED - check logs with: docker logs trawling-traders-data-retrieval"
+            fi
+
+  deployment-notification:
+    needs: [deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report Deployment Status
+        run: |
+          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
+            echo "✅ DEPLOYMENT SUCCESSFUL"
+            echo "Services deployed to ${{ secrets.SERVER_HOST }}"
+          else
+            echo "❌ DEPLOYMENT FAILED - Check logs for details"
+            exit 1
+          fi
