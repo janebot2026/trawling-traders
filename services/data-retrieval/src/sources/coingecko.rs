@@ -172,7 +172,17 @@ impl CoinGeckoClient {
         })
     }
     
-    /// Get historical candles
+    /// Get historical candles using CoinGecko OHLC endpoint
+    ///
+    /// Uses `/coins/{id}/ohlc` which returns proper OHLC data:
+    /// `[[timestamp, open, high, low, close], ...]`
+    ///
+    /// Note: CoinGecko OHLC endpoint only supports specific day values:
+    /// - 1, 7, 14, 30, 90, 180, 365, max
+    /// Candle granularity is automatic based on days:
+    /// - 1-2 days: 30min candles
+    /// - 3-30 days: 4h candles
+    /// - 31+ days: 4 day candles
     pub async fn get_candles(
         &self,
         asset: &str,
@@ -182,51 +192,47 @@ impl CoinGeckoClient {
     ) -> Result<Vec<Candle>> {
         let coin_id = self.get_coin_id(asset).await?;
         let vs_currency = quote.to_lowercase();
-        
-        // Map timeframe to days for CoinGecko
+
+        // Map timeframe to days for CoinGecko OHLC endpoint
+        // Choose days value that gives appropriate granularity
         let days = match timeframe {
-            TimeFrame::Minute1 | TimeFrame::Minute5 => "1",
-            TimeFrame::Minute15 | TimeFrame::Minute30 => "1",
-            TimeFrame::Hour1 | TimeFrame::Hour4 => "7",
-            TimeFrame::Day1 => "30",
-            TimeFrame::Week1 => "365",
+            TimeFrame::Minute1 | TimeFrame::Minute5 |
+            TimeFrame::Minute15 | TimeFrame::Minute30 => "1", // 30min candles
+            TimeFrame::Hour1 | TimeFrame::Hour4 => "7",       // 4h candles
+            TimeFrame::Day1 => "90",                           // 4 day candles (closest to daily)
+            TimeFrame::Week1 => "365",                         // ~4 day candles over a year
         };
-        
+
+        // Use OHLC endpoint which returns proper candlestick data
         let endpoint = format!(
-            "/coins/{}/market_chart?vs_currency={}&days={}",
+            "/coins/{}/ohlc?vs_currency={}&days={}",
             coin_id, vs_currency, days
         );
-        
-        let response: MarketChartResponse = self.rate_limited_request(&endpoint).await?;
-        
-        // CoinGecko returns [timestamp, value] pairs - fixed array indexing
-        let candles = response.prices
-            .chunks(2)
-            .filter_map(|chunk| {
-                if chunk.len() < 2 {
-                    return None;
-                }
-                let ts1 = chunk[0][0];
-                let price1 = chunk[0][1];
-                let price2 = chunk[1][1];
-                
-                let timestamp = DateTime::from_timestamp((ts1 / 1000.0) as i64, 0)?;
-                
+
+        // Response format: [[timestamp_ms, open, high, low, close], ...]
+        let response: Vec<[f64; 5]> = self.rate_limited_request(&endpoint).await?;
+
+        let candles: Vec<Candle> = response
+            .into_iter()
+            .filter_map(|ohlc| {
+                let timestamp_ms = ohlc[0] as i64;
+                let timestamp = DateTime::from_timestamp_millis(timestamp_ms)?;
+
                 Some(Candle {
                     asset: asset.to_uppercase(),
                     quote: quote.to_uppercase(),
                     timeframe,
-                    open: Decimal::try_from(price1).ok()?,
-                    high: Decimal::try_from(price1.max(price2)).ok()?,
-                    low: Decimal::try_from(price1.min(price2)).ok()?,
-                    close: Decimal::try_from(price2).ok()?,
-                    volume: Decimal::ZERO,
+                    open: Decimal::try_from(ohlc[1]).ok()?,
+                    high: Decimal::try_from(ohlc[2]).ok()?,
+                    low: Decimal::try_from(ohlc[3]).ok()?,
+                    close: Decimal::try_from(ohlc[4]).ok()?,
+                    volume: Decimal::ZERO, // OHLC endpoint doesn't include volume
                     timestamp,
                 })
             })
             .take(limit)
             .collect();
-        
+
         Ok(candles)
     }
     
