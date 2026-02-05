@@ -37,5 +37,9 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 # Config
 config = "0.13"
 
+# Unix process management (for targeted process kill)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tokio-test = "0.4"

@@ -262,26 +262,38 @@ impl TradeExecutor {
         let timeout_duration = Duration::from_secs(self.execution_config.confirm_timeout_secs);
         
         debug!("Running claw-trader with timeout {:?}: {:?}", timeout_duration, cmd);
-        
+
+        // Configure stdout/stderr capture
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        // Spawn the process so we can get its PID for targeted cleanup
+        let mut child = cmd.spawn().map_err(|e| {
+            anyhow::anyhow!("Failed to spawn claw-trader: {}", e)
+        })?;
+
+        // Store PID for potential cleanup (PROCESS-SAFETY: kill only this specific PID)
+        let child_pid = child.id();
+
         // Run with timeout
-        let result = timeout(timeout_duration, cmd.output()).await;
-        
+        let result = timeout(timeout_duration, child.wait_with_output()).await;
+
         match result {
             Ok(Ok(output)) => {
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     return Err(anyhow::anyhow!("claw-trader failed: {}", stderr));
                 }
-                
+
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let json: serde_json::Value = serde_json::from_str(&stdout)
-                    .map_err(|e| anyhow::anyhow!("Failed to parse claw-trader output: {} | Output: {}", e, stdout))?;
-                
+                    .map_err(|e| anyhow::anyhow!("Failed to parse claw-trader output: {}", e))?;
+
                 // Check for error in JSON
                 if let Some(error) = json.get("error") {
                     return Err(anyhow::anyhow!("claw-trader error: {:?}", error));
                 }
-                
+
                 Ok(json)
             }
             Ok(Err(e)) => {
@@ -290,14 +302,25 @@ impl TradeExecutor {
             Err(_) => {
                 // Timeout occurred
                 error!("claw-trader command timed out after {:?}", timeout_duration);
-                
-                // Try to kill any lingering process
-                let _ = TokioCommand::new("pkill")
-                    .args(&["-f", "claw-trader"])
-                    .output()
-                    .await;
-                
-                Err(anyhow::anyhow!("confirm_timeout: claw-trader did not complete within {} seconds", 
+
+                // PROCESS-SAFETY: Kill only the specific process we spawned, not all claw-trader processes
+                if let Some(pid) = child_pid {
+                    debug!("Killing timed-out claw-trader process with PID {}", pid);
+                    #[cfg(unix)]
+                    {
+                        // Send SIGKILL to the specific PID
+                        unsafe {
+                            libc::kill(pid as i32, libc::SIGKILL);
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        // On non-Unix, use the child handle directly
+                        let _ = child.kill().await;
+                    }
+                }
+
+                Err(anyhow::anyhow!("confirm_timeout: claw-trader did not complete within {} seconds",
                     self.execution_config.confirm_timeout_secs))
             }
         }
