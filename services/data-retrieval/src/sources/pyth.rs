@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 
 use crate::types::{Candle, DataRetrievalError, PriceDataSource, PricePoint, SourceHealth, TimeFrame};
 

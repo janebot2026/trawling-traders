@@ -1,10 +1,9 @@
 use crate::types::*;
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use tracing::{debug, error, info, warn};
 
 /// CoinGecko API client
 pub struct CoinGeckoClient {
