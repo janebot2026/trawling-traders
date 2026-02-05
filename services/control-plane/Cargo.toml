@@ -65,7 +65,7 @@ bigdecimal = { version = "0.4", features = ["serde"] }
 cedros-pay = "1.1.0"
 
 # DigitalOcean provisioning - SQLx 0.8 compatible
-claw-spawn = "0.1.1"
+claw-spawn = "0.1.2"
 rand = "0.8"
 
 # Shared types
