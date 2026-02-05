@@ -49,7 +49,9 @@ impl BinanceWebSocketClient {
         // Split into read/write halves to prevent deadlock
         let (ws_sink, ws_reader) = ws_stream.split();
 
-        let (price_tx, price_rx) = mpsc::channel(100);
+        // Larger buffer to prevent data loss during price spikes
+        // 10k entries = ~10 seconds of high-volume crypto trading
+        let (price_tx, price_rx) = mpsc::channel(10000);
 
         let client = Self {
             ws_sink: Arc::new(Mutex::new(ws_sink)),

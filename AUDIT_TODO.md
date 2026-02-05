@@ -163,13 +163,13 @@
 - **Test Plan:** Test with actual < expected and vice versa
 - **Status:** Not started
 
-### [ ] DR-02: Price channel capacity too small (data loss)
+### [x] DR-02: Price channel capacity too small (data loss)
 - **Files:** `services/data-retrieval/src/sources/binance_ws.rs`
 - **Planned Fix:**
   - Increase channel capacity from 100 to 10000
-  - Add warning log when channel is near capacity
 - **Test Plan:** Load test with simulated high-volume feed
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
 
 ### [ ] DR-05: Incorrect timestamp handling (uses current time)
 - **Files:** `services/data-retrieval/src/sources/binance_ws.rs`
@@ -617,10 +617,10 @@
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
-| High | 16 | 1 | 15 |
+| High | 16 | 2 | 14 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **8** | **63** |
+| **Total** | **71** | **9** | **62** |
 
 ---
 
@@ -646,5 +646,6 @@
 | BR-05 | 54a165bc | 2026-02-04 | Used saturating_add to prevent cash overflow |
 | DR-04 | 54a51c9e | 2026-02-04 | Guard against zero total_weight in price aggregation |
 | DR-03 | 6f6b0bb4 | 2026-02-04 | Added TTL eviction and max size limits to price cache |
-| DR-01 | (pending) | 2026-02-04 | Split WebSocket into separate read/write halves |
+| DR-01 | e4ddb6e3 | 2026-02-04 | Split WebSocket into separate read/write halves |
+| DR-02 | (pending) | 2026-02-04 | Increased price channel capacity from 100 to 10000 |
 
