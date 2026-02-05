@@ -535,21 +535,6 @@ impl BotRunner {
             return Ok(None);
         }
 
-        // Check for existing equivalent intent (idempotency)
-        // Enhanced per principal engineer feedback: include mode + strategy_version
-        // to prevent incorrectly suppressing legitimate repeated trades
-        if let Some(existing_id) = self.intent_registry.find_equivalent_with_context(
-            &self.config.bot_id.to_string(),
-            &usdc.mint,
-            &token.mint,
-            usdc_amount,
-            Some(&format!("{:?}", config.trading_mode)), // Include mode (paper/live)
-            Some(&config.version_id.to_string()), // Config version as strategy fingerprint
-        ) {
-            debug!("Equivalent intent {} already exists, skipping", existing_id);
-            return Ok(None);
-        }
-
         // Fetch price quote
         let quote = executor.fetch_price(
             &usdc.mint,
@@ -607,8 +592,10 @@ impl BotRunner {
             }
         }
 
-        // Create trade intent BEFORE execution (so we always have an intent_id)
-        let intent = self.intent_registry.create(
+        // Atomic try_create: check and insert in single operation (TOCTOU-safe)
+        // Enhanced per principal engineer feedback: include mode + strategy_version
+        // to prevent incorrectly suppressing legitimate repeated trades
+        let intent = match self.intent_registry.try_create(
             &self.config.bot_id.to_string(),
             &usdc.mint,
             &token.mint,
@@ -617,7 +604,18 @@ impl BotRunner {
             &format!("{:?}", config.algorithm_mode),
             confidence,
             &format!("{:?} signal at {}% confidence", side, confidence * 100.0),
-        );
+            Some(config.version_id.to_string()), // Config version as strategy fingerprint
+        ) {
+            Ok(Some(intent)) => intent,
+            Ok(None) => {
+                debug!("Equivalent intent already exists, skipping");
+                return Ok(None);
+            }
+            Err(e) => {
+                warn!("Failed to create intent: {}", e);
+                return Ok(None);
+            }
+        };
 
         // Determine trade direction
         let (input_mint, output_mint) = match side {

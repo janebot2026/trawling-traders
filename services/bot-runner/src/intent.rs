@@ -68,7 +68,7 @@ impl IntentRegistry {
     }
     
     /// Create a new trade intent with strategy version
-    /// 
+    ///
     /// Per principal engineer feedback: include mode + version to prevent
     /// incorrectly suppressing legitimate repeated trades after config changes
     pub fn create_with_version(
@@ -97,11 +97,48 @@ impl IntentRegistry {
             created_at: Instant::now(),
             strategy_version,
         };
-        
+
         self.intents.insert(intent.id.to_string(), intent.clone());
         debug!("Created trade intent: {} for bot {}", intent.id, bot_id);
-        
+
         intent
+    }
+
+    /// Atomic try_create: check and insert in single operation (TOCTOU-safe)
+    ///
+    /// Returns Ok(Some(intent)) if a new intent was created
+    /// Returns Ok(None) if an equivalent intent already exists
+    ///
+    /// This prevents race conditions between find_equivalent and create
+    /// that could result in duplicate intents.
+    pub fn try_create(
+        &mut self,
+        bot_id: &str,
+        input_mint: &str,
+        output_mint: &str,
+        in_amount: u64,
+        mode: &str,
+        algorithm: &str,
+        confidence: f64,
+        rationale: &str,
+        strategy_version: Option<String>,
+    ) -> Result<Option<TradeIntent>, String> {
+        // Atomic check: look for equivalent intent
+        if self.find_equivalent_with_context(
+            bot_id, input_mint, output_mint, in_amount,
+            Some(mode), strategy_version.as_deref()
+        ).is_some() {
+            debug!("Equivalent intent already exists for bot {} {}->{}", bot_id, input_mint, output_mint);
+            return Ok(None);
+        }
+
+        // No equivalent found, create new intent
+        let intent = self.create_with_version(
+            bot_id, input_mint, output_mint, in_amount,
+            mode, algorithm, confidence, rationale, strategy_version
+        );
+
+        Ok(Some(intent))
     }
     
     /// Get intent by ID
@@ -430,5 +467,65 @@ mod tests {
             Some("v1"),
         );
         assert!(exact_match.is_some(), "Exact match should be found");
+    }
+
+    #[test]
+    fn test_try_create_atomic() {
+        let mut registry = IntentRegistry::new();
+
+        // First try_create should succeed
+        let result1 = registry.try_create(
+            "bot-123",
+            "SOL_MINT",
+            "USDC_MINT",
+            1_000_000_000,
+            "paper",
+            "trend",
+            0.75,
+            "test signal",
+            Some("v1".to_string()),
+        );
+        assert!(result1.is_ok());
+        let intent1 = result1.unwrap();
+        assert!(intent1.is_some(), "First try_create should return Some(intent)");
+
+        // Finalize the intent so it becomes equivalent
+        registry.update_state(
+            &intent1.unwrap().id.to_string(),
+            TradeIntentState::Confirmed {
+                signature: "abc".to_string(),
+                out_amount: 100,
+            },
+        ).unwrap();
+
+        // Second try_create with same params should return None (atomic idempotency)
+        let result2 = registry.try_create(
+            "bot-123",
+            "SOL_MINT",
+            "USDC_MINT",
+            1_000_000_000,
+            "paper",
+            "trend",
+            0.75,
+            "test signal",
+            Some("v1".to_string()),
+        );
+        assert!(result2.is_ok());
+        assert!(result2.unwrap().is_none(), "Second try_create should return None");
+
+        // Different mode should succeed (not equivalent)
+        let result3 = registry.try_create(
+            "bot-123",
+            "SOL_MINT",
+            "USDC_MINT",
+            1_000_000_000,
+            "live", // different mode
+            "trend",
+            0.75,
+            "test signal",
+            Some("v1".to_string()),
+        );
+        assert!(result3.is_ok());
+        assert!(result3.unwrap().is_some(), "Different mode should create new intent");
     }
 }
