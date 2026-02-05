@@ -268,7 +268,7 @@ impl TradeExecutor {
         cmd.stderr(std::process::Stdio::piped());
 
         // Spawn the process so we can get its PID for targeted cleanup
-        let mut child = cmd.spawn().map_err(|e| {
+        let child = cmd.spawn().map_err(|e| {
             anyhow::anyhow!("Failed to spawn claw-trader: {}", e)
         })?;
 

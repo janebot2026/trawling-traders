@@ -1,6 +1,9 @@
 //! Bot Runner Library
-//! 
+//!
 //! Core trading agent functionality for Trawling Traders.
+
+// Allow dead code during early development - scaffolding for future features
+#![allow(dead_code)]
 
 pub mod amount;
 pub mod client;

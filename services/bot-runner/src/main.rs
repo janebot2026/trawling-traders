@@ -8,6 +8,9 @@
 //! 5. Reports heartbeats/metrics back to control-plane
 //! 6. Reconciles holdings with on-chain state
 
+// Allow dead code during early development - scaffolding for future features
+#![allow(dead_code)]
+
 use std::sync::Arc;
 use tracing::{info, warn};
 
