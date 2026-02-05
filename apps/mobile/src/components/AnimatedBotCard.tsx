@@ -144,8 +144,8 @@ export function AnimatedBotCard({ bot, onPress, index = 0 }: AnimatedBotCardProp
         </View>
         
         <View style={styles.cardBody}>
-          <PnLDisplay value={bot.todayPnl} /
-          
+          <PnLDisplay value={bot.todayPnl} />
+
           {bot.lastHeartbeatAt && (
             <View style={styles.heartbeatContainer}>
               <View style={styles.heartbeatDot} />
