@@ -110,6 +110,41 @@ impl Default for RiskCaps {
     }
 }
 
+impl RiskCaps {
+    /// Validate risk caps are within acceptable ranges
+    ///
+    /// # Returns
+    /// - `Ok(())` if all values are valid
+    /// - `Err(String)` with description of first invalid value
+    pub fn validate(&self) -> Result<(), String> {
+        if self.max_position_size_percent < 1 || self.max_position_size_percent > 50 {
+            return Err(format!(
+                "max_position_size_percent must be 1-50, got {}",
+                self.max_position_size_percent
+            ));
+        }
+        if self.max_daily_loss_usd < 1 || self.max_daily_loss_usd > 100_000 {
+            return Err(format!(
+                "max_daily_loss_usd must be 1-100000, got {}",
+                self.max_daily_loss_usd
+            ));
+        }
+        if self.max_drawdown_percent < 1 || self.max_drawdown_percent > 50 {
+            return Err(format!(
+                "max_drawdown_percent must be 1-50, got {}",
+                self.max_drawdown_percent
+            ));
+        }
+        if self.max_trades_per_day < 1 || self.max_trades_per_day > 100 {
+            return Err(format!(
+                "max_trades_per_day must be 1-100, got {}",
+                self.max_trades_per_day
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// User entity
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct User {

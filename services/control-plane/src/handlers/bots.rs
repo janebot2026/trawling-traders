@@ -65,7 +65,11 @@ pub async fn create_bot(
     if bot_count >= 4 {
         return Err((StatusCode::FORBIDDEN, "Maximum bot limit reached".to_string()));
     }
-    
+
+    // Validate risk caps are within safe ranges
+    req.risk_caps.validate()
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid risk caps: {}", e)))?;
+
     let config_id = Uuid::new_v4();
     let custom_assets_json = req.custom_assets.map(|a| serde_json::to_value(a).unwrap());
     
@@ -592,9 +596,13 @@ pub async fn update_bot_config(
     
     let new_version = current_version + 1;
     let config_id = Uuid::new_v4();
-    
+
+    // Validate risk caps are within safe ranges
+    req.config.risk_caps.validate()
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid risk caps: {}", e)))?;
+
     let custom_assets_json = req.config.custom_assets.map(|a| serde_json::to_value(a).unwrap());
-    
+
     sqlx::query(
         r#"
         INSERT INTO config_versions (

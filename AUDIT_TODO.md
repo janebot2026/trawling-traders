@@ -140,13 +140,15 @@
 - **Test Plan:** Load test with many unique user IDs; verify memory stable
 - **Status:** Not started
 
-### [ ] CP-08: Unvalidated risk caps allow dangerous configs
-- **Files:** `services/control-plane/src/handlers/bots.rs`
+### [x] CP-08: Unvalidated risk caps allow dangerous configs
+- **Files:** `services/control-plane/src/handlers/bots.rs`, `src/models/mod.rs`
 - **Planned Fix:**
   - Add validation function for risk caps
-  - Position size: 1-50%, Daily loss: 0-100000, Drawdown: 1-50%, Trades: 1-100
+  - Position size: 1-50%, Daily loss: 1-100000, Drawdown: 1-50%, Trades: 1-100
 - **Test Plan:** Test boundary values; verify rejection of invalid values
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Added RiskCaps::validate() and call it in create_bot and update_config
 
 ### [ ] BR-06: Race condition in intent registry (TOCTOU)
 - **Files:** `services/bot-runner/src/runner.rs`, `services/bot-runner/src/intent.rs`
@@ -621,10 +623,10 @@
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
-| High | 16 | 4 | 12 |
+| High | 16 | 5 | 11 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **11** | **60** |
+| **Total** | **71** | **12** | **59** |
 
 ---
 
@@ -653,5 +655,6 @@
 | DR-01 | e4ddb6e3 | 2026-02-04 | Split WebSocket into separate read/write halves |
 | DR-02 | b50edd2f | 2026-02-04 | Increased price channel capacity from 100 to 10000 |
 | DR-05 | 92a9972e | 2026-02-04 | Use actual trade timestamp instead of Utc::now() |
-| CP-06 | (pending) | 2026-02-04 | Added proper Base58 validation for Solana wallets |
+| CP-06 | dfb719c5 | 2026-02-04 | Added proper Base58 validation for Solana wallets |
+| CP-08 | (pending) | 2026-02-04 | Added RiskCaps validation with safe value ranges |
 
