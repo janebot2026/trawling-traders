@@ -523,19 +523,10 @@ async fn redeploy_bot_droplet(
 
 /// Helper: Update bot status with error message
 async fn update_bot_status(pool: &Db, bot_id: Uuid, status: BotStatus, _error: &str) {
-    let status_str = match status {
-        BotStatus::Provisioning => "provisioning",
-        BotStatus::Online => "online",
-        BotStatus::Offline => "offline",
-        BotStatus::Paused => "paused",
-        BotStatus::Error => "error",
-        BotStatus::Destroying => "destroying",
-    };
-    
     if let Err(e) = sqlx::query(
-        "UPDATE bots SET status = $1::bot_status, updated_at = NOW() WHERE id = $2"
+        "UPDATE bots SET status = $1, updated_at = NOW() WHERE id = $2"
     )
-    .bind(status_str)
+    .bind(status)
     .bind(bot_id)
     .execute(pool)
     .await {
@@ -691,7 +682,8 @@ pub async fn bot_action(
     
     match req.action {
         BotAction::Pause => {
-            sqlx::query("UPDATE bots SET status = 'paused'::bot_status, updated_at = NOW() WHERE id = $1")
+            sqlx::query("UPDATE bots SET status = $1, updated_at = NOW() WHERE id = $2")
+                .bind(BotStatus::Paused)
                 .bind(bot_id)
                 .execute(&state.db)
                 .await
@@ -699,7 +691,8 @@ pub async fn bot_action(
             info!("Bot {} paused", bot_id);
         }
         BotAction::Resume => {
-            sqlx::query("UPDATE bots SET status = 'online'::bot_status, updated_at = NOW() WHERE id = $1")
+            sqlx::query("UPDATE bots SET status = $1, updated_at = NOW() WHERE id = $2")
+                .bind(BotStatus::Online)
                 .bind(bot_id)
                 .execute(&state.db)
                 .await
@@ -707,7 +700,8 @@ pub async fn bot_action(
             info!("Bot {} resumed", bot_id);
         }
         BotAction::Redeploy => {
-            sqlx::query("UPDATE bots SET status = 'provisioning'::bot_status, updated_at = NOW() WHERE id = $1")
+            sqlx::query("UPDATE bots SET status = $1, updated_at = NOW() WHERE id = $2")
+                .bind(BotStatus::Provisioning)
                 .bind(bot_id)
                 .execute(&state.db)
                 .await
@@ -723,7 +717,8 @@ pub async fn bot_action(
             info!("Bot {} redeploy triggered", bot_id);
         }
         BotAction::Destroy => {
-            sqlx::query("UPDATE bots SET status = 'destroying'::bot_status, updated_at = NOW() WHERE id = $1")
+            sqlx::query("UPDATE bots SET status = $1, updated_at = NOW() WHERE id = $2")
+                .bind(BotStatus::Destroying)
                 .bind(bot_id)
                 .execute(&state.db)
                 .await
