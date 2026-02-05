@@ -16,8 +16,13 @@ pub use sources::pyth::PythClient;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use std::collections::HashMap;
+
+/// Maximum number of symbols in the price cache (prevent unbounded growth)
+const MAX_CACHE_SIZE: usize = 10000;
+/// Price TTL in seconds (prices older than this are evicted)
+const PRICE_TTL_SECONDS: i64 = 300; // 5 minutes
 
 /// Asset class for routing to appropriate data sources
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -112,12 +117,41 @@ impl PriceAggregator {
             let prices = Arc::clone(&latest_prices);
             
             tokio::spawn(async move {
+                let mut eviction_counter = 0u32;
                 loop {
                     if let Some(price) = source.next_price().await {
                         // Use the symbol field directly
                         let key = price.symbol.clone();
                         let mut p = prices.write().await;
                         p.insert(key, price);
+
+                        // Periodic eviction: every 1000 inserts, clean up stale entries
+                        eviction_counter += 1;
+                        if eviction_counter >= 1000 {
+                            eviction_counter = 0;
+                            let now = Utc::now();
+                            let ttl = Duration::seconds(PRICE_TTL_SECONDS);
+                            let before_count = p.len();
+                            p.retain(|_, v| now - v.timestamp < ttl);
+                            let evicted = before_count.saturating_sub(p.len());
+                            if evicted > 0 {
+                                tracing::debug!("Price cache: evicted {} stale entries", evicted);
+                            }
+
+                            // If still over max size, evict oldest entries
+                            if p.len() > MAX_CACHE_SIZE {
+                                let mut entries: Vec<_> = p.drain().collect();
+                                entries.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
+                                entries.truncate(MAX_CACHE_SIZE);
+                                for (k, v) in entries {
+                                    p.insert(k, v);
+                                }
+                                tracing::warn!(
+                                    "Price cache exceeded max size, truncated to {}",
+                                    MAX_CACHE_SIZE
+                                );
+                            }
+                        }
                     } else {
                         // Channel closed or disconnected
                         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;

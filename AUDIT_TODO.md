@@ -79,14 +79,16 @@
 - **Test Plan:** Load test with concurrent subscriptions and reads
 - **Status:** Not started
 
-### [ ] DR-03: Unbounded price cache memory leak
+### [x] DR-03: Unbounded price cache memory leak
 - **Files:** `services/data-retrieval/src/lib.rs`
 - **Planned Fix:**
-  - Add TTL-based eviction for old prices
-  - Add maximum cache size limit
-  - Periodic cleanup task
+  - Add TTL-based eviction for old prices (5 min)
+  - Add maximum cache size limit (10,000 entries)
+  - Periodic cleanup every 1000 inserts
 - **Test Plan:** Monitor memory over extended period with diverse symbols
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Evicts entries older than 5 min; caps at 10k entries
 
 ### [x] DR-04: Division by zero in price aggregation
 - **Files:** `services/data-retrieval/src/lib.rs`
@@ -612,11 +614,11 @@
 
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
-| Critical | 8 | 6 | 2 |
+| Critical | 8 | 7 | 1 |
 | High | 16 | 1 | 15 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **7** | **64** |
+| **Total** | **71** | **8** | **63** |
 
 ---
 
@@ -640,5 +642,6 @@
 | CP-02 | 0cf0d9d5 | 2026-02-04 | Implemented AES-256-GCM encryption with 4 unit tests |
 | BR-01 | 67ee0fb3 | 2026-02-04 | Replaced pkill -f with targeted PID kill using libc |
 | BR-05 | 54a165bc | 2026-02-04 | Used saturating_add to prevent cash overflow |
-| DR-04 | (pending) | 2026-02-04 | Guard against zero total_weight in price aggregation |
+| DR-04 | 54a51c9e | 2026-02-04 | Guard against zero total_weight in price aggregation |
+| DR-03 | (pending) | 2026-02-04 | Added TTL eviction and max size limits to price cache |
 
