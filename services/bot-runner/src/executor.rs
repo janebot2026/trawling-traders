@@ -368,7 +368,7 @@ impl TradeExecutor {
         Ok(price)
     }
 
-    /// Fallback HTTP price fetch
+    /// Fallback HTTP price fetch with timeout
     async fn fetch_price_http(
         &self,
         input_mint: &str,
@@ -377,8 +377,14 @@ impl TradeExecutor {
     ) -> anyhow::Result<ClawTraderPrice> {
         // Try data-retrieval service first
         let url = format!("{}/prices/{}", self.data_retrieval_url, input_mint);
-        
-        let response = self.http_client.get(&url).send().await?;
+
+        // Use 10 second timeout for price fetches
+        let response = timeout(
+            Duration::from_secs(10),
+            self.http_client.get(&url).send()
+        ).await
+        .map_err(|_| anyhow::anyhow!("Price fetch timed out after 10 seconds"))?
+        ?;
         
         if response.status().is_success() {
             let data: PriceResponse = response.json().await?;
