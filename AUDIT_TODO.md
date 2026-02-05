@@ -280,13 +280,15 @@
 - **Verification:** cargo check passes
 - **Note:** Conversions now return Result, sync returns 400 on invalid values
 
-### [ ] CP-10: Authorization check duplicated in every handler
+### [x] CP-10: Authorization check duplicated in every handler
 - **Files:** `services/control-plane/src/handlers/bots.rs`
 - **Planned Fix:**
   - Create `get_authorized_bot()` helper function
   - Refactor handlers to use shared helper
 - **Test Plan:** Code review checklist; verify all handlers use helper
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Refactored 5 handlers (get_bot, update_config, bot_action, get_metrics, get_events)
 
 ### [ ] CP-11: Orphan cleanup race with user destroy
 - **Files:** `services/control-plane/src/provisioning.rs`
@@ -312,28 +314,33 @@
 - **Test Plan:** Monitor table size over time
 - **Status:** Not started
 
-### [ ] DR-07: Redis connection cloning anti-pattern
+### [x] DR-07: Redis connection cloning anti-pattern
 - **Files:** `services/data-retrieval/src/cache/mod.rs`
 - **Planned Fix:**
   - Change to `&mut self` or proper interior mutability
   - Remove unnecessary clones
 - **Test Plan:** Benchmark before/after
-- **Status:** Not started
+- **Status:** NOT AN ISSUE
+- **Note:** MultiplexedConnection is designed to be cloned - it's an Arc-based cheap clone that shares the underlying connection. This is the recommended pattern per redis-rs docs.
 
-### [ ] DR-08: Missing per-request timeout
+### [x] DR-08: Missing per-request timeout
 - **Files:** `services/data-retrieval/src/sources/coingecko.rs`
 - **Planned Fix:**
   - Add 10s timeout wrapper using tokio::time::timeout
 - **Test Plan:** Test with simulated slow responses
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Uses tokio::time::timeout with REQUEST_TIMEOUT_SECS constant
 
-### [ ] DR-09: Inconsistent asset class detection
+### [x] DR-09: Inconsistent asset class detection
 - **Files:** `services/data-retrieval/src/lib.rs`, `services/data-retrieval/src/handlers.rs`
 - **Planned Fix:**
   - Remove duplicate `is_stock_symbol()` function
   - Use `AssetClass::from_symbol()` everywhere
 - **Test Plan:** Test routing for edge-case symbols
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Handlers now import and use shared AssetClass enum
 
 ### [ ] DR-10: Float-to-Decimal precision loss
 - **Files:** `services/data-retrieval/src/sources/coingecko.rs`, `binance_ws.rs`, `pyth.rs`
@@ -417,13 +424,15 @@
 - **Verification:** TypeScript syntax valid
 - **Note:** Added TimeoutError class for distinguishing timeout errors
 
-### [ ] INF-01: Weak postgres credentials in docker-compose
+### [x] INF-01: Weak postgres credentials in docker-compose
 - **Files:** `docker-compose.yml`
 - **Planned Fix:**
   - Add comment noting this is for development only
   - Consider using env vars for credentials
 - **Test Plan:** Security checklist
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** Comments added
+- **Note:** Added clear DEVELOPMENT ONLY warning comments
 
 ### [x] INF-02: Duplicate index in migrations
 - **Files:** `services/control-plane/migrations/002_add_agent_wallet_column.sql`
@@ -450,13 +459,15 @@
 - **Test Plan:** Verify no API calls in health check
 - **Status:** Not started
 
-### [ ] DR-15: No connection pool limits
+### [x] DR-15: No connection pool limits
 - **Files:** `services/data-retrieval/src/sources/coingecko.rs`, `pyth.rs`
 - **Planned Fix:**
   - Add `pool_max_idle_per_host(10)`
   - Add `pool_idle_timeout(90s)`
 - **Test Plan:** Test under high concurrency
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Added to both CoinGecko and Pyth clients
 
 ### [x] MB-05: fetchBots in both useEffect and useFocusEffect
 - **Files:** `apps/mobile/src/screens/BotsListScreen.tsx`
@@ -467,21 +478,25 @@
 - **Verification:** TypeScript syntax valid
 - **Note:** useFocusEffect handles both initial load and refocus
 
-### [ ] MB-06: Missing pulseAnim in useEffect dependencies
+### [x] MB-06: Missing pulseAnim in useEffect dependencies
 - **Files:** `apps/mobile/src/components/AnimatedBotCard.tsx`
 - **Planned Fix:**
   - Add pulseAnim to deps array
   - Add cleanup function
 - **Test Plan:** Test status change while animating
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** TypeScript syntax valid
+- **Note:** Added pulseAnim, fadeAnim, translateY to dep arrays
 
-### [ ] MB-08: State updates after potential unmount
+### [x] MB-08: State updates after potential unmount
 - **Files:** `apps/mobile/src/screens/BotDetailScreen.tsx`
 - **Planned Fix:**
   - Add `isMounted` ref guard
   - Check before setState calls
 - **Test Plan:** Test rapid navigation
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** TypeScript syntax valid
+- **Note:** Added isMountedRef guard to all async state updates
 
 ### [ ] MB-11: Animation memory leaks
 - **Files:** `apps/mobile/src/utils/animations.ts`
@@ -499,13 +514,15 @@
 - **Test Plan:** Test offline scenarios
 - **Status:** Not started
 
-### [ ] MB-15: BotCard not memoized
+### [x] MB-15: BotCard not memoized
 - **Files:** `apps/mobile/src/screens/BotsListScreen.tsx`
 - **Planned Fix:**
   - Wrap with React.memo()
   - Add custom comparison function
 - **Test Plan:** Profile render count
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** TypeScript syntax valid
+- **Note:** Added React.memo wrapper and fixed useEffect deps
 
 ### [ ] MB-18: Race condition in bot creation navigation
 - **Files:** `apps/mobile/src/screens/CreateBotScreen.tsx`
@@ -535,12 +552,14 @@
 
 ## Low Severity (12 items)
 
-### [ ] CP-14: Heartbeat uses client timestamp
+### [x] CP-14: Heartbeat uses client timestamp
 - **Files:** `services/control-plane/src/handlers/sync.rs`
 - **Planned Fix:**
   - Use `NOW()` instead of client-provided timestamp
 - **Test Plan:** Verify DB timestamp is server time
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Changed from req.timestamp to NOW() in UPDATE query
 
 ### [ ] CP-15: Decimal-to-f32 precision loss
 - **Files:** `services/control-plane/src/brain/engine.rs`
@@ -652,9 +671,9 @@
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
 | High | 16 | 15 | 1 (deferred) |
-| Medium | 32 | 4 | 28 |
-| Low | 15 | 0 | 15 |
-| **Total** | **71** | **26** | **45** |
+| Medium | 32 | 13 | 19 |
+| Low | 15 | 1 | 14 |
+| **Total** | **71** | **36** | **35** |
 
 ---
 
@@ -699,4 +718,6 @@
 | CP-09 | 4187204e | 2026-02-05 | Proper error handling for Decimal conversions |
 | MB-19 | 0977fe65 | 2026-02-05 | Add 30s timeout to fetch requests |
 | MB-05 | b5f3a75b | 2026-02-05 | Remove duplicate fetchBots call |
+| DR-08 | a910c8a0 | 2026-02-05 | Add 10s per-request timeout with tokio::time::timeout |
+| INF-01 | 23816bcb | 2026-02-05 | Add dev-only warning comments to docker-compose |
 
