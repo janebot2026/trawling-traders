@@ -160,18 +160,31 @@ impl Default for SecretsManager {
 }
 
 #[cfg(test)]
+impl SecretsManager {
+    /// Create a SecretsManager with a specific key (for testing only)
+    fn with_key(key_hex: &str) -> Self {
+        let encryption_key = hex::decode(key_hex).ok().filter(|k| k.len() == 32);
+        Self { encryption_key }
+    }
+
+    /// Create a SecretsManager without encryption (for testing only)
+    fn without_encryption() -> Self {
+        Self {
+            encryption_key: None,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
+    // Test key: 32 bytes = 64 hex chars
+    const TEST_KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
-        // Set up test encryption key (32 bytes = 64 hex chars)
-        std::env::set_var(
-            "SECRETS_ENCRYPTION_KEY",
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        );
-
-        let manager = SecretsManager::new();
+        let manager = SecretsManager::with_key(TEST_KEY);
         assert!(manager.is_encryption_active());
 
         let plaintext = "sk-secret-api-key-12345";
@@ -185,19 +198,11 @@ mod tests {
         // Decrypt should return original
         let decrypted = manager.decrypt(&encrypted).unwrap();
         assert_eq!(decrypted, plaintext);
-
-        // Clean up
-        std::env::remove_var("SECRETS_ENCRYPTION_KEY");
     }
 
     #[test]
     fn test_different_encryptions_produce_different_output() {
-        std::env::set_var(
-            "SECRETS_ENCRYPTION_KEY",
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        );
-
-        let manager = SecretsManager::new();
+        let manager = SecretsManager::with_key(TEST_KEY);
         let plaintext = "same-secret";
 
         let encrypted1 = manager.encrypt(plaintext).unwrap();
@@ -209,18 +214,11 @@ mod tests {
         // Both should decrypt to same value
         assert_eq!(manager.decrypt(&encrypted1).unwrap(), plaintext);
         assert_eq!(manager.decrypt(&encrypted2).unwrap(), plaintext);
-
-        std::env::remove_var("SECRETS_ENCRYPTION_KEY");
     }
 
     #[test]
     fn test_tampered_data_fails() {
-        std::env::set_var(
-            "SECRETS_ENCRYPTION_KEY",
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        );
-
-        let manager = SecretsManager::new();
+        let manager = SecretsManager::with_key(TEST_KEY);
         let encrypted = manager.encrypt("secret").unwrap();
 
         // Tamper with the encrypted data
@@ -232,16 +230,11 @@ mod tests {
 
         // Decryption should fail
         assert!(manager.decrypt(&tampered).is_err());
-
-        std::env::remove_var("SECRETS_ENCRYPTION_KEY");
     }
 
     #[test]
     fn test_no_key_passthrough() {
-        // Ensure no key is set
-        std::env::remove_var("SECRETS_ENCRYPTION_KEY");
-
-        let manager = SecretsManager::new();
+        let manager = SecretsManager::without_encryption();
         assert!(!manager.is_encryption_active());
 
         let plaintext = "unencrypted-secret";
