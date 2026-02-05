@@ -76,7 +76,18 @@ async function clearAuthState(): Promise<void> {
   }
 }
 
-// HTTP client with auth and automatic token refresh
+// Default timeout for API requests (30 seconds)
+const DEFAULT_TIMEOUT_MS = 30000;
+
+// Timeout error for distinguishing from other errors
+export class TimeoutError extends ApiError {
+  constructor(message: string = 'Request timed out') {
+    super(0, message);
+    this.name = 'TimeoutError';
+  }
+}
+
+// HTTP client with auth, automatic token refresh, and timeout
 async function fetchApi(
   endpoint: string,
   options: RequestInit = {},
@@ -95,10 +106,26 @@ async function fetchApi(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  // Create AbortController for timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new TimeoutError(`Request to ${endpoint} timed out after ${DEFAULT_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   // Handle 401 Unauthorized - attempt token refresh
   if (response.status === 401 && !isRetry) {
