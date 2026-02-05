@@ -391,15 +391,11 @@ struct SearchResponse {
 struct SearchCoin {
     id: String,
     symbol: String,
+    #[allow(dead_code)] // Deserialized from API but not used
     name: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct MarketChartResponse {
-    prices: Vec<[f64; 2]>,
-    market_caps: Vec<[f64; 2]>,
-    total_volumes: Vec<[f64; 2]>,
-}
+// MarketChartResponse removed - now using OHLC endpoint instead
 
 #[async_trait::async_trait]
 impl PriceDataSource for CoinGeckoClient {

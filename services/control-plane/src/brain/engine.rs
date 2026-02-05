@@ -247,10 +247,10 @@ impl BrainEngine {
         let volume_ok = self.check_volume(candles, 1.5);
         
         // Calculate confidence and signal type
-        let mut confidence = 0.0;
         let signal_type: SignalType;
         let reason: String;
-        
+        let mut confidence: f64;
+
         if price > resistance {
             let breakout_strength = ((price - resistance) / range).to_string().parse::<f64>().unwrap_or(0.0);
             confidence = breakout_strength.min(0.5) * 2.0;
