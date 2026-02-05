@@ -70,14 +70,16 @@
 - **Verification:** cargo check passes
 - **Note:** Used saturating_add to prevent panic; logs warning on saturation
 
-### [ ] DR-01: WebSocket race condition (deadlock risk)
+### [x] DR-01: WebSocket race condition (deadlock risk)
 - **Files:** `services/data-retrieval/src/sources/binance_ws.rs`
 - **Planned Fix:**
   - Split WebSocket into separate send/receive channels
   - Use `futures::stream::StreamExt::split()`
   - Prevent lock contention between reader and writer
 - **Test Plan:** Load test with concurrent subscriptions and reads
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Split ws_stream into ws_sink and ws_reader for independent locking
 
 ### [x] DR-03: Unbounded price cache memory leak
 - **Files:** `services/data-retrieval/src/lib.rs`
@@ -614,7 +616,7 @@
 
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
-| Critical | 8 | 7 | 1 |
+| Critical | 8 | 7 | 1 (deferred) |
 | High | 16 | 1 | 15 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
@@ -643,5 +645,6 @@
 | BR-01 | 67ee0fb3 | 2026-02-04 | Replaced pkill -f with targeted PID kill using libc |
 | BR-05 | 54a165bc | 2026-02-04 | Used saturating_add to prevent cash overflow |
 | DR-04 | 54a51c9e | 2026-02-04 | Guard against zero total_weight in price aggregation |
-| DR-03 | (pending) | 2026-02-04 | Added TTL eviction and max size limits to price cache |
+| DR-03 | 6f6b0bb4 | 2026-02-04 | Added TTL eviction and max size limits to price cache |
+| DR-01 | (pending) | 2026-02-04 | Split WebSocket into separate read/write halves |
 

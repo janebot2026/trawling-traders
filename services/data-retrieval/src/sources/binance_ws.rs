@@ -1,4 +1,5 @@
 use crate::types::*;
+use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde_json::Value;
@@ -9,10 +10,19 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, info, warn};
 
+type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type WsSink = SplitSink<WsStream, Message>;
+type WsReader = SplitStream<WsStream>;
+
 /// Binance WebSocket client for real-time price feeds
+///
+/// Uses split read/write channels to prevent deadlock between
+/// sending subscriptions and receiving messages.
 pub struct BinanceWebSocketClient {
-    /// WebSocket stream
-    ws_stream: Arc<Mutex<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
+    /// WebSocket write half (for sending subscriptions)
+    ws_sink: Arc<Mutex<WsSink>>,
+    /// WebSocket read half (for receiving messages)
+    ws_reader: Arc<Mutex<WsReader>>,
     /// Channel for receiving price updates
     price_tx: mpsc::Sender<PricePoint>,
     price_rx: Arc<Mutex<mpsc::Receiver<PricePoint>>>,
@@ -27,38 +37,43 @@ impl BinanceWebSocketClient {
     pub async fn new() -> Result<Self> {
         // Binance WebSocket URL for combined streams
         let url = "wss://stream.binance.com:9443/ws";
-        
+
         let (ws_stream, _) = connect_async(url)
             .await
             .map_err(|e| DataRetrievalError::ApiError(format!(
                 "WebSocket connection failed: {}", e
             )))?;
-        
+
         info!("Connected to Binance WebSocket");
-        
+
+        // Split into read/write halves to prevent deadlock
+        let (ws_sink, ws_reader) = ws_stream.split();
+
         let (price_tx, price_rx) = mpsc::channel(100);
-        
+
         let client = Self {
-            ws_stream: Arc::new(Mutex::new(ws_stream)),
+            ws_sink: Arc::new(Mutex::new(ws_sink)),
+            ws_reader: Arc::new(Mutex::new(ws_reader)),
             price_tx,
             price_rx: Arc::new(Mutex::new(price_rx)),
             subscriptions: Arc::new(RwLock::new(HashMap::new())),
             connected: Arc::new(RwLock::new(true)),
         };
-        
+
         // Spawn message handler
         let client_clone = client.clone();
         tokio::spawn(async move {
             client_clone.message_handler().await;
         });
-        
+
         Ok(client)
     }
-    
+
     /// Clone for spawning tasks
     fn clone(&self) -> Self {
         Self {
-            ws_stream: Arc::clone(&self.ws_stream),
+            ws_sink: Arc::clone(&self.ws_sink),
+            ws_reader: Arc::clone(&self.ws_reader),
             price_tx: self.price_tx.clone(),
             price_rx: Arc::clone(&self.price_rx),
             subscriptions: Arc::clone(&self.subscriptions),
@@ -86,25 +101,26 @@ impl BinanceWebSocketClient {
         });
         
         let msg = Message::Text(subscribe_msg.to_string());
-        
+
+        // Use ws_sink (write half) - doesn't block message handler
         {
-            let mut ws = self.ws_stream.lock().await;
-            ws.send(msg).await.map_err(|e| {
+            let mut sink = self.ws_sink.lock().await;
+            sink.send(msg).await.map_err(|e| {
                 DataRetrievalError::ApiError(format!(
                     "Failed to subscribe: {}", e
                 ))
             })?;
         }
-        
+
         {
             let mut subs = self.subscriptions.write().await;
             subs.insert(symbol.to_uppercase(), stream_name);
         }
-        
+
         info!("Subscribed to {} trades", symbol);
         Ok(())
     }
-    
+
     /// Subscribe to 1-minute kline (candlestick) updates
     pub async fn subscribe_klines(
         &self,
@@ -112,25 +128,26 @@ impl BinanceWebSocketClient {
         interval: &str, // "1m", "5m", "15m", "1h", "4h", "1d"
     ) -> Result<()> {
         let stream_name = format!("{}@kline_{}", symbol.to_lowercase(), interval);
-        
+
         {
             let subs = self.subscriptions.read().await;
             if subs.values().any(|v| v == &stream_name) {
                 return Ok(()); // Already subscribed
             }
         }
-        
+
         let subscribe_msg = serde_json::json!({
             "method": "SUBSCRIBE",
             "params": [&stream_name],
             "id": 2,
         });
-        
+
         let msg = Message::Text(subscribe_msg.to_string());
-        
+
+        // Use ws_sink (write half) - doesn't block message handler
         {
-            let mut ws = self.ws_stream.lock().await;
-            ws.send(msg).await.map_err(|e| {
+            let mut sink = self.ws_sink.lock().await;
+            sink.send(msg).await.map_err(|e| {
                 DataRetrievalError::ApiError(format!(
                     "Failed to subscribe to klines: {}", e
                 ))
@@ -147,14 +164,17 @@ impl BinanceWebSocketClient {
     }
     
     /// Handle incoming WebSocket messages
-    async fn message_handler(&self,
-    ) {
+    ///
+    /// Uses the read half (ws_reader) so subscriptions can be sent
+    /// concurrently without blocking.
+    async fn message_handler(&self) {
         loop {
+            // Read from ws_reader (read half) - doesn't block subscriptions
             let msg = {
-                let mut ws = self.ws_stream.lock().await;
-                ws.next().await
+                let mut reader = self.ws_reader.lock().await;
+                reader.next().await
             };
-            
+
             match msg {
                 Some(Ok(Message::Text(text))) => {
                     if let Err(e) = self.process_message(&text).await {
@@ -162,10 +182,10 @@ impl BinanceWebSocketClient {
                     }
                 }
                 Some(Ok(Message::Ping(data))) => {
-                    // Send pong
+                    // Send pong using write half
                     let pong = Message::Pong(data);
-                    let mut ws = self.ws_stream.lock().await;
-                    if let Err(e) = ws.send(pong).await {
+                    let mut sink = self.ws_sink.lock().await;
+                    if let Err(e) = sink.send(pong).await {
                         error!("Failed to send pong: {}", e);
                     }
                 }
@@ -184,13 +204,13 @@ impl BinanceWebSocketClient {
                 _ => {} // Ignore other message types
             }
         }
-        
+
         // Mark as disconnected
         {
             let mut connected = self.connected.write().await;
             *connected = false;
         }
-        
+
         warn!("WebSocket message handler exited");
     }
     
@@ -324,83 +344,89 @@ impl BinanceWebSocketClient {
     }
     
     /// Reconnect to WebSocket
-    pub async fn reconnect(&mut self,
-    ) -> Result<()> {
+    pub async fn reconnect(&mut self) -> Result<()> {
         info!("Reconnecting to Binance WebSocket...");
-        
+
         // Connect new WebSocket
         let (ws_stream, _) = connect_async("wss://stream.binance.com:9443/ws")
             .await
             .map_err(|e| DataRetrievalError::ApiError(format!(
                 "Reconnection failed: {}", e
             )))?;
-        
-        // Replace old stream
+
+        // Split into read/write halves
+        let (ws_sink, ws_reader) = ws_stream.split();
+
+        // Replace old streams
         {
-            let mut ws = self.ws_stream.lock().await;
-            *ws = ws_stream;
+            let mut sink = self.ws_sink.lock().await;
+            *sink = ws_sink;
         }
-        
+        {
+            let mut reader = self.ws_reader.lock().await;
+            *reader = ws_reader;
+        }
+
         // Resubscribe to previous streams
         let subs: Vec<(String, String)> = {
             let s = self.subscriptions.read().await;
             s.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
         };
-        
+
         for (_symbol, stream) in subs {
-            // Re-subscribe
+            // Re-subscribe using write half
             let subscribe_msg = serde_json::json!({
                 "method": "SUBSCRIBE",
                 "params": [&stream],
                 "id": 1,
             });
-            
+
             let msg = Message::Text(subscribe_msg.to_string());
             {
-                let mut ws = self.ws_stream.lock().await;
-                ws.send(msg).await.map_err(|e| {
+                let mut sink = self.ws_sink.lock().await;
+                sink.send(msg).await.map_err(|e| {
                     DataRetrievalError::ApiError(format!(
                         "Resubscription failed: {}", e
                     ))
                 })?;
             }
         }
-        
+
         // Mark as connected
         {
             let mut connected = self.connected.write().await;
             *connected = true;
         }
-        
+
         // Restart message handler
         let client_clone = self.clone();
         tokio::spawn(async move {
             client_clone.message_handler().await;
         });
-        
+
         info!("Reconnected to Binance WebSocket");
         Ok(())
     }
-    
+
     /// Close connection gracefully
-    pub async fn close(&self,
-    ) -> Result<()> {
+    pub async fn close(&self) -> Result<()> {
         info!("Closing Binance WebSocket connection");
-        
+
+        // Close via write half
         {
-            let mut ws = self.ws_stream.lock().await;
-            ws.close(None).await.map_err(|e| {
+            let mut sink = self.ws_sink.lock().await;
+            sink.close().await.map_err(|e| {
                 DataRetrievalError::ApiError(format!(
                     "Failed to close WebSocket: {}", e
                 ))
             })?;
         }
-        
+
         {
             let mut connected = self.connected.write().await;
             *connected = false;
         }
-        
+
         Ok(())
     }
 }
