@@ -432,6 +432,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore] // Integration test - requires real CoinGecko API
     async fn test_get_btc_price() {
         let client = CoinGeckoClient::new(None);
         let price = client.get_price("BTC", "USD").await.unwrap();
