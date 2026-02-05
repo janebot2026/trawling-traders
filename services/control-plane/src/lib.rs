@@ -136,7 +136,3 @@ pub async fn app(state: Arc<AppState>) -> Router {
         .layer(cors)
         .layer(TraceLayer::new_for_http())
 }
-
-pub async fn get_current_user() -> Result<String, String> {
-    Ok("user".to_string())
-}
