@@ -265,61 +265,109 @@ pub async fn find_orphaned_bots(
     Ok(rows)
 }
 
-/// Clean up an orphaned bot
+/// Clean up an orphaned bot with advisory lock to prevent race with user destroy
 pub async fn cleanup_orphaned_bot(
     bot_id: uuid::Uuid,
     status: &str,
-    droplet_id: Option<i64>,
+    _droplet_id: Option<i64>,  // We re-fetch current droplet_id inside the transaction
     pool: &sqlx::PgPool,
 ) -> anyhow::Result<()> {
+    // Use advisory lock based on bot_id to prevent race with user-initiated destroy.
+    // The advisory lock key is derived from the UUID's lower 64 bits.
+    let lock_key = bot_id.as_u128() as i64;
+
+    // Start a transaction and try to acquire advisory lock
+    let mut tx = pool.begin().await?;
+
+    // Try to acquire advisory lock (non-blocking) - returns true if acquired
+    let acquired: (bool,) = sqlx::query_as(
+        "SELECT pg_try_advisory_xact_lock($1)"
+    )
+    .bind(lock_key)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if !acquired.0 {
+        // Another operation (likely user destroy) has the lock - skip this bot
+        debug!("Skipping cleanup of bot {} - lock held by another operation", bot_id);
+        tx.rollback().await?;
+        return Ok(());
+    }
+
+    // Re-check bot status after acquiring lock (TOCTOU protection)
+    let current: Option<(String, Option<i64>)> = sqlx::query_as(
+        "SELECT status, droplet_id FROM bots WHERE id = $1"
+    )
+    .bind(bot_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some((current_status, current_droplet_id)) = current else {
+        // Bot was deleted while we were waiting
+        debug!("Bot {} no longer exists, skipping cleanup", bot_id);
+        tx.commit().await?;
+        return Ok(());
+    };
+
+    // Verify the status hasn't changed (user might have started a different operation)
+    if current_status != status {
+        debug!(
+            "Bot {} status changed from '{}' to '{}', skipping cleanup",
+            bot_id, status, current_status
+        );
+        tx.commit().await?;
+        return Ok(());
+    }
+
     match status {
         "provisioning" => {
             // Bot stuck in provisioning - mark as error
             info!("Cleaning up orphaned provisioning bot {}", bot_id);
-            
+
             // If we have a droplet_id, try to destroy it
-            if let Some(did) = droplet_id {
+            if let Some(did) = current_droplet_id {
                 if let Ok(do_token) = std::env::var("DIGITALOCEAN_TOKEN") {
                     if let Ok(client) = claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
                         let _ = client.destroy_droplet(did).await;
                     }
                 }
             }
-            
+
             // Mark bot as error
             sqlx::query(
                 "UPDATE bots SET status = 'error', droplet_id = NULL, updated_at = NOW() WHERE id = $1"
             )
             .bind(bot_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
         }
         "destroying" => {
             // Bot stuck in destroying - force to destroyed state
             info!("Cleaning up orphaned destroying bot {}", bot_id);
-            
+
             // Try to destroy droplet if exists
-            if let Some(did) = droplet_id {
+            if let Some(did) = current_droplet_id {
                 if let Ok(do_token) = std::env::var("DIGITALOCEAN_TOKEN") {
                     if let Ok(client) = claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
                         let _ = client.destroy_droplet(did).await;
                     }
                 }
             }
-            
+
             // Mark bot as fully destroyed (or delete it)
             sqlx::query(
                 "UPDATE bots SET status = 'destroying', droplet_id = NULL, updated_at = NOW() WHERE id = $1"
             )
             .bind(bot_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
         }
         _ => {
             warn!("Unknown orphan status '{}' for bot {}", status, bot_id);
         }
     }
-    
+
+    tx.commit().await?;
     Ok(())
 }
 
