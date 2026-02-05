@@ -11,6 +11,7 @@ import {
   Image,
   Animated,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -203,10 +204,10 @@ export function BotDetailScreen() {
                 <Text style={styles.walletAddress}>{bot.agentWallet.slice(0, 8)}...{bot.agentWallet.slice(-8)}</Text>
               </View>
               <View style={styles.walletActions}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.copyButton}
-                  onPress={() => {
-                    // TODO: Copy to clipboard
+                  onPress={async () => {
+                    await Clipboard.setStringAsync(bot.agentWallet);
                     Alert.alert('Copied', 'Wallet address copied to clipboard');
                   }}
                 >
