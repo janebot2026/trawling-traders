@@ -83,11 +83,11 @@ async fn build_router(
                 state.clone(),
                 control_plane::middleware::subscription::bot_create_limit_middleware
             )))
-        .route("/bots/:id", get(control_plane::handlers::bots::get_bot))
-        .route("/bots/:id/config", patch(control_plane::handlers::bots::update_bot_config))
-        .route("/bots/:id/actions", post(control_plane::handlers::bots::bot_action))
-        .route("/bots/:id/metrics", get(control_plane::handlers::bots::get_metrics))
-        .route("/bots/:id/events", get(control_plane::handlers::bots::get_events))
+        .route("/bots/{id}", get(control_plane::handlers::bots::get_bot))
+        .route("/bots/{id}/config", patch(control_plane::handlers::bots::update_bot_config))
+        .route("/bots/{id}/actions", post(control_plane::handlers::bots::bot_action))
+        .route("/bots/{id}/metrics", get(control_plane::handlers::bots::get_metrics))
+        .route("/bots/{id}/events", get(control_plane::handlers::bots::get_events))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             control_plane::middleware::subscription::subscription_middleware
@@ -104,12 +104,12 @@ async fn build_router(
     
     // Bot-facing routes (internal, from VPS)
     let bot_routes = Router::new()
-        .route("/bot/:id/register", post(control_plane::handlers::sync::register_bot))
-        .route("/bot/:id/config", get(control_plane::handlers::sync::get_bot_config))
-        .route("/bot/:id/config_ack", post(control_plane::handlers::sync::ack_config))
-        .route("/bot/:id/wallet", post(control_plane::handlers::sync::report_wallet))
-        .route("/bot/:id/heartbeat", post(control_plane::handlers::sync::heartbeat))
-        .route("/bot/:id/events", post(control_plane::handlers::sync::ingest_events))
+        .route("/bot/{id}/register", post(control_plane::handlers::sync::register_bot))
+        .route("/bot/{id}/config", get(control_plane::handlers::sync::get_bot_config))
+        .route("/bot/{id}/config_ack", post(control_plane::handlers::sync::ack_config))
+        .route("/bot/{id}/wallet", post(control_plane::handlers::sync::report_wallet))
+        .route("/bot/{id}/heartbeat", post(control_plane::handlers::sync::heartbeat))
+        .route("/bot/{id}/events", post(control_plane::handlers::sync::ingest_events))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             control_plane::middleware::rate_limit::bot_rate_limit_middleware
