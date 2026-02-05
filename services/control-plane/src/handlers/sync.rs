@@ -461,6 +461,12 @@ pub struct SecretsResponse {
     pub jupiter_api_key: String,
     pub data_retrieval_url: String,
     pub solana_rpc_url: String,
+    // OpenClaw secrets
+    pub llm_provider: String,
+    pub llm_model: String,
+    pub llm_api_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram_bot_token: Option<String>,
 }
 
 /// POST /bot/:id/secrets - Bot retrieves secrets using bootstrap token (one-time)
@@ -545,6 +551,64 @@ pub async fn get_bot_secrets(
     )
     .await;
 
+    // Retrieve OpenClaw secrets from bot_openclaw_config table
+    let openclaw_config = sqlx::query_as::<_, BotOpenClawConfig>(
+        "SELECT * FROM bot_openclaw_config WHERE bot_id = $1",
+    )
+    .bind(bot_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let (llm_provider, llm_model, llm_api_key, telegram_bot_token) = match openclaw_config {
+        Some(cfg) => {
+            let decrypted_llm_key = if !cfg.encrypted_llm_api_key.is_empty() {
+                state
+                    .secrets
+                    .decrypt(&cfg.encrypted_llm_api_key)
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            let decrypted_telegram_token = if cfg.telegram_enabled {
+                cfg.encrypted_telegram_bot_token
+                    .as_ref()
+                    .and_then(|token| state.secrets.decrypt(token).ok())
+            } else {
+                None
+            };
+
+            (
+                cfg.llm_provider,
+                cfg.llm_model,
+                decrypted_llm_key,
+                decrypted_telegram_token,
+            )
+        }
+        None => {
+            // Fallback: try to get LLM config from config_versions (legacy)
+            let config_version = sqlx::query_as::<_, ConfigVersion>(
+                "SELECT * FROM config_versions WHERE id = $1",
+            )
+            .bind(bot.desired_version_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            match config_version {
+                Some(cv) => {
+                    let decrypted_key = state
+                        .secrets
+                        .decrypt(&cv.encrypted_llm_api_key)
+                        .unwrap_or_default();
+                    (cv.llm_provider, String::new(), decrypted_key, None)
+                }
+                None => (String::new(), String::new(), String::new(), None),
+            }
+        }
+    };
+
     info!("Bot {} retrieved secrets successfully", bot_id);
     Logger::bot_event(
         &bot_id.to_string(),
@@ -556,5 +620,9 @@ pub async fn get_bot_secrets(
         jupiter_api_key,
         data_retrieval_url,
         solana_rpc_url,
+        llm_provider,
+        llm_model,
+        llm_api_key,
+        telegram_bot_token,
     }))
 }

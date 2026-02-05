@@ -20,6 +20,14 @@ export type Strictness = 'low' | 'medium' | 'high';
 // LLM providers
 export type LlmProvider = 'openai' | 'anthropic' | 'venice' | 'openrouter';
 
+// LLM models by provider
+export type LlmModel =
+  | 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4-turbo'  // OpenAI
+  | 'claude-3-5-sonnet' | 'claude-3-opus' | 'claude-3-haiku'  // Anthropic
+  | 'llama-3.1-405b'  // Venice
+  | 'auto'  // OpenRouter auto-select
+  | string; // Custom model string
+
 // Bot configuration (what user sets)
 export interface BotConfig {
   id?: string;
@@ -147,7 +155,32 @@ export interface CreateBotRequest {
   riskCaps: BotConfig['riskCaps'];
   tradingMode: TradingMode;
   llmProvider: LlmProvider;
+  llmModel?: LlmModel;
   llmApiKey: string;
+  // Telegram integration
+  telegramEnabled?: boolean;
+  telegramBotToken?: string;
+}
+
+// OpenClaw config request/response types
+export interface UpdateOpenClawConfigRequest {
+  llmProvider: LlmProvider;
+  llmModel?: LlmModel;
+  llmApiKey?: string;
+  telegramEnabled?: boolean;
+  telegramBotToken?: string;
+}
+
+export interface OpenClawConfigResponse {
+  botId: string;
+  llmProvider: string;
+  llmModel: string;
+  hasLlmApiKey: boolean;
+  telegramEnabled: boolean;
+  hasTelegramBotToken: boolean;
+  discordEnabled: boolean;
+  hasDiscordBotToken: boolean;
+  updatedAt: string;
 }
 
 export interface UpdateBotConfigRequest {

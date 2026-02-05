@@ -198,6 +198,25 @@ pub struct ConfigVersion {
     pub created_at: DateTime<Utc>,
 }
 
+/// OpenClaw configuration for a bot (LLM + channel integrations)
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct BotOpenClawConfig {
+    pub id: Uuid,
+    pub bot_id: Uuid,
+    pub llm_provider: String,
+    pub llm_model: String,
+    #[serde(skip_serializing)]
+    pub encrypted_llm_api_key: String,
+    pub telegram_enabled: bool,
+    #[serde(skip_serializing)]
+    pub encrypted_telegram_bot_token: Option<String>,
+    pub discord_enabled: bool,
+    #[serde(skip_serializing)]
+    pub encrypted_discord_bot_token: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 /// Metric DB model (uses BigDecimal for SQLx compatibility)
 #[derive(Debug, Clone, FromRow)]
 pub struct MetricDb {
@@ -319,9 +338,16 @@ pub struct CreateBotRequest {
     pub risk_caps: RiskCaps,
     #[validate(length(min = 1))]
     pub llm_provider: String,
+    /// Optional LLM model (e.g., "gpt-4o", "claude-3-5-sonnet")
+    pub llm_model: Option<String>,
     /// Optional LLM API key (will be encrypted at rest)
     pub llm_api_key: Option<String>,
     pub custom_assets: Option<Vec<String>>,
+    /// Enable Telegram integration
+    #[serde(default)]
+    pub telegram_enabled: bool,
+    /// Telegram bot token from @BotFather (encrypted at rest)
+    pub telegram_bot_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -334,9 +360,16 @@ pub struct BotConfigInput {
     pub trading_mode: TradingMode,
     pub risk_caps: RiskCaps,
     pub llm_provider: String,
+    /// Optional LLM model (e.g., "gpt-4o", "claude-3-5-sonnet")
+    pub llm_model: Option<String>,
     /// Optional LLM API key (will be encrypted at rest)
     pub llm_api_key: Option<String>,
     pub custom_assets: Option<Vec<String>>,
+    /// Enable Telegram integration
+    #[serde(default)]
+    pub telegram_enabled: bool,
+    /// Telegram bot token from @BotFather (encrypted at rest)
+    pub telegram_bot_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -556,4 +589,52 @@ pub struct TestWebhookRequest {
 pub struct TestWebhookResponse {
     pub success: bool,
     pub message: String,
+}
+
+// ============================================================================
+// OpenClaw Configuration
+// ============================================================================
+
+/// OpenClaw config response (secrets masked)
+#[derive(Debug, Serialize)]
+pub struct OpenClawConfigResponse {
+    pub bot_id: Uuid,
+    pub llm_provider: String,
+    pub llm_model: String,
+    pub has_llm_api_key: bool,
+    pub telegram_enabled: bool,
+    pub has_telegram_bot_token: bool,
+    pub discord_enabled: bool,
+    pub has_discord_bot_token: bool,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<BotOpenClawConfig> for OpenClawConfigResponse {
+    fn from(config: BotOpenClawConfig) -> Self {
+        Self {
+            bot_id: config.bot_id,
+            llm_provider: config.llm_provider,
+            llm_model: config.llm_model,
+            has_llm_api_key: !config.encrypted_llm_api_key.is_empty(),
+            telegram_enabled: config.telegram_enabled,
+            has_telegram_bot_token: config.encrypted_telegram_bot_token.is_some(),
+            discord_enabled: config.discord_enabled,
+            has_discord_bot_token: config.encrypted_discord_bot_token.is_some(),
+            updated_at: config.updated_at,
+        }
+    }
+}
+
+/// Request to create/update OpenClaw config
+#[derive(Debug, Deserialize)]
+pub struct UpdateOpenClawConfigRequest {
+    pub llm_provider: String,
+    pub llm_model: Option<String>,
+    /// LLM API key (encrypted at rest)
+    pub llm_api_key: Option<String>,
+    /// Enable Telegram integration
+    #[serde(default)]
+    pub telegram_enabled: bool,
+    /// Telegram bot token from @BotFather (encrypted at rest)
+    pub telegram_bot_token: Option<String>,
 }

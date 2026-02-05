@@ -2,9 +2,11 @@ pub mod algorithms;
 pub mod brain;
 pub mod config;
 pub mod models;
+pub mod user_data;
 pub mod handlers {
     pub mod admin;
     pub mod bots;
+    pub mod openclaw_config;
     pub mod simulate;
     pub mod sync;
 }

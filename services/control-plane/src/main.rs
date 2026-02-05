@@ -117,6 +117,14 @@ async fn build_router(
             "/bots/{id}/events",
             get(control_plane::handlers::bots::get_events),
         )
+        .route(
+            "/bots/{id}/openclaw-config",
+            get(control_plane::handlers::openclaw_config::get_openclaw_config),
+        )
+        .route(
+            "/bots/{id}/openclaw-config",
+            post(control_plane::handlers::openclaw_config::update_openclaw_config),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             control_plane::middleware::subscription::subscription_middleware,

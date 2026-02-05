@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
-import type { Persona, AlgorithmMode, AssetFocus, TradingMode, Strictness, LlmProvider } from '@trawling-traders/types';
+import type { Persona, AlgorithmMode, AssetFocus, TradingMode, Strictness, LlmProvider, LlmModel } from '@trawling-traders/types';
 import { api } from '@trawling-traders/api-client';
 import { OceanBackground } from '../components/OceanBackground';
 import { lightTheme } from '../theme';
@@ -63,6 +63,26 @@ const ASSET_FOCUSES: { value: AssetFocus; label: string; description: string; ti
   { value: 'memes', label: 'Memes ⚠️', description: 'High risk', tier: 'speculative' },
 ];
 
+// LLM Models by provider
+const LLM_MODELS: Record<LlmProvider, { value: LlmModel; label: string }[]> = {
+  openai: [
+    { value: 'gpt-4o', label: 'GPT-4o (Recommended)' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini (Faster)' },
+    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+  ],
+  anthropic: [
+    { value: 'claude-3-5-sonnet', label: 'Claude 3.5 Sonnet (Recommended)' },
+    { value: 'claude-3-opus', label: 'Claude 3 Opus (Best)' },
+    { value: 'claude-3-haiku', label: 'Claude 3 Haiku (Fastest)' },
+  ],
+  venice: [
+    { value: 'llama-3.1-405b', label: 'Llama 3.1 405B' },
+  ],
+  openrouter: [
+    { value: 'auto', label: 'Auto (Best Available)' },
+  ],
+};
+
 export function CreateBotScreen() {
   const navigation = useNavigation<CreateBotScreenNavigationProp>();
   const insets = useSafeAreaInsets();
@@ -79,6 +99,14 @@ export function CreateBotScreen() {
     ]).start();
   }, []);
 
+  // Update model when provider changes
+  useEffect(() => {
+    const models = LLM_MODELS[llmProvider];
+    if (models && models.length > 0) {
+      setLlmModel(models[0].value);
+    }
+  }, [llmProvider]);
+
   // Form state
   const [name, setName] = useState('');
   const [persona, setPersona] = useState<Persona>('beginner');
@@ -87,7 +115,10 @@ export function CreateBotScreen() {
   const [strictness, setStrictness] = useState<Strictness>('high');
   const [tradingMode, setTradingMode] = useState<TradingMode>('paper');
   const [llmProvider, setLlmProvider] = useState<LlmProvider>('openai');
+  const [llmModel, setLlmModel] = useState<LlmModel>('gpt-4o');
   const [llmApiKey, setLlmApiKey] = useState('');
+  const [telegramEnabled, setTelegramEnabled] = useState(false);
+  const [telegramBotToken, setTelegramBotToken] = useState('');
   const [maxPositionSize, setMaxPositionSize] = useState('5');
   const [maxDailyLoss, setMaxDailyLoss] = useState('50');
   const [maxDrawdown, setMaxDrawdown] = useState('10');
@@ -132,6 +163,12 @@ export function CreateBotScreen() {
       return;
     }
 
+    // Validate Telegram token if enabled
+    if (telegramEnabled && !telegramBotToken.trim()) {
+      Alert.alert('Error', 'Please enter your Telegram bot token or disable Telegram integration');
+      return;
+    }
+
     setIsLoading(true);
     try {
       await api.bot.createBot({
@@ -148,11 +185,15 @@ export function CreateBotScreen() {
         },
         tradingMode,
         llmProvider,
+        llmModel,
         llmApiKey: llmApiKey.trim(),
+        telegramEnabled,
+        telegramBotToken: telegramEnabled ? telegramBotToken.trim() : undefined,
       });
       Alert.alert('Success', 'Trawler deployed!');
       // Clear sensitive data from state immediately after successful submission
       setLlmApiKey('');
+      setTelegramBotToken('');
       // Small delay to ensure server has committed the new bot before navigating
       // This prevents the race condition where BotsList fetches before commit
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -350,7 +391,22 @@ export function CreateBotScreen() {
               ))}
             </View>
 
-            <Text style={styles.label}>API Key</Text>
+            <Text style={[styles.label, { marginTop: 16 }]}>Model</Text>
+            <View style={styles.providerRow}>
+              {LLM_MODELS[llmProvider].map((model) => (
+                <TouchableOpacity
+                  key={model.value}
+                  style={[styles.providerChip, llmModel === model.value && styles.providerChipSelected]}
+                  onPress={() => setLlmModel(model.value)}
+                >
+                  <Text style={[styles.providerText, llmModel === model.value && styles.providerTextSelected]}>
+                    {model.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[styles.label, { marginTop: 16 }]}>API Key</Text>
             <TextInput
               style={styles.input}
               value={llmApiKey}
@@ -359,6 +415,40 @@ export function CreateBotScreen() {
               placeholderTextColor={lightTheme.colors.wave[400]}
               secureTextEntry
             />
+          </>
+        )}
+
+        {renderSection('Telegram Integration',
+          <>
+            <View style={styles.switchRow}>
+              <View>
+                <Text style={styles.switchLabel}>Enable Telegram</Text>
+                <Text style={styles.switchSub}>Chat with your bot via Telegram</Text>
+              </View>
+              <Switch
+                value={telegramEnabled}
+                onValueChange={setTelegramEnabled}
+                trackColor={{ false: lightTheme.colors.wave[300], true: lightTheme.colors.primary[400] }}
+                thumbColor={telegramEnabled ? lightTheme.colors.primary[600] : '#fff'}
+              />
+            </View>
+
+            {telegramEnabled && (
+              <>
+                <Text style={styles.label}>Bot Token</Text>
+                <TextInput
+                  style={styles.input}
+                  value={telegramBotToken}
+                  onChangeText={setTelegramBotToken}
+                  placeholder="123456789:ABCdefGHI..."
+                  placeholderTextColor={lightTheme.colors.wave[400]}
+                  secureTextEntry
+                />
+                <Text style={styles.helperText}>
+                  Get your token from @BotFather on Telegram
+                </Text>
+              </>
+            )}
           </>
         )}
 
@@ -606,6 +696,12 @@ const styles = StyleSheet.create({
   providerTextSelected: {
     color: '#fff',
     fontWeight: '600',
+  },
+  helperText: {
+    fontSize: 12,
+    color: lightTheme.colors.wave[500],
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   deployButton: {
     backgroundColor: lightTheme.colors.primary[700],
