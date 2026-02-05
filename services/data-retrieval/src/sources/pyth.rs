@@ -6,7 +6,9 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use tracing::{debug, info};
 
-use crate::types::{Candle, DataRetrievalError, PriceDataSource, PricePoint, SourceHealth, TimeFrame};
+use crate::types::{
+    Candle, DataRetrievalError, PriceDataSource, PricePoint, SourceHealth, TimeFrame,
+};
 
 const PYTH_HERMES_BASE: &str = "https://hermes.pyth.network/v2";
 
@@ -87,22 +89,17 @@ impl PythClient {
     }
 
     /// Get price for a stock/metal symbol
-    pub async fn get_price(
-        &self,
-        symbol: &str,
-    ) -> Result<PricePoint> {
+    pub async fn get_price(&self, symbol: &str) -> Result<PricePoint> {
         let feed_id = PYTH_FEED_IDS
             .get(symbol)
             .with_context(|| format!("No Pyth feed ID for symbol: {}", symbol))?;
 
-        let url = format!(
-            "{}/updates/price/latest?ids[]={}",
-            self.base_url, feed_id
-        );
+        let url = format!("{}/updates/price/latest?ids[]={}", self.base_url, feed_id);
 
         debug!("Fetching Pyth price for {} from {}", symbol, url);
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .send()
             .await
@@ -111,9 +108,7 @@ impl PythClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "Pyth API error: {} - {}", status, text
-            ));
+            return Err(anyhow::anyhow!("Pyth API error: {} - {}", status, text));
         }
 
         let update: PythPriceUpdate = response
@@ -121,24 +116,29 @@ impl PythClient {
             .await
             .context("Failed to parse Pyth response")?;
 
-        let parsed = update.parsed
+        let parsed = update
+            .parsed
             .into_iter()
             .next()
             .context("No price data in Pyth response")?;
 
         let price_data = parsed.price;
-        
+
         // Pyth returns price as integer with exponent
-        let price_int: i64 = price_data.price.parse()
+        let price_int: i64 = price_data
+            .price
+            .parse()
             .context("Failed to parse Pyth price")?;
         let price_f64 = (price_int as f64) * 10f64.powi(price_data.expo);
-        
-        let confidence: u64 = price_data.conf.parse()
+
+        let confidence: u64 = price_data
+            .conf
+            .parse()
             .context("Failed to parse Pyth confidence")?;
         let confidence_usd = (confidence as f64) * 10f64.powi(price_data.expo);
 
-        let timestamp = DateTime::from_timestamp(price_data.publish_time, 0)
-            .unwrap_or_else(Utc::now);
+        let timestamp =
+            DateTime::from_timestamp(price_data.publish_time, 0).unwrap_or_else(Utc::now);
 
         info!(
             "Pyth price for {}: ${:.4} (confidence: ${:.4})",
@@ -151,15 +151,16 @@ impl PythClient {
                 .map_err(|e| anyhow::anyhow!("Failed to convert price: {}", e))?,
             source: "pyth".to_string(),
             timestamp,
-            confidence: Some(if price_f64 > 0.0 { confidence_usd / price_f64 } else { 0.0 }),
+            confidence: Some(if price_f64 > 0.0 {
+                confidence_usd / price_f64
+            } else {
+                0.0
+            }),
         })
     }
 
     /// Get multiple prices in one request (more efficient)
-    pub async fn get_prices_batch(
-        &self,
-        symbols: &[&str],
-    ) -> Result<HashMap<String, PricePoint>> {
+    pub async fn get_prices_batch(&self, symbols: &[&str]) -> Result<HashMap<String, PricePoint>> {
         let feed_ids: Vec<&str> = symbols
             .iter()
             .filter_map(|s| PYTH_FEED_IDS.get(s).copied())
@@ -174,7 +175,8 @@ impl PythClient {
             url.push_str(&format!("ids[]={}&", id));
         }
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .send()
             .await
@@ -186,7 +188,7 @@ impl PythClient {
             .context("Failed to parse Pyth batch response")?;
 
         let mut result = HashMap::new();
-        
+
         // Create reverse lookup: feed_id -> symbol
         let id_to_symbol: HashMap<&str, &str> = symbols
             .iter()
@@ -197,9 +199,9 @@ impl PythClient {
             if let Some(symbol) = id_to_symbol.get(parsed.id.as_str()) {
                 let price_int: i64 = parsed.price.price.parse()?;
                 let price_f64 = (price_int as f64) * 10f64.powi(parsed.price.expo);
-                
-                let timestamp = DateTime::from_timestamp(parsed.price.publish_time, 0)
-                    .unwrap_or_else(Utc::now);
+
+                let timestamp =
+                    DateTime::from_timestamp(parsed.price.publish_time, 0).unwrap_or_else(Utc::now);
 
                 result.insert(
                     symbol.to_string(),
@@ -225,7 +227,9 @@ impl PythClient {
 
     /// Get list of supported stock symbols
     pub fn supported_stocks() -> Vec<&'static str> {
-        vec!["AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "NVDA", "META", "NFLX"]
+        vec![
+            "AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "NVDA", "META", "NFLX",
+        ]
     }
 
     /// Get list of supported ETF symbols

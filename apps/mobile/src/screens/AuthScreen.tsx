@@ -49,7 +49,7 @@ export function AuthScreen() {
       isNavigatingRef.current = true;
 
       // Check subscription status before navigating
-      api.getMe()
+      api.user.getCurrentUser()
         .then((userData) => {
           const subscription = userData.subscription;
           const isActive = subscription?.status === 'active';
@@ -200,6 +200,29 @@ export function AuthScreen() {
                 }
               }}
               isLoading={authLoading}
+            />
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <GoogleLoginButton
+              onSuccess={() => {
+                // CedrosLoginProvider handles the auth state
+                // Navigation happens automatically via useEffect above
+                if (__DEV__) {
+                  console.log('Google login success');
+                }
+              }}
+              onError={(error) => {
+                if (__DEV__) {
+                  console.error('Google login error:', error);
+                }
+              }}
+              style={styles.googleButton}
+              textStyle={styles.googleButtonText}
             />
           </Animated.View>
 
@@ -362,6 +385,41 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: lightTheme.colors.wave[500],
     marginBottom: 40,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: lightTheme.colors.wave[300],
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    fontSize: 14,
+    color: lightTheme.colors.wave[500],
+  },
+  googleButton: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: lightTheme.colors.wave[300],
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  googleButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: lightTheme.colors.wave[700],
   },
   footer: {
     alignItems: 'center',

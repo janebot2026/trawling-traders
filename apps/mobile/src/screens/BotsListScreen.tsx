@@ -146,15 +146,25 @@ export function BotsListScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [botCount, setBotCount] = useState(0);
-  const [maxBots, setMaxBots] = useState(4);
+  const [maxBots, setMaxBots] = useState(1); // Default to free tier, will be updated from subscription
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchBots = useCallback(async () => {
     setLoadError(null);
     try {
-      const response = await api.bot.listBots();
-      setBots(response.bots);
-      setBotCount(response.total);
+      // Fetch bots and user data in parallel for efficiency
+      const [botsResponse, userData] = await Promise.all([
+        api.bot.listBots(),
+        api.user.getCurrentUser(),
+      ]);
+      setBots(botsResponse.bots);
+      setBotCount(botsResponse.total);
+      // Set maxBots from user's subscription tier (default to 1 for free tier)
+      if (userData.subscription?.maxBots) {
+        setMaxBots(userData.subscription.maxBots);
+      } else {
+        setMaxBots(1); // Free tier default
+      }
     } catch (error) {
       if (__DEV__) {
         console.error('Failed to fetch bots:', error);

@@ -1,5 +1,5 @@
 //! End-to-end paper trading test harness
-//! 
+//!
 //! Validates the full trading loop:
 //! config → signal → intent → shield/quote → execute (paper) → events + portfolio
 
@@ -7,12 +7,15 @@ mod mock_executor;
 
 use bot_runner::{
     client::{EventInput, MetricInput},
-    config::{BotConfig, ExecutionConfig, TradingMode, AlgorithmMode, Strictness, AssetFocus, Persona, RiskCaps},
-    executor::{TradeStage, TradeSide, TradeError},
+    config::{
+        AlgorithmMode, AssetFocus, BotConfig, ExecutionConfig, Persona, RiskCaps, Strictness,
+        TradingMode,
+    },
+    executor::{TradeError, TradeSide, TradeStage},
     intent::{IntentRegistry, TradeIntentState},
     portfolio::{Portfolio, Position},
 };
-use mock_executor::{MockTradeExecutor, MockPriceOracle};
+use mock_executor::{MockPriceOracle, MockTradeExecutor};
 use rust_decimal::Decimal;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -90,33 +93,35 @@ pub fn create_test_config(version: i32) -> BotConfig {
 async fn test_paper_trade_buy_cycle() {
     let config = create_test_config(1);
     let executor = MockTradeExecutor::new(config.execution);
-    
+
     // Execute a buy: USDC -> SOL
-    let result = executor.execute_trade(
-        "test-intent-1",
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
-        "So11111111111111111111111111111111111111112",  // SOL
-        1_000_000_000, // 1000 USDC (6 decimals)
-        TradeSide::Buy,
-        TradingMode::Paper,
-    ).await;
+    let result = executor
+        .execute_trade(
+            "test-intent-1",
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+            "So11111111111111111111111111111111111111112",  // SOL
+            1_000_000_000,                                  // 1000 USDC (6 decimals)
+            TradeSide::Buy,
+            TradingMode::Paper,
+        )
+        .await;
 
     // Verify result structure
     assert_eq!(result.intent_id, "test-intent-1");
     assert_eq!(result.stage_reached, TradeStage::Confirmed);
     assert!(result.signature.is_some());
     assert_eq!(result.signature.as_ref().unwrap(), "paper_trade_simulated");
-    
+
     // Verify quote data populated
     assert!(result.quote.in_amount > 0);
     assert!(result.quote.expected_out > 0);
     assert!(result.quote.price_impact_pct >= 0.0);
-    
+
     // Verify execution data populated
     assert!(result.execution.out_amount_raw > 0);
     assert!(result.execution.realized_price > Decimal::ZERO);
     assert!(result.execution.slippage_bps_estimate.is_some());
-    
+
     // No error
     assert!(result.error.is_none());
 
@@ -139,32 +144,33 @@ async fn test_trade_blocked_by_impact() {
         },
         ..create_test_config(1)
     };
-    
-    let executor = MockTradeExecutor::new(config.execution)
-        .with_oracle(MockPriceOracle {
-            sol_price_usdc: 150.0,
-            btc_price_usdc: 65000.0,
-            impact_for_amount: |_| 2.0, // Always return 2% impact
-        });
+
+    let executor = MockTradeExecutor::new(config.execution).with_oracle(MockPriceOracle {
+        sol_price_usdc: 150.0,
+        btc_price_usdc: 65000.0,
+        impact_for_amount: |_| 2.0, // Always return 2% impact
+    });
 
     // Execute with any amount - should be blocked due to high impact
-    let result = executor.execute_trade(
-        "test-intent-impact",
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        "So11111111111111111111111111111111111111112",
-        1_000_000_000,
-        TradeSide::Buy,
-        TradingMode::Paper,
-    ).await;
+    let result = executor
+        .execute_trade(
+            "test-intent-impact",
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "So11111111111111111111111111111111111111112",
+            1_000_000_000,
+            TradeSide::Buy,
+            TradingMode::Paper,
+        )
+        .await;
 
     // Should be blocked
     assert_eq!(result.stage_reached, TradeStage::Blocked);
     assert!(result.error.is_some());
-    
+
     let error = result.error.unwrap();
     assert_eq!(error.stage, "quote");
     assert_eq!(error.code, "impact_too_high");
-    
+
     println!("✅ Trade correctly blocked due to high price impact");
     println!("   Block reason: {}", error.message);
 }
@@ -173,29 +179,30 @@ async fn test_trade_blocked_by_impact() {
 #[tokio::test]
 async fn test_trade_blocked_by_shield() {
     let config = create_test_config(1);
-    let executor = MockTradeExecutor::new(config.execution)
-        .with_failure_simulator(|| TradeError {
-            stage: "shield".to_string(),
-            code: "shield_deny".to_string(),
-            message: "Token marked as high risk".to_string(),
-        });
+    let executor = MockTradeExecutor::new(config.execution).with_failure_simulator(|| TradeError {
+        stage: "shield".to_string(),
+        code: "shield_deny".to_string(),
+        message: "Token marked as high risk".to_string(),
+    });
 
-    let result = executor.execute_trade(
-        "test-intent-shield",
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        "So11111111111111111111111111111111111111112",
-        1_000_000_000,
-        TradeSide::Buy,
-        TradingMode::Paper,
-    ).await;
+    let result = executor
+        .execute_trade(
+            "test-intent-shield",
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "So11111111111111111111111111111111111111112",
+            1_000_000_000,
+            TradeSide::Buy,
+            TradingMode::Paper,
+        )
+        .await;
 
     assert_eq!(result.stage_reached, TradeStage::Failed);
     assert!(result.error.is_some());
-    
+
     let error = result.error.unwrap();
     assert_eq!(error.stage, "shield");
     assert_eq!(error.code, "shield_deny");
-    
+
     println!("✅ Trade correctly blocked by shield");
     println!("   Block reason: {}", error.message);
 }
@@ -204,29 +211,30 @@ async fn test_trade_blocked_by_shield() {
 #[tokio::test]
 async fn test_confirmation_timeout() {
     let config = create_test_config(1);
-    let executor = MockTradeExecutor::new(config.execution)
-        .with_failure_simulator(|| TradeError {
-            stage: "confirm".to_string(),
-            code: "confirm_timeout".to_string(),
-            message: "Transaction confirmation timed out".to_string(),
-        });
+    let executor = MockTradeExecutor::new(config.execution).with_failure_simulator(|| TradeError {
+        stage: "confirm".to_string(),
+        code: "confirm_timeout".to_string(),
+        message: "Transaction confirmation timed out".to_string(),
+    });
 
-    let result = executor.execute_trade(
-        "test-intent-timeout",
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        "So11111111111111111111111111111111111111112",
-        1_000_000_000,
-        TradeSide::Buy,
-        TradingMode::Live, // Timeout only relevant for live trades
-    ).await;
+    let result = executor
+        .execute_trade(
+            "test-intent-timeout",
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "So11111111111111111111111111111111111111112",
+            1_000_000_000,
+            TradeSide::Buy,
+            TradingMode::Live, // Timeout only relevant for live trades
+        )
+        .await;
 
     assert_eq!(result.stage_reached, TradeStage::Failed);
     assert!(result.error.is_some());
-    
+
     let error = result.error.unwrap();
     assert_eq!(error.stage, "confirm");
     assert_eq!(error.code, "confirm_timeout");
-    
+
     println!("✅ Confirmation timeout correctly handled");
 }
 
@@ -249,32 +257,52 @@ fn test_intent_equivalence_with_context() {
     );
 
     // Finalize it
-    registry.update_state(
-        &intent1.id.to_string(),
-        TradeIntentState::Confirmed {
-            signature: "abc".to_string(),
-            out_amount: 500_000_000,
-        },
-    ).unwrap();
+    registry
+        .update_state(
+            &intent1.id.to_string(),
+            TradeIntentState::Confirmed {
+                signature: "abc".to_string(),
+                out_amount: 500_000_000,
+            },
+        )
+        .unwrap();
 
     // Same params but LIVE mode - should NOT be equivalent
     let live_equiv = registry.find_equivalent_with_context(
-        "bot-123", "USDC_MINT", "SOL_MINT", 1_000_000_000,
-        Some("live"), Some("v1"),
+        "bot-123",
+        "USDC_MINT",
+        "SOL_MINT",
+        1_000_000_000,
+        Some("live"),
+        Some("v1"),
     );
-    assert!(live_equiv.is_none(), "Paper and live should not be equivalent");
+    assert!(
+        live_equiv.is_none(),
+        "Paper and live should not be equivalent"
+    );
 
     // Same params, paper mode, different version - should NOT be equivalent
     let version_equiv = registry.find_equivalent_with_context(
-        "bot-123", "USDC_MINT", "SOL_MINT", 1_000_000_000,
-        Some("paper"), Some("v2"),
+        "bot-123",
+        "USDC_MINT",
+        "SOL_MINT",
+        1_000_000_000,
+        Some("paper"),
+        Some("v2"),
     );
-    assert!(version_equiv.is_none(), "Different versions should not be equivalent");
+    assert!(
+        version_equiv.is_none(),
+        "Different versions should not be equivalent"
+    );
 
     // Exact match - should find equivalent
     let exact_match = registry.find_equivalent_with_context(
-        "bot-123", "USDC_MINT", "SOL_MINT", 1_000_000_000,
-        Some("paper"), Some("v1"),
+        "bot-123",
+        "USDC_MINT",
+        "SOL_MINT",
+        1_000_000_000,
+        Some("paper"),
+        Some("v1"),
     );
     assert!(exact_match.is_some(), "Exact match should be found");
     assert_eq!(exact_match.unwrap(), intent1.id.to_string());
@@ -286,7 +314,7 @@ fn test_intent_equivalence_with_context() {
 #[test]
 fn test_portfolio_updates_after_trade() {
     let mut portfolio = Portfolio::new(Decimal::from(10000));
-    
+
     // Initial state
     assert_eq!(portfolio.cash_usdc_raw, 10_000_000_000);
     assert!(portfolio.positions.is_empty());
@@ -294,13 +322,10 @@ fn test_portfolio_updates_after_trade() {
     // Simulate a buy: spent 1000 USDC, got 5 SOL @ $200/SOL
     let spent_usdc = 1_000_000_000u64;
     let received_sol = 5_000_000_000u64;
-    
+
     // Update cash
-    portfolio.update_cash(
-        portfolio.cash_usdc_raw - spent_usdc,
-        "buy trade"
-    );
-    
+    portfolio.update_cash(portfolio.cash_usdc_raw - spent_usdc, "buy trade");
+
     // Update position
     portfolio.update_position(
         "So11111111111111111111111111111111111111112",
@@ -312,15 +337,18 @@ fn test_portfolio_updates_after_trade() {
 
     // Verify state
     assert_eq!(portfolio.cash_usdc_raw, 9_000_000_000);
-    
-    let sol_pos = portfolio.get_position("So11111111111111111111111111111111111111112").unwrap();
+
+    let sol_pos = portfolio
+        .get_position("So11111111111111111111111111111111111111112")
+        .unwrap();
     assert_eq!(sol_pos.quantity_raw, received_sol);
     assert_eq!(sol_pos.avg_entry_price_usdc, Decimal::from(200));
     assert!(!sol_pos.unknown_cost_basis);
 
     println!("✅ Portfolio correctly updated after buy");
     println!("   Cash: {} USDC", portfolio.cash_usdc_raw / 1_000_000);
-    println!("   SOL position: {} tokens @ ${}", 
+    println!(
+        "   SOL position: {} tokens @ ${}",
         sol_pos.quantity_raw / 1_000_000_000,
         sol_pos.avg_entry_price_usdc
     );
@@ -330,30 +358,29 @@ fn test_portfolio_updates_after_trade() {
 #[test]
 fn test_portfolio_updates_after_sell() {
     let mut portfolio = Portfolio::new(Decimal::from(10000));
-    
+
     // Setup initial position
     portfolio.update_cash(9_000_000_000, "initial");
     portfolio.update_position(
         "So11111111111111111111111111111111111111112",
         "SOL",
-        5_000_000_000, // 5 SOL
+        5_000_000_000,      // 5 SOL
         Decimal::from(200), // $200 entry
         9,
     );
-    
+
     // Now sell 2 SOL at $220
     let sold_sol = 2_000_000_000u64;
     let received_usdc = 440_000_000u64; // 2 * $220 = $440
-    
+
     // Update cash
-    portfolio.update_cash(
-        portfolio.cash_usdc_raw + received_usdc,
-        "sell trade"
-    );
-    
+    portfolio.update_cash(portfolio.cash_usdc_raw + received_usdc, "sell trade");
+
     // Update position (partial close)
-    let current_qty = portfolio.get_position("So11111111111111111111111111111111111111112")
-        .unwrap().quantity_raw;
+    let current_qty = portfolio
+        .get_position("So11111111111111111111111111111111111111112")
+        .unwrap()
+        .quantity_raw;
     portfolio.update_position(
         "So11111111111111111111111111111111111111112",
         "SOL",
@@ -361,16 +388,21 @@ fn test_portfolio_updates_after_sell() {
         Decimal::ZERO, // Keep same avg entry
         9,
     );
-    
+
     // Verify
     assert_eq!(portfolio.cash_usdc_raw, 9_440_000_000); // 9000 + 440
-    let sol_pos = portfolio.get_position("So11111111111111111111111111111111111111112").unwrap();
+    let sol_pos = portfolio
+        .get_position("So11111111111111111111111111111111111111112")
+        .unwrap();
     assert_eq!(sol_pos.quantity_raw, 3_000_000_000); // 5 - 2 = 3 SOL
     assert_eq!(sol_pos.avg_entry_price_usdc, Decimal::from(200)); // Unchanged
-    
+
     println!("✅ Portfolio correctly updated after sell");
     println!("   Cash: {} USDC", portfolio.cash_usdc_raw / 1_000_000);
-    println!("   SOL position: {} tokens", sol_pos.quantity_raw / 1_000_000_000);
+    println!(
+        "   SOL position: {} tokens",
+        sol_pos.quantity_raw / 1_000_000_000
+    );
 }
 
 /// Test: Reconciler discovers unknown cost basis position
@@ -379,7 +411,7 @@ fn test_reconciler_unknown_cost_basis() {
     use chrono::Utc;
 
     let mut portfolio = Portfolio::new(Decimal::from(10000));
-    
+
     // Simulate reconciler adding a discovered position
     portfolio.positions.insert(
         "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263".to_string(),
@@ -391,10 +423,12 @@ fn test_reconciler_unknown_cost_basis() {
             current_price_usdc: None,
             last_updated: Utc::now(),
             unknown_cost_basis: true,
-        }
+        },
     );
 
-    let bonk = portfolio.get_position("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263").unwrap();
+    let bonk = portfolio
+        .get_position("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263")
+        .unwrap();
     assert!(bonk.unknown_cost_basis);
     assert_eq!(bonk.avg_entry_price_usdc, Decimal::ZERO);
 
@@ -466,12 +500,13 @@ fn test_event_schema_structure() {
     // Verify each event has required fields
     for event in &events {
         let metadata = event.metadata.as_ref().expect("Event should have metadata");
-        
+
         // Every trade event must have intent_id
         if event.event_type.starts_with("trade_") {
             assert!(
                 metadata.get("intent_id").is_some(),
-                "{} missing intent_id", event.event_type
+                "{} missing intent_id",
+                event.event_type
             );
         }
 
@@ -546,17 +581,19 @@ async fn test_full_trading_cycle_integration() {
     assert_eq!(intent.state, TradeIntentState::Created);
 
     // Step 2: Execute paper trade
-    let result = executor.execute_trade(
-        &intent.id.to_string(),
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        "So11111111111111111111111111111111111111112",
-        500_000_000,
-        TradeSide::Buy,
-        TradingMode::Paper,
-    ).await;
+    let result = executor
+        .execute_trade(
+            &intent.id.to_string(),
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "So11111111111111111111111111111111111111112",
+            500_000_000,
+            TradeSide::Buy,
+            TradingMode::Paper,
+        )
+        .await;
 
     println!("2. Trade executed: stage={:?}", result.stage_reached);
-    
+
     // Step 3: Update intent state based on result
     let final_state = match result.stage_reached {
         TradeStage::Confirmed => TradeIntentState::Confirmed {
@@ -564,13 +601,23 @@ async fn test_full_trading_cycle_integration() {
             out_amount: result.execution.out_amount_raw,
         },
         TradeStage::Failed => TradeIntentState::Failed {
-            stage: result.error.as_ref().map(|e| e.stage.clone()).unwrap_or_default(),
-            error: result.error.as_ref().map(|e| e.message.clone()).unwrap_or_default(),
+            stage: result
+                .error
+                .as_ref()
+                .map(|e| e.stage.clone())
+                .unwrap_or_default(),
+            error: result
+                .error
+                .as_ref()
+                .map(|e| e.message.clone())
+                .unwrap_or_default(),
         },
         _ => TradeIntentState::Created,
     };
-    
-    intent_registry.update_state(&intent.id.to_string(), final_state.clone()).unwrap();
+
+    intent_registry
+        .update_state(&intent.id.to_string(), final_state.clone())
+        .unwrap();
 
     println!("3. Intent state updated: {:?}", final_state);
 
@@ -578,10 +625,10 @@ async fn test_full_trading_cycle_integration() {
     if result.stage_reached == TradeStage::Confirmed {
         let new_cash = portfolio.cash_usdc_raw - result.quote.in_amount;
         portfolio.update_cash(new_cash, "buy trade");
-        
+
         let received_qty = result.execution.out_amount_raw;
         let price = Decimal::from(result.quote.in_amount) / Decimal::from(received_qty);
-        
+
         portfolio.update_position(
             "So11111111111111111111111111111111111111112",
             "SOL",
@@ -602,7 +649,7 @@ async fn test_full_trading_cycle_integration() {
 
     assert!(snapshot.cash_usdc < Decimal::from(10000));
     assert!(!snapshot.positions.is_empty());
-    
+
     println!("\n✅ Full trading cycle integration test passed!");
 }
 
@@ -612,41 +659,57 @@ async fn test_multiple_trades_sequence() {
     let config = create_test_config(1);
     let mut portfolio = Portfolio::new(Decimal::from(10000));
     let executor = MockTradeExecutor::new(config.execution);
-    
+
     // Trade 1: Buy SOL
-    let result1 = executor.execute_trade(
-        "intent-1",
-        "USDC_MINT",
-        "SOL_MINT",
-        2_000_000_000, // 2000 USDC
-        TradeSide::Buy,
-        TradingMode::Paper,
-    ).await;
+    let result1 = executor
+        .execute_trade(
+            "intent-1",
+            "USDC_MINT",
+            "SOL_MINT",
+            2_000_000_000, // 2000 USDC
+            TradeSide::Buy,
+            TradingMode::Paper,
+        )
+        .await;
     assert_eq!(result1.stage_reached, TradeStage::Confirmed);
-    
+
     // Update portfolio
     portfolio.update_cash(8_000_000_000, "buy 1");
-    portfolio.update_position("SOL_MINT", "SOL", result1.execution.out_amount_raw, Decimal::from(150), 9);
-    
+    portfolio.update_position(
+        "SOL_MINT",
+        "SOL",
+        result1.execution.out_amount_raw,
+        Decimal::from(150),
+        9,
+    );
+
     // Trade 2: Buy BTC
-    let result2 = executor.execute_trade(
-        "intent-2",
-        "USDC_MINT",
-        "BTC_MINT",
-        3_000_000_000, // 3000 USDC
-        TradeSide::Buy,
-        TradingMode::Paper,
-    ).await;
+    let result2 = executor
+        .execute_trade(
+            "intent-2",
+            "USDC_MINT",
+            "BTC_MINT",
+            3_000_000_000, // 3000 USDC
+            TradeSide::Buy,
+            TradingMode::Paper,
+        )
+        .await;
     assert_eq!(result2.stage_reached, TradeStage::Confirmed);
-    
+
     // Update portfolio
     portfolio.update_cash(5_000_000_000, "buy 2");
-    portfolio.update_position("BTC_MINT", "BTC", result2.execution.out_amount_raw, Decimal::from(65000), 8);
-    
+    portfolio.update_position(
+        "BTC_MINT",
+        "BTC",
+        result2.execution.out_amount_raw,
+        Decimal::from(65000),
+        8,
+    );
+
     // Verify
     assert_eq!(portfolio.cash_usdc_raw, 5_000_000_000);
     assert_eq!(portfolio.positions.len(), 2);
-    
+
     println!("✅ Multiple trades executed successfully");
     println!("   Cash: {} USDC", portfolio.cash_usdc_raw / 1_000_000);
     println!("   Positions: {}", portfolio.positions.len());

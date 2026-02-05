@@ -36,13 +36,17 @@ impl Config {
             .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
 
         let agent_wallet = std::env::var("AGENT_WALLET").ok();
-        
+
         let keypair_path = std::env::var("AGENT_WALLET_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("/opt/trawling-traders/.config/solana/id.json"));
-        
+
         let wallet_address = std::env::var("WALLET_ADDRESS")
-            .or_else(|_| agent_wallet.clone().ok_or_else(|| anyhow::anyhow!("No wallet address")))
+            .or_else(|_| {
+                agent_wallet
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("No wallet address"))
+            })
             .unwrap_or_else(|_| "unknown".to_string());
 
         Ok(Self {
@@ -79,11 +83,10 @@ impl BotConfig {
     ///
     /// Returns error if config JSON is malformed or version_id is invalid.
     pub fn from_response(resp: BotConfigResponse) -> anyhow::Result<Self> {
-        let config: BotConfigInner = serde_json::from_value(resp.config.clone())
-            .map_err(|e| {
-                tracing::error!("Failed to parse bot config JSON: {}", e);
-                anyhow::anyhow!("Invalid bot config JSON: {}", e)
-            })?;
+        let config: BotConfigInner = serde_json::from_value(resp.config.clone()).map_err(|e| {
+            tracing::error!("Failed to parse bot config JSON: {}", e);
+            anyhow::anyhow!("Invalid bot config JSON: {}", e)
+        })?;
 
         let version_id = resp.version_id.parse().map_err(|e| {
             tracing::error!("Failed to parse version_id '{}': {}", resp.version_id, e);
@@ -230,7 +233,15 @@ impl Default for ExecutionConfig {
     }
 }
 
-fn default_max_price_impact_pct() -> f64 { 2.0 }
-fn default_max_slippage_bps() -> u32 { 100 }
-fn default_confirm_timeout_secs() -> u64 { 60 }
-fn default_quote_cache_secs() -> u64 { 10 }
+fn default_max_price_impact_pct() -> f64 {
+    2.0
+}
+fn default_max_slippage_bps() -> u32 {
+    100
+}
+fn default_confirm_timeout_secs() -> u64 {
+    60
+}
+fn default_quote_cache_secs() -> u64 {
+    10
+}

@@ -3,7 +3,7 @@
 //! This module provides modular, composable trading algorithms that can be
 //! customized by users based on their persona (Beginner, Tweaker, QuantLite).
 
-use crate::models::{AlgorithmMode, Persona, Strictness, RiskCaps};
+use crate::models::{AlgorithmMode, Persona, RiskCaps, Strictness};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -14,23 +14,23 @@ pub mod trend;
 
 pub use breakout::BreakoutAlgorithm;
 pub use mean_reversion::MeanReversionAlgorithm;
-pub use signal::{Signal, SignalType, SignalStrength};
+pub use signal::{Signal, SignalStrength, SignalType};
 pub use trend::TrendFollowingAlgorithm;
 
 /// Core algorithm trait - all trading strategies implement this
 pub trait Algorithm: Send + Sync {
     /// Algorithm name
     fn name(&self) -> &str;
-    
+
     /// Current algorithm mode
     fn mode(&self) -> AlgorithmMode;
-    
+
     /// Generate trading signal based on price data
     fn generate_signal(&self, ctx: &MarketContext) -> Signal;
-    
+
     /// Get current parameters (for display/debugging)
     fn parameters(&self) -> AlgorithmParams;
-    
+
     /// Update parameters (for live tuning)
     fn update_parameters(&mut self, params: AlgorithmParams);
 }
@@ -121,20 +121,14 @@ impl AlgorithmFactory {
         risk_caps: RiskCaps,
     ) -> Box<dyn Algorithm> {
         let params = Self::params_for_persona(persona, strictness, &risk_caps);
-        
+
         match mode {
-            AlgorithmMode::Trend => {
-                Box::new(TrendFollowingAlgorithm::new(params))
-            }
-            AlgorithmMode::MeanReversion => {
-                Box::new(MeanReversionAlgorithm::new(params))
-            }
-            AlgorithmMode::Breakout => {
-                Box::new(BreakoutAlgorithm::new(params))
-            }
+            AlgorithmMode::Trend => Box::new(TrendFollowingAlgorithm::new(params)),
+            AlgorithmMode::MeanReversion => Box::new(MeanReversionAlgorithm::new(params)),
+            AlgorithmMode::Breakout => Box::new(BreakoutAlgorithm::new(params)),
         }
     }
-    
+
     /// Get default parameters for a persona
     fn params_for_persona(
         persona: Persona,
@@ -146,11 +140,11 @@ impl AlgorithmFactory {
             Persona::Tweaker => Self::tweaker_defaults(),
             Persona::QuantLite => Self::quant_lite_defaults(),
         };
-        
+
         // Apply strictness adjustments
         Self::apply_strictness(base, strictness, risk_caps)
     }
-    
+
     /// Beginner (Set & Forget) - Conservative
     fn beginner_defaults() -> AlgorithmParams {
         AlgorithmParams {
@@ -170,7 +164,7 @@ impl AlgorithmFactory {
             }),
         }
     }
-    
+
     /// Tweaker (Hands-on) - Moderate
     fn tweaker_defaults() -> AlgorithmParams {
         AlgorithmParams {
@@ -190,7 +184,7 @@ impl AlgorithmFactory {
             }),
         }
     }
-    
+
     /// QuantLite (Power User) - Aggressive
     fn quant_lite_defaults() -> AlgorithmParams {
         AlgorithmParams {
@@ -212,7 +206,7 @@ impl AlgorithmFactory {
             }),
         }
     }
-    
+
     /// Apply strictness adjustments to parameters
     fn apply_strictness(
         mut params: AlgorithmParams,
@@ -224,17 +218,19 @@ impl AlgorithmFactory {
             Strictness::Medium => Decimal::ONE,
             Strictness::High => Decimal::from_str("0.8").unwrap(),
         };
-        
+
         // Adjust threshold (higher = stricter)
         params.threshold = (params.threshold * multiplier).min(Decimal::from_str("0.95").unwrap());
-        
+
         // Adjust min confidence (higher = stricter)
-        params.min_confidence = (params.min_confidence * multiplier).min(Decimal::from_str("0.95").unwrap());
-        
+        params.min_confidence =
+            (params.min_confidence * multiplier).min(Decimal::from_str("0.95").unwrap());
+
         // Apply risk caps
-        let max_pos_from_caps = Decimal::from(risk_caps.max_position_size_percent) / Decimal::from(100);
+        let max_pos_from_caps =
+            Decimal::from(risk_caps.max_position_size_percent) / Decimal::from(100);
         params.max_position_pct = params.max_position_pct.min(max_pos_from_caps);
-        
+
         params
     }
 }

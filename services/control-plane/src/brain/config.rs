@@ -2,7 +2,7 @@
 //!
 //! Single source of truth for trader behavior.
 
-use crate::models::{RiskCaps, AssetFocus, TradingMode, Strictness};
+use crate::models::{AssetFocus, RiskCaps, Strictness, TradingMode};
 use serde::{Deserialize, Serialize};
 
 /// Complete trader brain configuration
@@ -71,9 +71,9 @@ pub struct PlaybookConfig {
 impl Default for PlaybookConfig {
     fn default() -> Self {
         Self {
-            cadence_secs: 900,      // 15 minutes
-            confirmations: 2,       // 2 confirmations
-            cooldown_secs: 300,     // 5 minute cooldown
+            cadence_secs: 900,  // 15 minutes
+            confirmations: 2,   // 2 confirmations
+            cooldown_secs: 300, // 5 minute cooldown
             explain_trades: true,
             daily_recap: true,
         }
@@ -93,7 +93,8 @@ impl Default for BrainKnowledgeConfig {
     fn default() -> Self {
         Self {
             knowledge_packs: vec![KnowledgePack::RiskBasics],
-            pinned_notes: "Always remember: avoid big drawdowns. When unsure, do nothing.".to_string(),
+            pinned_notes: "Always remember: avoid big drawdowns. When unsure, do nothing."
+                .to_string(),
         }
     }
 }
@@ -211,8 +212,12 @@ impl KnowledgePack {
     pub fn description(&self) -> &'static str {
         match self {
             KnowledgePack::RiskBasics => "Position sizing, stop losses, and portfolio protection",
-            KnowledgePack::SolanaExecution => "Jupiter routing, slippage management, and optimal execution",
-            KnowledgePack::MomentumPatterns => "Identifying and riding momentum, avoiding false breakouts",
+            KnowledgePack::SolanaExecution => {
+                "Jupiter routing, slippage management, and optimal execution"
+            }
+            KnowledgePack::MomentumPatterns => {
+                "Identifying and riding momentum, avoiding false breakouts"
+            }
             KnowledgePack::MemecoinCycle => "Understanding pump cycles and exit timing",
             KnowledgePack::LiquidityRules => "Avoiding low-liquidity traps and spread costs",
         }

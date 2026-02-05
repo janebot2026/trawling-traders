@@ -97,19 +97,19 @@ impl CoinGeckoClient {
             health_tracker: HealthTracker::new(),
         }
     }
-    
+
     /// Build request with optional API key
     fn build_request(&self, endpoint: &str) -> reqwest::RequestBuilder {
         let url = format!("{}{}", self.base_url, endpoint);
         let mut req = self.client.get(&url);
-        
+
         if let Some(key) = &self.api_key {
             req = req.header("x-cg-pro-api-key", key);
         }
-        
+
         req
     }
-    
+
     /// Per-request timeout (10 seconds for individual API calls)
     const REQUEST_TIMEOUT_SECS: u64 = 10;
 
@@ -122,14 +122,10 @@ impl CoinGeckoClient {
 
         // Try up to 2 times (initial + 1 retry on rate limit)
         for attempt in 0..2 {
-            let _permit = self
-                .rate_limiter
-                .acquire()
-                .await
-                .map_err(|e| {
-                    self.health_tracker.record_failure();
-                    DataRetrievalError::ApiError(e.to_string())
-                })?;
+            let _permit = self.rate_limiter.acquire().await.map_err(|e| {
+                self.health_tracker.record_failure();
+                DataRetrievalError::ApiError(e.to_string())
+            })?;
 
             // Ensure minimum delay between requests (free tier friendly)
             {
@@ -145,8 +141,10 @@ impl CoinGeckoClient {
             let request_future = self.build_request(endpoint).send();
             let response = match tokio::time::timeout(
                 Duration::from_secs(Self::REQUEST_TIMEOUT_SECS),
-                request_future
-            ).await {
+                request_future,
+            )
+            .await
+            {
                 Ok(Ok(resp)) => resp,
                 Ok(Err(e)) => {
                     self.health_tracker.record_failure();
@@ -155,7 +153,9 @@ impl CoinGeckoClient {
                 Err(_) => {
                     self.health_tracker.record_failure();
                     return Err(DataRetrievalError::ApiError(format!(
-                        "CoinGecko request to {} timed out after {}s", endpoint, Self::REQUEST_TIMEOUT_SECS
+                        "CoinGecko request to {} timed out after {}s",
+                        endpoint,
+                        Self::REQUEST_TIMEOUT_SECS
                     )));
                 }
             };
@@ -163,7 +163,8 @@ impl CoinGeckoClient {
             let status = response.status();
 
             if status == 429 {
-                let retry_after = response.headers()
+                let retry_after = response
+                    .headers()
                     .get("retry-after")
                     .and_then(|v| v.to_str().ok())
                     .and_then(|v| v.parse::<u64>().ok());
@@ -199,19 +200,18 @@ impl CoinGeckoClient {
             let latency_ms = request_start.elapsed().as_millis() as u64;
             self.health_tracker.record_success(latency_ms);
 
-            return response
-                .json::<T>()
-                .await
-                .map_err(|e| {
-                    self.health_tracker.record_failure();
-                    DataRetrievalError::InvalidResponse(e.to_string())
-                });
+            return response.json::<T>().await.map_err(|e| {
+                self.health_tracker.record_failure();
+                DataRetrievalError::InvalidResponse(e.to_string())
+            });
         }
 
         // Should not reach here, but fallback error
-        Err(DataRetrievalError::ApiError("Unexpected retry loop exit".to_string()))
+        Err(DataRetrievalError::ApiError(
+            "Unexpected retry loop exit".to_string(),
+        ))
     }
-    
+
     /// Get CoinGecko ID for asset symbol
     async fn get_coin_id(&self, symbol: &str) -> Result<String> {
         // Common mappings for speed (avoid API call)
@@ -226,52 +226,51 @@ impl CoinGeckoClient {
             ("ADA", "cardano"),
             ("DOGE", "dogecoin"),
             ("MATIC", "matic-network"),
-        ].iter().cloned().collect();
-        
+        ]
+        .iter()
+        .cloned()
+        .collect();
+
         if let Some(&id) = static_mappings.get(symbol.to_uppercase().as_str()) {
             return Ok(id.to_string());
         }
-        
+
         // Fallback: search API (expensive, cache this)
         let endpoint = format!("/search?query={}", symbol);
         let response: SearchResponse = self.rate_limited_request(&endpoint).await?;
-        
-        response.coins
+
+        response
+            .coins
             .into_iter()
             .find(|c| c.symbol.eq_ignore_ascii_case(symbol))
             .map(|c| c.id)
             .ok_or_else(|| DataRetrievalError::AssetNotFound(symbol.to_string()))
     }
-    
+
     /// Get current price for an asset
-    pub async fn get_price(&self,
-        asset: &str,
-        quote: &str,
-    ) -> Result<PricePoint> {
+    pub async fn get_price(&self, asset: &str, quote: &str) -> Result<PricePoint> {
         let coin_id = self.get_coin_id(asset).await?;
         let vs_currency = quote.to_lowercase();
-        
+
         let endpoint = format!(
             "/simple/price?ids={}&vs_currencies={}",
             coin_id, vs_currency
         );
-        
+
         let response: serde_json::Value = self.rate_limited_request(&endpoint).await?;
-        
-        let data = response.get(&coin_id)
-            .ok_or_else(|| DataRetrievalError::InvalidResponse(
-                format!("Missing data for coin: {}", coin_id)
-            ))?;
-        
+
+        let data = response.get(&coin_id).ok_or_else(|| {
+            DataRetrievalError::InvalidResponse(format!("Missing data for coin: {}", coin_id))
+        })?;
+
         // Note: CoinGecko API returns JSON numbers (not strings), so f64 intermediate
         // is unavoidable - precision loss inherent to JSON numeric representation.
         // For higher precision, use Binance WebSocket which provides string prices.
-        let price = data.get("usd")
+        let price = data
+            .get("usd")
             .or_else(|| data.get(&vs_currency))
             .and_then(|v| v.as_f64())
-            .ok_or_else(|| DataRetrievalError::InvalidResponse(
-                "Missing price data".to_string()
-            ))?;
+            .ok_or_else(|| DataRetrievalError::InvalidResponse("Missing price data".to_string()))?;
 
         let symbol = format!("{}/{}", asset.to_uppercase(), quote.to_uppercase());
 
@@ -284,7 +283,7 @@ impl CoinGeckoClient {
             confidence: Some(0.85), // CoinGecko is reliable but not real-time
         })
     }
-    
+
     /// Get historical candles using CoinGecko OHLC endpoint
     ///
     /// Uses `/coins/{id}/ohlc` which returns proper OHLC data:
@@ -309,11 +308,12 @@ impl CoinGeckoClient {
         // Map timeframe to days for CoinGecko OHLC endpoint
         // Choose days value that gives appropriate granularity
         let days = match timeframe {
-            TimeFrame::Minute1 | TimeFrame::Minute5 |
-            TimeFrame::Minute15 | TimeFrame::Minute30 => "1", // 30min candles
-            TimeFrame::Hour1 | TimeFrame::Hour4 => "7",       // 4h candles
-            TimeFrame::Day1 => "90",                           // 4 day candles (closest to daily)
-            TimeFrame::Week1 => "365",                         // ~4 day candles over a year
+            TimeFrame::Minute1 | TimeFrame::Minute5 | TimeFrame::Minute15 | TimeFrame::Minute30 => {
+                "1"
+            } // 30min candles
+            TimeFrame::Hour1 | TimeFrame::Hour4 => "7", // 4h candles
+            TimeFrame::Day1 => "90",                    // 4 day candles (closest to daily)
+            TimeFrame::Week1 => "365",                  // ~4 day candles over a year
         };
 
         // Use OHLC endpoint which returns proper candlestick data
@@ -348,7 +348,7 @@ impl CoinGeckoClient {
 
         Ok(candles)
     }
-    
+
     /// Get health status using internal metrics (no API call)
     ///
     /// Uses internal health tracking from actual API calls instead of making
@@ -369,12 +369,16 @@ impl CoinGeckoClient {
             source: "coingecko".to_string(),
             is_healthy,
             last_success,
-            last_error: if is_healthy { None } else { Some("Recent failures detected".to_string()) },
+            last_error: if is_healthy {
+                None
+            } else {
+                Some("Recent failures detected".to_string())
+            },
             success_rate_24h: success_rate,
             avg_latency_ms: latency,
         }
     }
-    
+
     /// Source name
     pub fn name(&self) -> &str {
         "coingecko"
@@ -425,12 +429,12 @@ impl PriceDataSource for CoinGeckoClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_get_btc_price() {
         let client = CoinGeckoClient::new(None);
         let price = client.get_price("BTC", "USD").await.unwrap();
-        
+
         assert_eq!(price.asset(), "BTC");
         assert_eq!(price.quote(), Some("USD".to_string()));
         assert_eq!(price.source, "coingecko");

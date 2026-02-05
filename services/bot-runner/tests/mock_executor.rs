@@ -2,15 +2,17 @@
 
 use bot_runner::{
     config::{ExecutionConfig, TradingMode},
-    executor::{NormalizedTradeResult, TradeStage, TradeSide, QuoteData, ExecutionData, TradeError},
+    executor::{
+        ExecutionData, NormalizedTradeResult, QuoteData, TradeError, TradeSide, TradeStage,
+    },
 };
 use rust_decimal::Decimal;
 
 /// Mock price data for testing
 pub struct MockPriceOracle {
-    pub sol_price_usdc: f64,  // SOL price in USDC
-    pub btc_price_usdc: f64,  // BTC price in USDC
-    pub impact_for_amount: fn(u64) -> f64,  // Function to calculate impact based on amount
+    pub sol_price_usdc: f64,               // SOL price in USDC
+    pub btc_price_usdc: f64,               // BTC price in USDC
+    pub impact_for_amount: fn(u64) -> f64, // Function to calculate impact based on amount
 }
 
 impl Default for MockPriceOracle {
@@ -87,7 +89,7 @@ impl MockTradeExecutor {
 
         // Calculate mock price
         let (out_amount, impact_pct) = self.calculate_mock_swap(input_mint, output_mint, amount);
-        
+
         result.quote = QuoteData {
             in_amount: amount,
             expected_out: out_amount,
@@ -130,12 +132,7 @@ impl MockTradeExecutor {
         result
     }
 
-    fn calculate_mock_swap(
-        &self,
-        input_mint: &str,
-        output_mint: &str,
-        amount: u64,
-    ) -> (u64, f64) {
+    fn calculate_mock_swap(&self, input_mint: &str, output_mint: &str, amount: u64) -> (u64, f64) {
         // USDC is 6 decimals
         let usdc_decimals = 1_000_000.0;
         let amount_usdc = amount as f64 / usdc_decimals;
@@ -167,7 +164,7 @@ impl MockTradeExecutor {
     ) {
         result.stage_reached = TradeStage::Confirmed;
         result.signature = Some("paper_trade_simulated".to_string());
-        
+
         let realized_price = if out_amount > 0 {
             Decimal::from(in_amount) / Decimal::from(out_amount)
         } else {
@@ -189,7 +186,7 @@ impl MockTradeExecutor {
         amount: u64,
     ) -> anyhow::Result<MockPrice> {
         let (out_amount, impact_pct) = self.calculate_mock_swap(input_mint, output_mint, amount);
-        
+
         Ok(MockPrice {
             input_mint: input_mint.to_string(),
             output_mint: output_mint.to_string(),
@@ -225,14 +222,16 @@ mod tests {
         };
 
         let executor = MockTradeExecutor::new(config);
-        let result = executor.execute_trade(
-            "test-123",
-            "USDC_MINT",
-            "SOL_MINT",
-            1_000_000_000, // 1000 USDC
-            TradeSide::Buy,
-            TradingMode::Paper,
-        ).await;
+        let result = executor
+            .execute_trade(
+                "test-123",
+                "USDC_MINT",
+                "SOL_MINT",
+                1_000_000_000, // 1000 USDC
+                TradeSide::Buy,
+                TradingMode::Paper,
+            )
+            .await;
 
         assert_eq!(result.stage_reached, TradeStage::Confirmed);
         assert!(result.signature.is_some());
@@ -249,21 +248,22 @@ mod tests {
         };
 
         // Use custom oracle that always returns high impact
-        let executor = MockTradeExecutor::new(config)
-            .with_oracle(MockPriceOracle {
-                sol_price_usdc: 150.0,
-                btc_price_usdc: 65000.0,
-                impact_for_amount: |_| 2.0, // Always return 2% impact
-            });
-        
-        let result = executor.execute_trade(
-            "test-456",
-            "USDC_MINT",
-            "SOL_MINT",
-            1_000_000_000, // Any amount - impact is fixed high
-            TradeSide::Buy,
-            TradingMode::Paper,
-        ).await;
+        let executor = MockTradeExecutor::new(config).with_oracle(MockPriceOracle {
+            sol_price_usdc: 150.0,
+            btc_price_usdc: 65000.0,
+            impact_for_amount: |_| 2.0, // Always return 2% impact
+        });
+
+        let result = executor
+            .execute_trade(
+                "test-456",
+                "USDC_MINT",
+                "SOL_MINT",
+                1_000_000_000, // Any amount - impact is fixed high
+                TradeSide::Buy,
+                TradingMode::Paper,
+            )
+            .await;
 
         assert_eq!(result.stage_reached, TradeStage::Blocked);
         assert!(result.error.is_some());

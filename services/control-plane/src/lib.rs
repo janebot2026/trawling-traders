@@ -5,34 +5,34 @@ pub mod models;
 pub mod handlers {
     pub mod admin;
     pub mod bots;
-    pub mod sync;
     pub mod simulate;
+    pub mod sync;
 }
-pub mod db;
-pub mod middleware;
+pub mod alerting;
 pub mod cedros;
-pub mod secrets;
+pub mod db;
+pub mod health;
+pub mod middleware;
 pub mod observability;
 pub mod provisioning;
-pub mod alerting;
+pub mod secrets;
 pub mod webhook;
-pub mod health;
 
-use std::sync::Arc;
 use axum::{
-    routing::{get, post, patch},
+    routing::{get, patch, post},
     Router,
 };
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
-use tokio::sync::Semaphore;
 
-pub use models::*;
+pub use alerting::{AlertConfig, AlertManager};
 pub use db::Db;
+pub use models::*;
+pub use observability::{Logger, MetricsCollector};
 pub use secrets::SecretsManager;
-pub use observability::{MetricsCollector, Logger};
-pub use alerting::{AlertManager, AlertConfig};
-pub use webhook::{WebhookNotifier, WebhookConfig};
+pub use webhook::{WebhookConfig, WebhookNotifier};
 
 /// Application state shared across handlers
 #[derive(Clone)]
@@ -71,39 +71,44 @@ pub async fn app(state: Arc<AppState>) -> Router {
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
-    
+
     // App-facing routes (require auth + subscription + rate limit)
     let app_routes = Router::new()
         .route("/me", get(handlers::bots::get_current_user))
         .route("/bots", get(handlers::bots::list_bots))
-        .route("/bots", post(handlers::bots::create_bot)
-            .layer(axum::middleware::from_fn_with_state(
+        .route(
+            "/bots",
+            post(handlers::bots::create_bot).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                middleware::subscription::bot_create_limit_middleware
-            )))
+                middleware::subscription::bot_create_limit_middleware,
+            )),
+        )
         .route("/bots/:id", get(handlers::bots::get_bot))
         .route("/bots/:id/config", patch(handlers::bots::update_bot_config))
         .route("/bots/:id/actions", post(handlers::bots::bot_action))
         .route("/bots/:id/metrics", get(handlers::bots::get_metrics))
         .route("/bots/:id/events", get(handlers::bots::get_events))
-        .route("/simulate-signal", post(handlers::simulate::simulate_signal))
+        .route(
+            "/simulate-signal",
+            post(handlers::simulate::simulate_signal),
+        )
         // Health endpoints
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
-            middleware::subscription::subscription_middleware
+            middleware::subscription::subscription_middleware,
         ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
-            middleware::rate_limit::rate_limit_middleware
+            middleware::rate_limit::rate_limit_middleware,
         ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
-            middleware::auth_middleware
+            middleware::auth_middleware,
         ))
         .with_state(state.clone());
-    
+
     // Bot-facing routes (internal, from VPS)
     let bot_routes = Router::new()
         .route("/bot/:id/register", post(handlers::sync::register_bot))
@@ -114,10 +119,10 @@ pub async fn app(state: Arc<AppState>) -> Router {
         .route("/bot/:id/events", post(handlers::sync::ingest_events))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
-            middleware::rate_limit::bot_rate_limit_middleware
+            middleware::rate_limit::bot_rate_limit_middleware,
         ))
         .with_state(state.clone());
-    
+
     // Cedros Pay routes - try full integration, fallback to placeholder
     let pay_routes = match cedros::full_router(state.db.clone()).await {
         Ok(router) => {
@@ -125,11 +130,14 @@ pub async fn app(state: Arc<AppState>) -> Router {
             router
         }
         Err(e) => {
-            tracing::warn!("Cedros Pay full integration failed ({}), using placeholder", e);
+            tracing::warn!(
+                "Cedros Pay full integration failed ({}), using placeholder",
+                e
+            );
             cedros::placeholder_routes()
         }
     };
-    
+
     // Build combined router
     Router::new()
         .nest("/v1", app_routes)

@@ -1,17 +1,10 @@
 //! Simulate endpoint - dry-run signal generation
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, Json};
 use std::sync::Arc;
 
 use crate::{
-    algorithms::{
-        AlgorithmFactory, Candle, MarketContext, Position,
-        signal::Signal,
-    },
+    algorithms::{signal::Signal, AlgorithmFactory, Candle, MarketContext, Position},
     models::*,
     AppState,
 };
@@ -75,15 +68,19 @@ pub async fn simulate_signal(
     Json(req): Json<SimulateRequest>,
 ) -> Result<Json<SimulateResponse>, (StatusCode, String)> {
     // Convert input candles to algorithm candles
-    let candles: Vec<Candle> = req.candles.into_iter().map(|c| Candle {
-        timestamp: c.timestamp,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-        volume: c.volume,
-    }).collect();
-    
+    let candles: Vec<Candle> = req
+        .candles
+        .into_iter()
+        .map(|c| Candle {
+            timestamp: c.timestamp,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume,
+        })
+        .collect();
+
     // Convert position if provided
     let position = req.position.map(|p| Position {
         symbol: p.symbol,
@@ -91,7 +88,7 @@ pub async fn simulate_signal(
         entry_price: p.entry_price,
         unrealized_pnl: p.unrealized_pnl,
     });
-    
+
     // Build market context
     let ctx = MarketContext {
         symbol: req.symbol.clone(),
@@ -101,7 +98,7 @@ pub async fn simulate_signal(
         portfolio_value: req.portfolio_value.unwrap_or_else(|| Decimal::from(10000)),
         risk_caps: req.risk_caps,
     };
-    
+
     // Create algorithm with persona-based defaults
     let algorithm = AlgorithmFactory::create(
         req.algorithm_mode,
@@ -109,21 +106,18 @@ pub async fn simulate_signal(
         req.strictness,
         req.risk_caps,
     );
-    
+
     // Generate signal
     let signal = algorithm.generate_signal(&ctx);
-    
+
     // Build response context
     let context = SignalContext {
         candles_analyzed: candles.len(),
         trend_detected: detect_trend(&candles),
         confidence_factors: extract_confidence_factors(&signal, &candles),
     };
-    
-    Ok(Json(SimulateResponse {
-        signal,
-        context,
-    }))
+
+    Ok(Json(SimulateResponse { signal, context }))
 }
 
 /// Detect overall trend from candles
@@ -131,11 +125,11 @@ fn detect_trend(candles: &[Candle]) -> Option<String> {
     if candles.len() < 20 {
         return None;
     }
-    
+
     let recent = &candles[candles.len().saturating_sub(20)..];
     let first = recent.first()?.close;
     let last = recent.last()?.close;
-    
+
     if last > first * Decimal::from(105) / Decimal::from(100) {
         Some("uptrend".to_string())
     } else if last < first * Decimal::from(95) / Decimal::from(100) {
@@ -148,13 +142,13 @@ fn detect_trend(candles: &[Candle]) -> Option<String> {
 /// Extract confidence factors from signal metadata
 fn extract_confidence_factors(signal: &Signal, _candles: &[Candle]) -> Vec<ConfidenceFactor> {
     let mut factors = vec![];
-    
+
     // Base confidence
     factors.push(ConfidenceFactor {
         factor: "base_confidence".to_string(),
         contribution: signal.confidence.to_string().parse().unwrap_or(0.0),
     });
-    
+
     // Signal type bonus
     if signal.signal_type != crate::algorithms::signal::SignalType::Hold {
         factors.push(ConfidenceFactor {
@@ -162,6 +156,6 @@ fn extract_confidence_factors(signal: &Signal, _candles: &[Candle]) -> Vec<Confi
             contribution: 0.1,
         });
     }
-    
+
     factors
 }

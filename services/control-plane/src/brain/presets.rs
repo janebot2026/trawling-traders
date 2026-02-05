@@ -3,7 +3,7 @@
 //! These are the internal parameters that make up each algorithm mode.
 //! Users don't see these directly - they select a mode and strictness.
 
-use crate::brain::config::{AlgoMode, AlgoConfig};
+use crate::brain::config::{AlgoConfig, AlgoMode};
 use crate::models::Strictness;
 
 /// Get preset config for a mode (before strictness applied)

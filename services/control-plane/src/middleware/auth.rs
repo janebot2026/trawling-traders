@@ -28,10 +28,10 @@ pub struct AuthContext {
 /// JWT claims structure for Cedros Login tokens
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CedrosClaims {
-    pub sub: String,        // User ID (subject)
+    pub sub: String, // User ID (subject)
     pub email: Option<String>,
-    pub exp: i64,           // Expiration timestamp
-    pub iat: i64,           // Issued at timestamp
+    pub exp: i64, // Expiration timestamp
+    pub iat: i64, // Issued at timestamp
     #[serde(default)]
     pub is_admin: bool,
     #[serde(default)]
@@ -53,9 +53,7 @@ pub async fn auth_middleware(
         .get(AUTHORIZATION)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let auth_str = auth_header
-        .to_str()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let auth_str = auth_header.to_str().map_err(|_| StatusCode::UNAUTHORIZED)?;
 
     // Extract Bearer token
     let token = auth_str

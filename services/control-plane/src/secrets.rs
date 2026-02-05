@@ -36,19 +36,17 @@ impl SecretsManager {
     /// Loads the encryption key from `SECRETS_ENCRYPTION_KEY` environment variable.
     /// Key must be 32 bytes (256 bits) provided as 64 hex characters.
     pub fn new() -> Self {
-        let encryption_key = std::env::var("SECRETS_ENCRYPTION_KEY")
-            .ok()
-            .and_then(|k| {
-                let decoded = hex::decode(&k).ok()?;
-                if decoded.len() != 32 {
-                    tracing::warn!(
-                        "SECRETS_ENCRYPTION_KEY must be 32 bytes (64 hex chars), got {} bytes",
-                        decoded.len()
-                    );
-                    return None;
-                }
-                Some(decoded)
-            });
+        let encryption_key = std::env::var("SECRETS_ENCRYPTION_KEY").ok().and_then(|k| {
+            let decoded = hex::decode(&k).ok()?;
+            if decoded.len() != 32 {
+                tracing::warn!(
+                    "SECRETS_ENCRYPTION_KEY must be 32 bytes (64 hex chars), got {} bytes",
+                    decoded.len()
+                );
+                return None;
+            }
+            Some(decoded)
+        });
 
         if encryption_key.is_none() {
             tracing::warn!(
@@ -105,7 +103,8 @@ impl SecretsManager {
             .decrypt(nonce, ciphertext)
             .map_err(|_| anyhow!("Decryption failed - data may be corrupted or tampered"))?;
 
-        String::from_utf8(plaintext).map_err(|e| anyhow!("Decrypted data is not valid UTF-8: {}", e))
+        String::from_utf8(plaintext)
+            .map_err(|e| anyhow!("Decrypted data is not valid UTF-8: {}", e))
     }
 
     /// Encrypt a plaintext value

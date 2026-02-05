@@ -1,6 +1,6 @@
+use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use bigdecimal::BigDecimal;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -231,11 +231,17 @@ impl From<MetricDb> for Metric {
             timestamp: db.timestamp,
             // Use try_ versions that surface errors - log and default to ZERO on failure
             equity: try_decimal_from_bigdecimal(&db.equity).unwrap_or_else(|| {
-                tracing::warn!("Failed to convert equity BigDecimal to Decimal for metric {}", db.id);
+                tracing::warn!(
+                    "Failed to convert equity BigDecimal to Decimal for metric {}",
+                    db.id
+                );
                 Decimal::ZERO
             }),
             pnl: try_decimal_from_bigdecimal(&db.pnl).unwrap_or_else(|| {
-                tracing::warn!("Failed to convert pnl BigDecimal to Decimal for metric {}", db.id);
+                tracing::warn!(
+                    "Failed to convert pnl BigDecimal to Decimal for metric {}",
+                    db.id
+                );
                 Decimal::ZERO
             }),
         }
@@ -262,7 +268,9 @@ pub fn decimal_from_bigdecimal(bd: &BigDecimal) -> Result<Decimal, rust_decimal:
 }
 
 /// Convert rust_decimal::Decimal to BigDecimal, surfacing parse errors
-pub fn bigdecimal_from_decimal(d: &Decimal) -> Result<BigDecimal, bigdecimal::ParseBigDecimalError> {
+pub fn bigdecimal_from_decimal(
+    d: &Decimal,
+) -> Result<BigDecimal, bigdecimal::ParseBigDecimalError> {
     d.to_string().parse()
 }
 

@@ -46,7 +46,8 @@ impl MetricsCollector {
     /// Record a histogram value
     pub async fn histogram(&self, name: &str, value: f64) {
         let mut inner = self.inner.write().await;
-        inner.histograms
+        inner
+            .histograms
             .entry(name.to_string())
             .or_insert_with(Vec::new)
             .push(value);
@@ -88,12 +89,7 @@ pub struct Logger;
 
 impl Logger {
     /// Log a structured event
-    pub fn event(
-        level: tracing::Level,
-        component: &str,
-        event: &str,
-        attributes: &[(&str, &str)],
-    ) {
+    pub fn event(level: tracing::Level, component: &str, event: &str, attributes: &[(&str, &str)]) {
         let attrs = attributes
             .iter()
             .map(|(k, v)| format!("{}={}", k, v))
@@ -110,11 +106,7 @@ impl Logger {
     }
 
     /// Log bot event
-    pub fn bot_event(
-        bot_id: &str,
-        event_type: &str,
-        details: &str,
-    ) {
+    pub fn bot_event(bot_id: &str, event_type: &str, details: &str) {
         tracing::info!(
             bot_id = %bot_id,
             event_type = %event_type,
@@ -124,11 +116,7 @@ impl Logger {
     }
 
     /// Log provision event
-    pub fn provision_event(
-        bot_id: &str,
-        action: &str,
-        status: &str,
-    ) {
+    pub fn provision_event(bot_id: &str, action: &str, status: &str) {
         tracing::info!(
             bot_id = %bot_id,
             action = %action,
@@ -146,40 +134,40 @@ pub mod metrics {
     pub const BOT_REGISTERED: &str = "bot_registered_total";
     pub const BOT_PROVISION_FAILED: &str = "bot_provision_failed_total";
     pub const BOT_PROVISION_SUCCESS: &str = "bot_provision_success_total";
-    
+
     // Trading
     pub const TRADE_EXECUTED: &str = "trade_executed_total";
     pub const TRADE_BLOCKED: &str = "trade_blocked_total";
     pub const TRADE_FAILED: &str = "trade_failed_total";
-    
+
     // API
     pub const API_REQUESTS: &str = "api_requests_total";
     pub const API_ERRORS: &str = "api_errors_total";
     pub const RATE_LIMITED: &str = "rate_limited_total";
-    
+
     // Queue
     pub const PROVISION_QUEUE_DEPTH: &str = "provision_queue_depth";
     pub const PROVISION_RETRIES: &str = "provision_retries_total";
-    
+
     // Config sync
     pub const CONFIG_FETCH_COUNT: &str = "config_fetch_total";
     pub const CONFIG_FETCH_DURATION_MS: &str = "config_fetch_duration_ms";
     pub const CONFIG_ACK_COUNT: &str = "config_ack_total";
     pub const CONFIG_MISMATCH_COUNT: &str = "config_mismatch_total";
-    
+
     // Heartbeat
     pub const HEARTBEAT_COUNT: &str = "heartbeat_total";
     pub const HEARTBEAT_DURATION_MS: &str = "heartbeat_duration_ms";
-    
+
     // Wallet
     pub const WALLET_REPORT_COUNT: &str = "wallet_report_total";
     pub const WALLET_REPORT_ERRORS: &str = "wallet_report_errors_total";
-    
+
     // Events
     pub const EVENTS_INGESTED: &str = "events_ingested_total";
     pub const EVENTS_TRADES: &str = "events_trades_total";
     pub const EVENTS_ERRORS: &str = "events_errors_total";
-    
+
     // Metrics batch
     pub const METRICS_BATCH_RECEIVED: &str = "metrics_batch_received_total";
 }

@@ -1,5 +1,5 @@
 //! Subscription enforcement middleware
-//! 
+//!
 //! Protects premium routes by checking user's subscription tier and entitlements.
 
 use axum::{
@@ -46,8 +46,20 @@ impl SubscriptionTier {
     pub fn features(&self) -> Vec<&'static str> {
         match self {
             SubscriptionTier::Free => vec!["paper_trading", "trend_algo"],
-            SubscriptionTier::Pro => vec!["paper_trading", "live_trading", "all_algos", "advanced_risk"],
-            SubscriptionTier::Enterprise => vec!["paper_trading", "live_trading", "all_algos", "advanced_risk", "custom_strategies", "priority_support"],
+            SubscriptionTier::Pro => vec![
+                "paper_trading",
+                "live_trading",
+                "all_algos",
+                "advanced_risk",
+            ],
+            SubscriptionTier::Enterprise => vec![
+                "paper_trading",
+                "live_trading",
+                "all_algos",
+                "advanced_risk",
+                "custom_strategies",
+                "priority_support",
+            ],
         }
     }
 
@@ -83,25 +95,23 @@ pub async fn subscription_middleware(
         .get::<AuthContext>()
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let user_id = Uuid::parse_str(&auth.user_id).map_err(|_| StatusCode::BAD_REQUEST)?;
 
     // Fetch subscription from database
-    let subscription = sqlx::query_as::
-        <_, (String, Option<chrono::DateTime<chrono::Utc>>, i64)>(
-            r#"
+    let subscription = sqlx::query_as::<_, (String, Option<chrono::DateTime<chrono::Utc>>, i64)>(
+        r#"
             SELECT s.tier, s.expires_at, COUNT(b.id) as bot_count
             FROM subscriptions s
             LEFT JOIN bots b ON b.user_id = s.user_id AND b.status != 'destroying'
             WHERE s.user_id = $1
             AND (s.expires_at IS NULL OR s.expires_at > NOW())
             GROUP BY s.id
-            "#
-        )
-        .bind(user_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            "#,
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let (tier, expires_at, bot_count) = match subscription {
         Some((tier_str, exp, count)) => {

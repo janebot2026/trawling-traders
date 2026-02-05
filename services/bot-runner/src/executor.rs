@@ -1,8 +1,8 @@
 //! Trade Executor - Integrates with claw-trader-cli for Solana trade execution
 
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use rust_decimal::MathematicalOps;
-use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -16,8 +16,8 @@ use crate::config::{ExecutionConfig, TradingMode};
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use std::time::Instant;
+use tokio::sync::RwLock;
 
 /// Cache key for quote caching
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -50,7 +50,7 @@ impl QuoteCache {
             max_size: 10000,
         }
     }
-    
+
     pub fn with_max_size(ttl_secs: u64, max_size: usize) -> Self {
         Self {
             entries: Arc::new(RwLock::new(HashMap::new())),
@@ -59,7 +59,8 @@ impl QuoteCache {
         }
     }
 
-    pub async fn get(&self,
+    pub async fn get(
+        &self,
         input_mint: &str,
         output_mint: &str,
         in_amount: u64,
@@ -98,7 +99,8 @@ impl QuoteCache {
         // This amortizes the O(n) scan cost instead of doing it on every insert
         if entries.len() >= self.max_size {
             let evict_count = (self.max_size / 10).max(1);
-            let mut items: Vec<_> = entries.iter()
+            let mut items: Vec<_> = entries
+                .iter()
                 .map(|(k, e)| (k.clone(), e.cached_at))
                 .collect();
             items.sort_by_key(|(_, t)| *t);
@@ -109,35 +111,40 @@ impl QuoteCache {
 
             debug!(
                 "Quote cache batch eviction: removed {} entries, {} remaining",
-                evict_count, entries.len()
+                evict_count,
+                entries.len()
             );
         }
 
-        entries.insert(key, QuoteCacheEntry {
-            price,
-            cached_at: Instant::now(),
-        });
+        entries.insert(
+            key,
+            QuoteCacheEntry {
+                price,
+                cached_at: Instant::now(),
+            },
+        );
     }
 
     /// Clean up expired entries
     pub async fn cleanup(&self) {
         let mut entries = self.entries.write().await;
         let before = entries.len();
-        entries.retain(|_, entry| {
-            entry.cached_at.elapsed().as_secs() < self.ttl_secs
-        });
+        entries.retain(|_, entry| entry.cached_at.elapsed().as_secs() < self.ttl_secs);
         let after = entries.len();
         if before != after {
-            debug!("Quote cache cleanup: removed {} expired entries, {} remaining", 
-                   before - after, after);
+            debug!(
+                "Quote cache cleanup: removed {} expired entries, {} remaining",
+                before - after,
+                after
+            );
         }
     }
-    
+
     pub async fn size(&self) -> usize {
         let entries = self.entries.read().await;
         entries.len()
     }
-    
+
     pub fn spawn_cleanup_task(self) {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
@@ -148,7 +155,6 @@ impl QuoteCache {
         });
     }
 }
-
 
 /// Normalized trade result returned by TradeExecutor
 /// Regardless of claw-trader quirks, this is the canonical representation
@@ -192,9 +198,9 @@ pub struct ExecutionData {
 
 #[derive(Debug, Clone)]
 pub struct TradeError {
-    pub stage: String,      // "shield", "quote", "swap", "confirm"
-    pub code: String,       // machine-readable error code
-    pub message: String,    // sanitized for logging
+    pub stage: String,   // "shield", "quote", "swap", "confirm"
+    pub code: String,    // machine-readable error code
+    pub message: String, // sanitized for logging
 }
 
 /// Trade executor using claw-trader-cli
@@ -213,7 +219,7 @@ pub struct TradeExecutor {
 impl TradeExecutor {
     /// Create new trade executor
     pub fn new(
-        data_retrieval_url: &str, 
+        data_retrieval_url: &str,
         solana_rpc_url: &str,
         keypair_path: PathBuf,
         execution_config: ExecutionConfig,
@@ -222,12 +228,15 @@ impl TradeExecutor {
         let claw_trader_path = std::env::var("CLAW_TRADER_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("/usr/local/bin/claw-trader"));
-        
+
         // Verify claw-trader exists
         if !claw_trader_path.exists() {
-            warn!("claw-trader not found at {:?}, trades will be simulated", claw_trader_path);
+            warn!(
+                "claw-trader not found at {:?}, trades will be simulated",
+                claw_trader_path
+            );
         }
-        
+
         Ok(Self {
             data_retrieval_url: data_retrieval_url.to_string(),
             solana_rpc_url: solana_rpc_url.to_string(),
@@ -246,41 +255,41 @@ impl TradeExecutor {
     }
 
     /// Run claw-trader command with timeout and parse JSON output
-    pub async fn run_claw_trader(
-        &self,
-        args: &[&str],
-    ) -> anyhow::Result<serde_json::Value> {
+    pub async fn run_claw_trader(&self, args: &[&str]) -> anyhow::Result<serde_json::Value> {
         let mut cmd = TokioCommand::new(&self.claw_trader_path);
-        
+
         // Add common flags
         cmd.arg("--json");
-        
+
         // Add API key if available
         if let Some(ref api_key) = self.jupiter_api_key {
             cmd.arg("--api-key").arg(api_key);
         }
-        
+
         // Add RPC URL if confirming
         if self.solana_rpc_url.contains("mainnet") || self.solana_rpc_url.contains("devnet") {
             cmd.arg("--rpc-url").arg(&self.solana_rpc_url);
         }
-        
+
         // Add subcommand args
         cmd.args(args);
-        
+
         // Set timeout from execution config
         let timeout_duration = Duration::from_secs(self.execution_config.confirm_timeout_secs);
-        
-        debug!("Running claw-trader with timeout {:?}: {:?}", timeout_duration, cmd);
+
+        debug!(
+            "Running claw-trader with timeout {:?}: {:?}",
+            timeout_duration, cmd
+        );
 
         // Configure stdout/stderr capture
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
         // Spawn the process so we can get its PID for targeted cleanup
-        let child = cmd.spawn().map_err(|e| {
-            anyhow::anyhow!("Failed to spawn claw-trader: {}", e)
-        })?;
+        let child = cmd
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("Failed to spawn claw-trader: {}", e))?;
 
         // Store PID for potential cleanup (PROCESS-SAFETY: kill only this specific PID)
         let child_pid = child.id();
@@ -306,9 +315,7 @@ impl TradeExecutor {
 
                 Ok(json)
             }
-            Ok(Err(e)) => {
-                Err(anyhow::anyhow!("Failed to execute claw-trader: {}", e))
-            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to execute claw-trader: {}", e)),
             Err(_) => {
                 // Timeout occurred
                 error!("claw-trader command timed out after {:?}", timeout_duration);
@@ -330,8 +337,10 @@ impl TradeExecutor {
                     }
                 }
 
-                Err(anyhow::anyhow!("confirm_timeout: claw-trader did not complete within {} seconds",
-                    self.execution_config.confirm_timeout_secs))
+                Err(anyhow::anyhow!(
+                    "confirm_timeout: claw-trader did not complete within {} seconds",
+                    self.execution_config.confirm_timeout_secs
+                ))
             }
         }
     }
@@ -352,20 +361,38 @@ impl TradeExecutor {
 
         let price = if !self.is_claw_trader_available() {
             // Fallback to HTTP API
-            self.fetch_price_http(input_mint, output_mint, amount).await?
+            self.fetch_price_http(input_mint, output_mint, amount)
+                .await?
         } else {
-            let result = self.run_claw_trader(&[
-                "price",
-                "--input-mint", input_mint,
-                "--output-mint", output_mint,
-                "--amount", &amount.to_string(),
-            ]).await?;
-        
+            let result = self
+                .run_claw_trader(&[
+                    "price",
+                    "--input-mint",
+                    input_mint,
+                    "--output-mint",
+                    output_mint,
+                    "--amount",
+                    &amount.to_string(),
+                ])
+                .await?;
+
             let price = ClawTraderPrice {
-                input_mint: result["inputMint"].as_str().unwrap_or(input_mint).to_string(),
-                output_mint: result["outputMint"].as_str().unwrap_or(output_mint).to_string(),
-                in_amount: result["inAmount"].as_str().and_then(|s| s.parse().ok()).unwrap_or(amount),
-                out_amount: result["outAmount"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0),
+                input_mint: result["inputMint"]
+                    .as_str()
+                    .unwrap_or(input_mint)
+                    .to_string(),
+                output_mint: result["outputMint"]
+                    .as_str()
+                    .unwrap_or(output_mint)
+                    .to_string(),
+                in_amount: result["inAmount"]
+                    .as_str()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(amount),
+                out_amount: result["outAmount"]
+                    .as_str()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0),
                 price_impact_pct: result["priceImpactPct"].as_f64().unwrap_or(0.0),
                 fee_bps: result["feeBps"].as_u64().unwrap_or(69),
             };
@@ -373,8 +400,10 @@ impl TradeExecutor {
         };
 
         // Cache the result
-        self.quote_cache.set(input_mint, output_mint, amount, price.clone()).await;
-        
+        self.quote_cache
+            .set(input_mint, output_mint, amount, price.clone())
+            .await;
+
         Ok(price)
     }
 
@@ -389,17 +418,14 @@ impl TradeExecutor {
         let url = format!("{}/prices/{}", self.data_retrieval_url, input_mint);
 
         // Use 10 second timeout for price fetches
-        let response = timeout(
-            Duration::from_secs(10),
-            self.http_client.get(&url).send()
-        ).await
-        .map_err(|_| anyhow::anyhow!("Price fetch timed out after 10 seconds"))?
-        ?;
-        
+        let response = timeout(Duration::from_secs(10), self.http_client.get(&url).send())
+            .await
+            .map_err(|_| anyhow::anyhow!("Price fetch timed out after 10 seconds"))??;
+
         if response.status().is_success() {
             let data: PriceResponse = response.json().await?;
             let price: f64 = data.price.parse()?;
-            
+
             return Ok(ClawTraderPrice {
                 input_mint: input_mint.to_string(),
                 output_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(), // USDC
@@ -409,15 +435,12 @@ impl TradeExecutor {
                 fee_bps: 69,
             });
         }
-        
+
         Err(anyhow::anyhow!("Price fetch failed: {}", response.status()))
     }
 
     /// Run risk check (shield) on a token
-    pub async fn shield_check(
-        &self,
-        mint: &str,
-    ) -> anyhow::Result<ShieldCheck> {
+    pub async fn shield_check(&self, mint: &str) -> anyhow::Result<ShieldCheck> {
         if !self.is_claw_trader_available() {
             // Default to safe if claw-trader not available
             return Ok(ShieldCheck {
@@ -427,12 +450,9 @@ impl TradeExecutor {
                 message: "claw-trader not available, skipping shield check".to_string(),
             });
         }
-        
-        let result = self.run_claw_trader(&[
-            "shield",
-            "--mints", mint,
-        ]).await?;
-        
+
+        let result = self.run_claw_trader(&["shield", "--mints", mint]).await?;
+
         // Parse shield response with structured verdict
         let safe = result["safe"].as_bool().unwrap_or(true);
         let verdict_str = result["verdict"].as_str().unwrap_or("allow");
@@ -441,12 +461,16 @@ impl TradeExecutor {
             "warn" => ShieldVerdict::Warn,
             _ => ShieldVerdict::Allow,
         };
-        
+
         let warnings: Vec<String> = result["warnings"]
             .as_array()
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
-        
+
         Ok(ShieldCheck {
             safe: safe && verdict != ShieldVerdict::Deny,
             verdict,
@@ -484,7 +508,7 @@ impl TradeExecutor {
         match self.shield_check(input_mint).await {
             Ok(shield) => {
                 result.shield_result = Some(shield.clone());
-                
+
                 if !shield.safe {
                     result.stage_reached = TradeStage::Blocked;
                     result.error = Some(TradeError {
@@ -492,7 +516,10 @@ impl TradeExecutor {
                         code: "shield_deny".to_string(),
                         message: format!("Shield check failed: {}", shield.message),
                     });
-                    warn!("Shield check failed for {}: {:?}", input_mint, shield.warnings);
+                    warn!(
+                        "Shield check failed for {}: {:?}",
+                        input_mint, shield.warnings
+                    );
                     return result;
                 }
             }
@@ -537,26 +564,36 @@ impl TradeExecutor {
             result.error = Some(TradeError {
                 stage: "quote".to_string(),
                 code: "impact_too_high".to_string(),
-                message: format!("Price impact {}% exceeds max {}", 
-                    price_quote.price_impact_pct, 
-                    self.execution_config.max_price_impact_pct),
+                message: format!(
+                    "Price impact {}% exceeds max {}",
+                    price_quote.price_impact_pct, self.execution_config.max_price_impact_pct
+                ),
             });
-            warn!("Price impact too high: {}% > {}%", 
-                price_quote.price_impact_pct, 
-                self.execution_config.max_price_impact_pct);
+            warn!(
+                "Price impact too high: {}% > {}%",
+                price_quote.price_impact_pct, self.execution_config.max_price_impact_pct
+            );
             return result;
         }
 
         // Route to paper or live execution
         match trading_mode {
             TradingMode::Paper => {
-                self.execute_paper_trade(&mut result, input_mint, output_mint, amount, &price_quote).await;
+                self.execute_paper_trade(
+                    &mut result,
+                    input_mint,
+                    output_mint,
+                    amount,
+                    &price_quote,
+                )
+                .await;
             }
             TradingMode::Live => {
-                self.execute_live_trade(&mut result, input_mint, output_mint, amount, &price_quote).await;
+                self.execute_live_trade(&mut result, input_mint, output_mint, amount, &price_quote)
+                    .await;
             }
         }
-        
+
         result
     }
 
@@ -571,7 +608,11 @@ impl TradeExecutor {
     ) {
         info!(
             "📝 PAPER TRADE: {:?} {:?} -> {:?} | Expected out: {:?} | Impact: {:?}%",
-            result.side, input_mint, output_mint, price_quote.out_amount, price_quote.price_impact_pct
+            result.side,
+            input_mint,
+            output_mint,
+            price_quote.out_amount,
+            price_quote.price_impact_pct
         );
 
         // Simulate small slippage based on configured max
@@ -606,9 +647,11 @@ impl TradeExecutor {
     ) {
         if !self.is_claw_trader_available() {
             warn!("claw-trader not available, falling back to paper trade");
-            return self.execute_paper_trade(result, input_mint, output_mint, amount, price_quote).await;
+            return self
+                .execute_paper_trade(result, input_mint, output_mint, amount, price_quote)
+                .await;
         }
-        
+
         if !self.keypair_path.exists() {
             result.stage_reached = TradeStage::Failed;
             result.error = Some(TradeError {
@@ -618,7 +661,7 @@ impl TradeExecutor {
             });
             return;
         }
-        
+
         info!(
             "💰 LIVE TRADE: {:?} {:?} -> {:?} | Amount: {:?} | Expected out: {:?}",
             result.side, input_mint, output_mint, amount, price_quote.out_amount
@@ -629,13 +672,17 @@ impl TradeExecutor {
         let slippage_str = self.execution_config.max_slippage_bps.to_string();
         let mut args: Vec<&str> = vec![
             "swap",
-            "--input-mint", input_mint,
-            "--output-mint", output_mint,
-            "--amount", &amount_str,
-            "--keypair", self.keypair_path.to_str().unwrap(),
+            "--input-mint",
+            input_mint,
+            "--output-mint",
+            output_mint,
+            "--amount",
+            &amount_str,
+            "--keypair",
+            self.keypair_path.to_str().unwrap(),
             "--confirm",
         ];
-        
+
         // Add slippage if claw-trader supports it
         args.push("--slippage-bps");
         args.push(&slippage_str);
@@ -643,19 +690,22 @@ impl TradeExecutor {
         // Execute swap with timeout already handled in run_claw_trader
         match self.run_claw_trader(&args).await {
             Ok(swap_result) => {
-                self.parse_live_trade_result(result, swap_result, amount, price_quote).await;
+                self.parse_live_trade_result(result, swap_result, amount, price_quote)
+                    .await;
             }
             Err(e) => {
                 let error_str = e.to_string();
-                
+
                 // Check if this was a timeout
                 if error_str.contains("confirm_timeout") {
                     result.stage_reached = TradeStage::Failed;
                     result.error = Some(TradeError {
                         stage: "confirm".to_string(),
                         code: "confirm_timeout".to_string(),
-                        message: format!("Trade confirmation timed out after {} seconds", 
-                            self.execution_config.confirm_timeout_secs),
+                        message: format!(
+                            "Trade confirmation timed out after {} seconds",
+                            self.execution_config.confirm_timeout_secs
+                        ),
                     });
                 } else {
                     result.stage_reached = TradeStage::Failed;
@@ -679,28 +729,33 @@ impl TradeExecutor {
         _price_quote: &ClawTraderPrice,
     ) {
         let success = swap_result["ok"].as_bool().unwrap_or(false);
-        
+
         if success {
             let execute = &swap_result["result"]["execute"];
             let confirmation = &swap_result["result"]["confirmation"];
             let order = &swap_result["result"]["order"];
-            
-            let tx_hash = execute["signature"].as_str()
+
+            let tx_hash = execute["signature"]
+                .as_str()
                 .or_else(|| confirmation["signature"].as_str())
                 .unwrap_or("unknown")
                 .to_string();
-            
+
             let status = execute["status"].as_str().unwrap_or("Unknown");
-            
+
             info!("✅ Trade executed: {} | Status: {}", tx_hash, status);
-            
+
             // Get actual out amount
             let out_amount = order["outAmount"]
                 .as_str()
                 .and_then(|s| s.parse::<u64>().ok())
-                .or_else(|| order["expectedOutAmount"].as_str().and_then(|s| s.parse().ok()))
+                .or_else(|| {
+                    order["expectedOutAmount"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                })
                 .unwrap_or(0);
-            
+
             // Calculate realized slippage using Decimal for precision
             // Slippage is absolute difference from expected (positive = unfavorable, negative = favorable)
             let expected_out = Decimal::from(result.quote.expected_out);
@@ -714,7 +769,7 @@ impl TradeExecutor {
             } else {
                 0
             };
-            
+
             result.stage_reached = TradeStage::Confirmed;
             result.signature = Some(tx_hash);
             result.execution = ExecutionData {
@@ -731,14 +786,14 @@ impl TradeExecutor {
                 .as_str()
                 .unwrap_or("Unknown error")
                 .to_string();
-            
+
             let error_code = swap_result["error"]["code"]
                 .as_str()
                 .unwrap_or("unknown")
                 .to_string();
-            
+
             warn!("❌ Trade failed: {} (code: {})", error_msg, error_code);
-            
+
             result.stage_reached = TradeStage::Failed;
             result.error = Some(TradeError {
                 stage: "swap".to_string(),
@@ -751,7 +806,10 @@ impl TradeExecutor {
     /// Get wallet holdings
     ///
     /// Note: Currently returns empty vec. Wallet integration not yet implemented.
-    #[deprecated(since = "0.1.0", note = "Wallet integration not yet implemented; always returns empty")]
+    #[deprecated(
+        since = "0.1.0",
+        note = "Wallet integration not yet implemented; always returns empty"
+    )]
     #[allow(dead_code)]
     pub async fn get_holdings(&self) -> anyhow::Result<Vec<TokenHolding>> {
         Ok(vec![])
@@ -833,7 +891,9 @@ impl From<NormalizedTradeResult> for TradeResult {
         Self {
             success: n.stage_reached == TradeStage::Confirmed,
             tx_hash: n.signature,
-            message: n.error.as_ref()
+            message: n
+                .error
+                .as_ref()
                 .map(|e| e.message.clone())
                 .unwrap_or_else(|| format!("Trade {:?}", n.stage_reached)),
             executed_price: n.execution.realized_price,
@@ -851,10 +911,7 @@ impl From<NormalizedTradeResult> for TradeResult {
 // ==================== ALGORITHM SIGNAL GENERATORS ====================
 
 /// Generate trend-following signal
-pub fn generate_trend_signal(
-    prices: &[Decimal],
-    _current_price: Decimal,
-) -> TradingSignal {
+pub fn generate_trend_signal(prices: &[Decimal], _current_price: Decimal) -> TradingSignal {
     if prices.len() < 2 {
         return TradingSignal::Hold;
     }
@@ -863,10 +920,9 @@ pub fn generate_trend_signal(
     let short_period = prices.len() / 2;
     let long_period = prices.len();
 
-    let sma_short = prices.iter().rev().take(short_period).sum::<Decimal>() 
+    let sma_short = prices.iter().rev().take(short_period).sum::<Decimal>()
         / Decimal::from(short_period as i64);
-    let sma_long = prices.iter().sum::<Decimal>() 
-        / Decimal::from(long_period as i64);
+    let sma_long = prices.iter().sum::<Decimal>() / Decimal::from(long_period as i64);
 
     // Calculate trend strength
     let diff = (sma_short - sma_long).abs();
@@ -877,7 +933,11 @@ pub fn generate_trend_signal(
     };
 
     // Map trend to confidence
-    let confidence = trend_strength.to_string().parse::<f64>().unwrap_or(0.0).min(0.95);
+    let confidence = trend_strength
+        .to_string()
+        .parse::<f64>()
+        .unwrap_or(0.0)
+        .min(0.95);
 
     if sma_short > sma_long && confidence > 0.5 {
         TradingSignal::Buy { confidence }
@@ -889,25 +949,24 @@ pub fn generate_trend_signal(
 }
 
 /// Generate mean reversion signal
-pub fn generate_reversion_signal(
-    prices: &[Decimal],
-    current_price: Decimal,
-) -> TradingSignal {
+pub fn generate_reversion_signal(prices: &[Decimal], current_price: Decimal) -> TradingSignal {
     if prices.is_empty() {
         return TradingSignal::Hold;
     }
 
     // Calculate mean
     let mean = prices.iter().sum::<Decimal>() / Decimal::from(prices.len() as i64);
-    
+
     // Calculate standard deviation
-    let variance = prices.iter()
+    let variance = prices
+        .iter()
         .map(|p| {
             let diff = *p - mean;
             diff * diff
         })
-        .sum::<Decimal>() / Decimal::from(prices.len() as i64);
-    
+        .sum::<Decimal>()
+        / Decimal::from(prices.len() as i64);
+
     let std_dev = variance.sqrt().unwrap_or(Decimal::ZERO);
 
     if std_dev == Decimal::ZERO {
@@ -933,10 +992,7 @@ pub fn generate_reversion_signal(
 }
 
 /// Generate breakout signal
-pub fn generate_breakout_signal(
-    prices: &[Decimal],
-    current_price: Decimal,
-) -> TradingSignal {
+pub fn generate_breakout_signal(prices: &[Decimal], current_price: Decimal) -> TradingSignal {
     if prices.len() < 5 {
         return TradingSignal::Hold;
     }
@@ -950,7 +1006,7 @@ pub fn generate_breakout_signal(
     let range = high - low;
     let threshold_pct = Decimal::from_str_exact("0.02").unwrap_or(Decimal::ZERO);
     let breakout_threshold = range * threshold_pct;
-    
+
     if current_price > high + breakout_threshold {
         // Breakout above resistance
         let confidence = 0.7;
@@ -987,13 +1043,13 @@ pub fn symbol_to_mint(symbol: &str) -> Option<&'static str> {
 /// Get decimals for a token
 pub fn get_token_decimals(mint: &str) -> u8 {
     match mint {
-        "So11111111111111111111111111111111111111112" => 9,  // SOL
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" => 6,  // USDC
-        "qfnqNLS3x2K5R3oCmS1NjwiKOK8Tq77pCH6zTX8mR2F" => 8,  // WBTC
-        "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs" => 8,  // WETH
-        "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263" => 5,  // BONK
-        "EKpQGSJtjMFqKZ9KQbSqL2zPQCpA5xZKN2CjeJRdQpump" => 6,  // WIF
-        _ => 6, // Default to 6
+        "So11111111111111111111111111111111111111112" => 9, // SOL
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" => 6, // USDC
+        "qfnqNLS3x2K5R3oCmS1NjwiKOK8Tq77pCH6zTX8mR2F" => 8, // WBTC
+        "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs" => 8, // WETH
+        "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263" => 5, // BONK
+        "EKpQGSJtjMFqKZ9KQbSqL2zPQCpA5xZKN2CjeJRdQpump" => 6, // WIF
+        _ => 6,                                             // Default to 6
     }
 }
 

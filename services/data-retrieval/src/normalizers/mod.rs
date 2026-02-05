@@ -5,12 +5,12 @@ use crate::types::*;
 pub fn normalize_price(source: &str, raw_price: f64, symbol: &str) -> PricePoint {
     // Apply source-specific adjustments if needed
     let confidence = match source {
-        "binance" => Some(0.95), // Real-time, high confidence
+        "binance" => Some(0.95),   // Real-time, high confidence
         "coingecko" => Some(0.85), // Aggregated, slight delay
-        "pyth" => Some(0.90),    // Solana-native, on-chain
+        "pyth" => Some(0.90),      // Solana-native, on-chain
         _ => Some(0.70),
     };
-    
+
     PricePoint {
         symbol: symbol.to_uppercase(),
         price: rust_decimal::Decimal::try_from(raw_price).unwrap_or_default(),
@@ -24,9 +24,9 @@ pub fn normalize_price(source: &str, raw_price: f64, symbol: &str) -> PricePoint
 pub fn validate_price(price: &PricePoint) -> Result<()> {
     if price.price <= rust_decimal::Decimal::ZERO {
         return Err(DataRetrievalError::InvalidResponse(
-            "Price must be positive".to_string()
+            "Price must be positive".to_string(),
         ));
     }
-    
+
     Ok(())
 }

@@ -9,12 +9,10 @@ pub async fn init_db(database_url: &str) -> anyhow::Result<Db> {
         .acquire_timeout(Duration::from_secs(3))
         .connect(database_url)
         .await?;
-    
+
     // Run migrations
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await?;
-    
+    sqlx::migrate!("./migrations").run(&pool).await?;
+
     Ok(pool)
 }
 

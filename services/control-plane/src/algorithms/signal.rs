@@ -1,8 +1,8 @@
 //! Trading signals - output from algorithms
 
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 use std::str::FromStr;
 
 /// Trading signal type
@@ -40,7 +40,7 @@ impl SignalStrength {
             SignalStrength::VeryStrong => Decimal::from_str("0.95").unwrap(),
         }
     }
-    
+
     /// Create from numeric confidence
     pub fn from_confidence(confidence: Decimal) -> Self {
         if confidence >= Decimal::from_str("0.9").unwrap() {
@@ -110,7 +110,7 @@ impl Signal {
             metadata: serde_json::json!({}),
         }
     }
-    
+
     /// Create a new sell signal
     pub fn sell(
         symbol: String,
@@ -135,7 +135,7 @@ impl Signal {
             metadata: serde_json::json!({}),
         }
     }
-    
+
     /// Create a hold signal (no action)
     pub fn hold(symbol: String, price: Decimal, algorithm: String) -> Self {
         Self {
@@ -153,30 +153,30 @@ impl Signal {
             metadata: serde_json::json!({}),
         }
     }
-    
+
     /// Check if signal is actionable (above minimum confidence)
     pub fn is_actionable(&self, min_confidence: Decimal) -> bool {
         self.confidence >= min_confidence && self.signal_type != SignalType::Hold
     }
-    
+
     /// Add stop loss level
     pub fn with_stop_loss(mut self, stop_loss: Decimal) -> Self {
         self.stop_loss = Some(stop_loss);
         self
     }
-    
+
     /// Add take profit level
     pub fn with_take_profit(mut self, take_profit: Decimal) -> Self {
         self.take_profit = Some(take_profit);
         self
     }
-    
+
     /// Set suggested position size
     pub fn with_position_size(mut self, pct: Decimal) -> Self {
         self.suggested_position_pct = pct;
         self
     }
-    
+
     /// Add metadata
     pub fn with_metadata(mut self, key: &str, value: serde_json::Value) -> Self {
         if let Some(obj) = self.metadata.as_object_mut() {

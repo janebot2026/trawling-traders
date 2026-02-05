@@ -11,14 +11,8 @@ pub mod signal;
 
 // Re-export main types for convenience
 pub use config::{
-    TraderBrainConfig,
-    IdentityConfig,
-    PlaybookConfig,
-    BrainKnowledgeConfig,
-    TradeConfig,
-    AlgoConfig,
-    AlgoMode,
-    KnowledgePack,
+    AlgoConfig, AlgoMode, BrainKnowledgeConfig, IdentityConfig, KnowledgePack, PlaybookConfig,
+    TradeConfig, TraderBrainConfig,
 };
-pub use engine::{BrainEngine, MarketContext, Candle};
-pub use signal::{Signal, SignalType, SignalStrength};
+pub use engine::{BrainEngine, Candle, MarketContext};
+pub use signal::{Signal, SignalStrength, SignalType};

@@ -85,10 +85,13 @@ impl RateLimiter {
             }
             None => {
                 // New bucket
-                buckets.insert(key.to_string(), RateLimitBucket {
-                    requests: 1,
-                    window_start: now,
-                });
+                buckets.insert(
+                    key.to_string(),
+                    RateLimitBucket {
+                        requests: 1,
+                        window_start: now,
+                    },
+                );
                 true
             }
         }
@@ -102,7 +105,7 @@ impl Default for RateLimiter {
 }
 
 /// Rate limiting middleware
-/// 
+///
 /// Limits: 100 requests per minute for authenticated users
 ///         20 requests per minute for anonymous (if applicable)
 pub async fn rate_limit_middleware(
@@ -128,7 +131,7 @@ pub async fn rate_limit_middleware(
 }
 
 /// Bot-specific rate limiting (for bot-facing routes)
-/// 
+///
 /// Limits: 60 requests per minute per bot
 pub async fn bot_rate_limit_middleware(
     State(state): State<Arc<AppState>>,

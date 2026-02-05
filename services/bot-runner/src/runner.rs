@@ -1,24 +1,24 @@
 //! Bot Runner - Main orchestration loop
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::interval;
 use tokio::signal;
+use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
 use crate::amount::{get_tokens_for_focus, to_raw_amount, TokenInfo};
 use crate::client::{ControlPlaneClient, EventInput, MetricInput};
-use crate::config::{BotConfig, TradingMode, AlgorithmMode, Strictness};
+use crate::config::Config;
+use crate::config::{AlgorithmMode, BotConfig, Strictness, TradingMode};
 use crate::executor::{
     generate_breakout_signal, generate_reversion_signal, generate_trend_signal,
-    TradeExecutor, NormalizedTradeResult, TradeSide, TradingSignal,
+    NormalizedTradeResult, TradeExecutor, TradeSide, TradingSignal,
 };
 use crate::intent::{IntentRegistry, TradeIntent, TradeIntentState};
 use crate::portfolio::{Portfolio, PortfolioSnapshot};
 use crate::reconciler::HoldingsReconciler;
-use crate::config::Config;
 
 /// Main bot runner that manages the trading loop
 pub struct BotRunner {
@@ -37,7 +37,7 @@ impl BotRunner {
     pub fn new(client: Arc<ControlPlaneClient>, config: Config) -> Self {
         // Initialize portfolio with starting cash
         let portfolio = Portfolio::new(Decimal::from(10000));
-        
+
         Self {
             client,
             config,
@@ -77,13 +77,15 @@ impl BotRunner {
         }
 
         // Run main loop with shutdown handling
-        let shutdown_reason = self.run_main_loop(
-            &mut config_interval,
-            &mut heartbeat_interval,
-            &mut trading_interval,
-            &mut reconcile_interval,
-            &mut cleanup_interval,
-        ).await;
+        let shutdown_reason = self
+            .run_main_loop(
+                &mut config_interval,
+                &mut heartbeat_interval,
+                &mut trading_interval,
+                &mut reconcile_interval,
+                &mut cleanup_interval,
+            )
+            .await;
 
         info!("Shutdown triggered: {}", shutdown_reason);
 
@@ -163,13 +165,13 @@ impl BotRunner {
     }
 
     /// Poll for config updates
-    async fn poll_config(
-        &mut self,
-    ) -> anyhow::Result<()> {
+    async fn poll_config(&mut self) -> anyhow::Result<()> {
         match self.client.get_config().await? {
             Some(config) => {
                 // Check if config changed
-                let is_new = self.current_config.as_ref()
+                let is_new = self
+                    .current_config
+                    .as_ref()
                     .map(|c| c.version_id != config.version_id)
                     .unwrap_or(true);
 
@@ -178,10 +180,10 @@ impl BotRunner {
                         "New config received: version {} ({})",
                         config.version, config.version_id
                     );
-                    
+
                     // Acknowledge config
                     self.client.ack_config(config.version_id).await?;
-                    
+
                     // Apply new config
                     self.apply_config(config).await?;
                 }
@@ -194,10 +196,7 @@ impl BotRunner {
     }
 
     /// Apply new configuration
-    async fn apply_config(
-        &mut self,
-        config: BotConfig,
-    ) -> anyhow::Result<()> {
+    async fn apply_config(&mut self, config: BotConfig) -> anyhow::Result<()> {
         // Initialize executor if not already done
         if self.executor.is_none() {
             match TradeExecutor::new(
@@ -212,7 +211,7 @@ impl BotRunner {
                         executor.clone(),
                         self.config.wallet_address.clone(),
                     );
-                    
+
                     self.executor = Some(executor);
                     self.reconciler = Some(reconciler);
                 }
@@ -255,23 +254,23 @@ impl BotRunner {
     }
 
     /// Reconcile holdings with on-chain state
-    async fn reconcile_holdings(
-        &mut self,
-    ) -> anyhow::Result<()> {
+    async fn reconcile_holdings(&mut self) -> anyhow::Result<()> {
         // Take ownership of reconciler temporarily to avoid borrow issues
         if let Some(mut reconciler) = self.reconciler.take() {
             info!("Running holdings reconciliation...");
-            
+
             match reconciler.reconcile(&self.portfolio).await {
                 Ok(result) => {
                     // Send portfolio snapshot
                     let snapshot = self.portfolio.snapshot();
                     self.send_portfolio_snapshot(&snapshot).await;
-                    
+
                     // Apply corrections if significant discrepancies
                     if !result.discrepancies.is_empty() || !result.missing_on_chain.is_empty() {
-                        info!("Applying {} corrections to portfolio", 
-                            result.discrepancies.len() + result.missing_on_chain.len());
+                        info!(
+                            "Applying {} corrections to portfolio",
+                            result.discrepancies.len() + result.missing_on_chain.len()
+                        );
                         reconciler.apply_to_portfolio(&result, &mut self.portfolio);
                     }
                 }
@@ -279,7 +278,7 @@ impl BotRunner {
                     warn!("Reconciliation failed: {}", e);
                 }
             }
-            
+
             // Put reconciler back
             self.reconciler = Some(reconciler);
         }
@@ -287,10 +286,7 @@ impl BotRunner {
     }
 
     /// Send portfolio snapshot to control plane
-    async fn send_portfolio_snapshot(
-        &self,
-        snapshot: &PortfolioSnapshot,
-    ) {
+    async fn send_portfolio_snapshot(&self, snapshot: &PortfolioSnapshot) {
         let metadata = serde_json::json!({
             "cash_usdc": snapshot.cash_usdc.to_string(),
             "total_equity": snapshot.total_equity.to_string(),
@@ -316,9 +312,7 @@ impl BotRunner {
     }
 
     /// Run one trading cycle - check signals and execute trades
-    async fn run_trading_cycle(
-        &mut self,
-    ) -> anyhow::Result<()> {
+    async fn run_trading_cycle(&mut self) -> anyhow::Result<()> {
         // Check if we have config and executor
         let config = match &self.current_config {
             Some(c) => c.clone(),
@@ -349,11 +343,7 @@ impl BotRunner {
 
         // Check each token for trading signals
         for token in tokens {
-            match self.evaluate_and_trade(
-                &token,
-                &usdc_info,
-                &config,
-            ).await {
+            match self.evaluate_and_trade(&token, &usdc_info, &config).await {
                 Ok(Some((intent, result))) => {
                     self.trade_count += 1;
 
@@ -367,13 +357,17 @@ impl BotRunner {
 
                     // Update portfolio based on trade result
                     self.update_portfolio_from_trade(&result, &token, &usdc_info);
-                    
+
                     // Emit standardized events based on trade stage
                     self.emit_trade_events(&intent, &result, &config).await;
-                    
+
                     info!(
                         "Trade #{} for {} | Intent: {} | Stage: {:?} | TX: {:?}",
-                        self.trade_count, token.symbol, intent.id, result.stage_reached, result.signature
+                        self.trade_count,
+                        token.symbol,
+                        intent.id,
+                        result.stage_reached,
+                        result.signature
                     );
                 }
                 Ok(None) => {
@@ -424,7 +418,7 @@ impl BotRunner {
                 let reason_code = error
                     .map(|e| e.code.clone())
                     .unwrap_or_else(|| "unknown".to_string());
-                
+
                 let blocked_event = EventInput {
                     event_type: "trade_blocked".to_string(),
                     message: error
@@ -443,7 +437,7 @@ impl BotRunner {
                 };
                 self.client.send_events(vec![blocked_event]).await.ok();
             }
-            
+
             TradeStage::Submitted => {
                 let submitted_event = EventInput {
                     event_type: "trade_submitted".to_string(),
@@ -461,7 +455,7 @@ impl BotRunner {
                 };
                 self.client.send_events(vec![submitted_event]).await.ok();
             }
-            
+
             TradeStage::Confirmed => {
                 let confirmed_event = EventInput {
                     event_type: "trade_confirmed".to_string(),
@@ -482,7 +476,7 @@ impl BotRunner {
                 };
                 self.client.send_events(vec![confirmed_event]).await.ok();
             }
-            
+
             TradeStage::Failed => {
                 let error = result.error.as_ref();
                 let stage = error
@@ -491,7 +485,7 @@ impl BotRunner {
                 let code = error
                     .map(|e| e.code.clone())
                     .unwrap_or_else(|| "unknown".to_string());
-                
+
                 let failed_event = EventInput {
                     event_type: "trade_failed".to_string(),
                     message: error
@@ -530,9 +524,12 @@ impl BotRunner {
             // Bought token with USDC
             // Reduce cash
             let spent = crate::amount::from_raw_amount(result.quote.in_amount, usdc.decimals);
-            let new_cash = self.portfolio.cash_usdc_raw.saturating_sub(result.quote.in_amount);
+            let new_cash = self
+                .portfolio
+                .cash_usdc_raw
+                .saturating_sub(result.quote.in_amount);
             self.portfolio.update_cash(new_cash, "buy trade");
-            
+
             // Add/update position
             let received = result.execution.out_amount_raw;
             if received > 0 {
@@ -549,10 +546,12 @@ impl BotRunner {
             // Sold token for USDC
             // Remove/reduce position
             let sold = result.quote.in_amount;
-            let current_pos = self.portfolio.get_position(&token.mint)
+            let current_pos = self
+                .portfolio
+                .get_position(&token.mint)
                 .map(|p| p.quantity_raw)
                 .unwrap_or(0);
-            
+
             if sold >= current_pos {
                 // Full close
                 self.portfolio.close_position(&token.mint, token.decimals);
@@ -566,9 +565,11 @@ impl BotRunner {
                     token.decimals,
                 );
             }
-            
+
             // Add to cash (saturating to prevent overflow)
-            let received_usdc = self.portfolio.cash_usdc_raw
+            let received_usdc = self
+                .portfolio
+                .cash_usdc_raw
                 .saturating_add(result.execution.out_amount_raw);
             if received_usdc == u64::MAX && result.execution.out_amount_raw > 0 {
                 tracing::warn!(
@@ -588,19 +589,19 @@ impl BotRunner {
     ) -> anyhow::Result<Option<(TradeIntent, NormalizedTradeResult)>> {
         // Get executor reference
         let executor = self.executor.as_ref().unwrap();
-        
+
         // Calculate position size
-        let max_position_pct = Decimal::from(config.risk_caps.max_position_size_percent)
-            / Decimal::from(100);
-        
+        let max_position_pct =
+            Decimal::from(config.risk_caps.max_position_size_percent) / Decimal::from(100);
+
         // Get current equity from portfolio snapshot
         let snapshot = self.portfolio.snapshot();
         let position_value_usd = snapshot.total_equity * max_position_pct;
-        
+
         // Convert to raw USDC amount
         let usdc_amount = to_raw_amount(position_value_usd, usdc.decimals)
             .map_err(|e| anyhow::anyhow!("Invalid position size: {}", e))?;
-        
+
         if usdc_amount == 0 {
             return Ok(None);
         }
@@ -612,11 +613,9 @@ impl BotRunner {
         }
 
         // Fetch price quote
-        let quote = executor.fetch_price(
-            &usdc.mint,
-            &token.mint,
-            usdc_amount,
-        ).await?;
+        let quote = executor
+            .fetch_price(&usdc.mint, &token.mint, usdc_amount)
+            .await?;
 
         // Calculate price for signal generation
         let price = crate::amount::from_raw_amount(quote.out_amount, token.decimals)
@@ -653,15 +652,15 @@ impl BotRunner {
 
         // Check if we can sell (for sell signals)
         if side == TradeSide::Sell {
-            let token_qty = self.portfolio.get_position(&token.mint)
+            let token_qty = self
+                .portfolio
+                .get_position(&token.mint)
                 .map(|p| p.quantity_raw)
                 .unwrap_or(0);
-            
+
             // Estimate how much we'd need to sell
-            let estimated_qty = (position_value_usd / price)
-                .to_u64()
-                .unwrap_or(0);
-            
+            let estimated_qty = (position_value_usd / price).to_u64().unwrap_or(0);
+
             if token_qty < estimated_qty {
                 debug!("Insufficient {} balance to sell", token.symbol);
                 return Ok(None);
@@ -700,14 +699,16 @@ impl BotRunner {
         };
 
         // Execute trade with intent_id for tracking
-        let result = executor.execute_trade(
-            &intent.id.to_string(),
-            input_mint,
-            output_mint,
-            usdc_amount,
-            side,
-            config.trading_mode,
-        ).await;
+        let result = executor
+            .execute_trade(
+                &intent.id.to_string(),
+                input_mint,
+                output_mint,
+                usdc_amount,
+                side,
+                config.trading_mode,
+            )
+            .await;
 
         // Update intent state based on result
         self.update_intent_state(&intent, &result);
@@ -716,49 +717,47 @@ impl BotRunner {
     }
 
     /// Update intent state based on normalized trade result
-    fn update_intent_state(
-        &mut self,
-        intent: &TradeIntent,
-        result: &NormalizedTradeResult,
-    ) {
+    fn update_intent_state(&mut self, intent: &TradeIntent, result: &NormalizedTradeResult) {
         use crate::executor::TradeStage;
-        
+
         let state = match result.stage_reached {
             TradeStage::Blocked => {
-                let reason = result.error.as_ref()
+                let reason = result
+                    .error
+                    .as_ref()
                     .map(|e| format!("{}: {}", e.stage, e.code))
                     .unwrap_or_else(|| "blocked".to_string());
                 TradeIntentState::ShieldCheckFailed { reason }
             }
-            TradeStage::Submitted => {
-                TradeIntentState::Submitted {
-                    signature: result.signature.clone().unwrap_or_default(),
-                }
-            }
-            TradeStage::Confirmed => {
-                TradeIntentState::Confirmed {
-                    signature: result.signature.clone().unwrap_or_default(),
-                    out_amount: result.execution.out_amount_raw,
-                }
-            }
+            TradeStage::Submitted => TradeIntentState::Submitted {
+                signature: result.signature.clone().unwrap_or_default(),
+            },
+            TradeStage::Confirmed => TradeIntentState::Confirmed {
+                signature: result.signature.clone().unwrap_or_default(),
+                out_amount: result.execution.out_amount_raw,
+            },
             TradeStage::Failed => {
-                let stage = result.error.as_ref()
+                let stage = result
+                    .error
+                    .as_ref()
                     .map(|e| e.stage.clone())
                     .unwrap_or_else(|| "unknown".to_string());
-                let error = result.error.as_ref()
+                let error = result
+                    .error
+                    .as_ref()
                     .map(|e| e.message.clone())
                     .unwrap_or_else(|| "failed".to_string());
                 TradeIntentState::Failed { stage, error }
             }
         };
-        
-        self.intent_registry.update_state(&intent.id.to_string(), state).ok();
+
+        self.intent_registry
+            .update_state(&intent.id.to_string(), state)
+            .ok();
     }
 
     /// Send heartbeat with metrics
-    async fn send_heartbeat(
-        &self,
-    ) -> anyhow::Result<()> {
+    async fn send_heartbeat(&self) -> anyhow::Result<()> {
         let status = if self.current_config.is_some() {
             "online"
         } else {

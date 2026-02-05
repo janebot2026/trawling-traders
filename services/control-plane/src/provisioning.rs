@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::time::sleep;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn, error};
+use tokio::time::sleep;
+use tracing::{debug, error, info, warn};
 
 /// Retry configuration for DO API calls
 #[derive(Debug, Clone)]
@@ -21,8 +21,8 @@ impl Default for RetryConfig {
     fn default() -> Self {
         Self {
             max_attempts: 3,
-            base_delay_ms: 2000,  // 2 seconds
-            max_delay_ms: 8000,   // 8 seconds
+            base_delay_ms: 2000, // 2 seconds
+            max_delay_ms: 8000,  // 8 seconds
             jitter: true,
         }
     }
@@ -33,7 +33,7 @@ fn backoff_delay(attempt: u32, config: &RetryConfig) -> Duration {
     // Exponential backoff: 2s, 4s, 8s
     let delay = config.base_delay_ms * (1_u64 << attempt.min(3));
     let delay = delay.min(config.max_delay_ms);
-    
+
     // Add jitter (±25%)
     let jittered = if config.jitter {
         let jitter_range = delay / 4;
@@ -42,29 +42,31 @@ fn backoff_delay(attempt: u32, config: &RetryConfig) -> Duration {
     } else {
         delay
     };
-    
+
     Duration::from_millis(jittered)
 }
 
 /// Execute a fallible async operation with retry logic
-pub async fn with_retry<F, Fut, T, E>(
-    operation: F,
-    config: RetryConfig,
-) -> Result<T, E>
+pub async fn with_retry<F, Fut, T, E>(operation: F, config: RetryConfig) -> Result<T, E>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
     E: std::fmt::Display,
 {
     let mut last_error = None;
-    
+
     for attempt in 0..config.max_attempts {
         match operation().await {
             Ok(result) => return Ok(result),
             Err(e) => {
-                warn!("Operation failed (attempt {}/{}): {}", attempt + 1, config.max_attempts, e);
+                warn!(
+                    "Operation failed (attempt {}/{}): {}",
+                    attempt + 1,
+                    config.max_attempts,
+                    e
+                );
                 last_error = Some(e);
-                
+
                 if attempt < config.max_attempts - 1 {
                     let delay = backoff_delay(attempt, &config);
                     debug!("Retrying after {:?}", delay);
@@ -73,7 +75,7 @@ where
             }
         }
     }
-    
+
     Err(last_error.expect("last_error should be set"))
 }
 
@@ -82,9 +84,9 @@ where
 /// Circuit breaker state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CircuitState {
-    Closed,     // Normal operation
-    Open,       // Failing, rejecting requests
-    HalfOpen,   // Testing if recovered
+    Closed,   // Normal operation
+    Open,     // Failing, rejecting requests
+    HalfOpen, // Testing if recovered
 }
 
 /// Circuit breaker for DO API calls
@@ -110,9 +112,9 @@ pub struct CircuitConfig {
 impl Default for CircuitConfig {
     fn default() -> Self {
         Self {
-            failure_threshold: 5,        // 5 failures
-            failure_window_secs: 60,     // in 60 seconds
-            recovery_timeout_secs: 300,  // wait 5 min before retry
+            failure_threshold: 5,       // 5 failures
+            failure_window_secs: 60,    // in 60 seconds
+            recovery_timeout_secs: 300, // wait 5 min before retry
         }
     }
 }
@@ -130,7 +132,7 @@ impl CircuitBreaker {
     /// Check if request should be allowed
     pub async fn allow(&self) -> bool {
         let state = *self.state.read().await;
-        
+
         match state {
             CircuitState::Closed => true,
             CircuitState::Open => {
@@ -157,15 +159,15 @@ impl CircuitBreaker {
     /// Record a success
     pub async fn record_success(&self) {
         let state = *self.state.read().await;
-        
+
         if state == CircuitState::HalfOpen {
             // Recovery successful, close circuit
             let mut s = self.state.write().await;
             *s = CircuitState::Closed;
-            
+
             let mut count = self.failure_count.write().await;
             *count = 0;
-            
+
             info!("Circuit breaker closed - service recovered");
         }
     }
@@ -174,12 +176,12 @@ impl CircuitBreaker {
     pub async fn record_failure(&self) {
         let mut count = self.failure_count.write().await;
         *count += 1;
-        
+
         let current_count = *count;
-        
+
         let mut last = self.last_failure_time.write().await;
         *last = Some(Instant::now());
-        
+
         // Check if we should open the circuit
         if current_count >= self.config.failure_threshold {
             let mut state = self.state.write().await;
@@ -187,7 +189,9 @@ impl CircuitBreaker {
                 *state = CircuitState::Open;
                 error!(
                     "Circuit breaker OPENED after {} failures in {}s. Pausing provisions for {}s.",
-                    current_count, self.config.failure_window_secs, self.config.recovery_timeout_secs
+                    current_count,
+                    self.config.failure_window_secs,
+                    self.config.recovery_timeout_secs
                 );
             }
         }
@@ -202,10 +206,10 @@ impl CircuitBreaker {
     pub async fn reset(&self) {
         let mut state = self.state.write().await;
         *state = CircuitState::Closed;
-        
+
         let mut count = self.failure_count.write().await;
         *count = 0;
-        
+
         info!("Circuit breaker manually reset to closed");
     }
 }
@@ -229,8 +233,8 @@ pub struct CleanupConfig {
 impl Default for CleanupConfig {
     fn default() -> Self {
         Self {
-            provisioning_timeout_secs: 600,  // 10 minutes
-            destroying_timeout_secs: 300,    // 5 minutes
+            provisioning_timeout_secs: 600, // 10 minutes
+            destroying_timeout_secs: 300,   // 5 minutes
         }
     }
 }
@@ -240,10 +244,7 @@ pub async fn find_orphaned_bots(
     pool: &sqlx::PgPool,
     config: &CleanupConfig,
 ) -> anyhow::Result<Vec<(uuid::Uuid, String, Option<i64>)>> {
-    let rows = sqlx::query_as::<
-        _,
-        (uuid::Uuid, String, Option<i64>),
-    >(
+    let rows = sqlx::query_as::<_, (uuid::Uuid, String, Option<i64>)>(
         r#"
         SELECT id, status, droplet_id
         FROM bots
@@ -255,13 +256,13 @@ pub async fn find_orphaned_bots(
             status = 'destroying'
             AND updated_at < NOW() - INTERVAL '1 second' * $2
         )
-        "#
+        "#,
     )
     .bind(config.provisioning_timeout_secs as i64)
     .bind(config.destroying_timeout_secs as i64)
     .fetch_all(pool)
     .await?;
-    
+
     Ok(rows)
 }
 
@@ -269,7 +270,7 @@ pub async fn find_orphaned_bots(
 pub async fn cleanup_orphaned_bot(
     bot_id: uuid::Uuid,
     status: &str,
-    _droplet_id: Option<i64>,  // We re-fetch current droplet_id inside the transaction
+    _droplet_id: Option<i64>, // We re-fetch current droplet_id inside the transaction
     pool: &sqlx::PgPool,
     secrets: &crate::SecretsManager,
 ) -> anyhow::Result<()> {
@@ -282,27 +283,27 @@ pub async fn cleanup_orphaned_bot(
     let mut tx = pool.begin().await?;
 
     // Try to acquire advisory lock (non-blocking) - returns true if acquired
-    let acquired: (bool,) = sqlx::query_as(
-        "SELECT pg_try_advisory_xact_lock($1)"
-    )
-    .bind(lock_key)
-    .fetch_one(&mut *tx)
-    .await?;
+    let acquired: (bool,) = sqlx::query_as("SELECT pg_try_advisory_xact_lock($1)")
+        .bind(lock_key)
+        .fetch_one(&mut *tx)
+        .await?;
 
     if !acquired.0 {
         // Another operation (likely user destroy) has the lock - skip this bot
-        debug!("Skipping cleanup of bot {} - lock held by another operation", bot_id);
+        debug!(
+            "Skipping cleanup of bot {} - lock held by another operation",
+            bot_id
+        );
         tx.rollback().await?;
         return Ok(());
     }
 
     // Re-check bot status after acquiring lock (TOCTOU protection)
-    let current: Option<(String, Option<i64>)> = sqlx::query_as(
-        "SELECT status, droplet_id FROM bots WHERE id = $1"
-    )
-    .bind(bot_id)
-    .fetch_optional(&mut *tx)
-    .await?;
+    let current: Option<(String, Option<i64>)> =
+        sqlx::query_as("SELECT status, droplet_id FROM bots WHERE id = $1")
+            .bind(bot_id)
+            .fetch_optional(&mut *tx)
+            .await?;
 
     let Some((current_status, current_droplet_id)) = current else {
         // Bot was deleted while we were waiting
@@ -328,9 +329,13 @@ pub async fn cleanup_orphaned_bot(
 
             // If we have a droplet_id, try to destroy it
             if let Some(did) = current_droplet_id {
-                if let Some(do_token) = config::get_config_decrypted(pool, secrets, keys::DIGITALOCEAN_TOKEN).await {
+                if let Some(do_token) =
+                    config::get_config_decrypted(pool, secrets, keys::DIGITALOCEAN_TOKEN).await
+                {
                     if !do_token.is_empty() {
-                        if let Ok(client) = claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
+                        if let Ok(client) =
+                            claw_spawn::infrastructure::DigitalOceanClient::new(do_token)
+                        {
                             let _ = client.destroy_droplet(did).await;
                         }
                     }
@@ -351,9 +356,13 @@ pub async fn cleanup_orphaned_bot(
 
             // Try to destroy droplet if exists
             if let Some(did) = current_droplet_id {
-                if let Some(do_token) = config::get_config_decrypted(pool, secrets, keys::DIGITALOCEAN_TOKEN).await {
+                if let Some(do_token) =
+                    config::get_config_decrypted(pool, secrets, keys::DIGITALOCEAN_TOKEN).await
+                {
                     if !do_token.is_empty() {
-                        if let Ok(client) = claw_spawn::infrastructure::DigitalOceanClient::new(do_token) {
+                        if let Ok(client) =
+                            claw_spawn::infrastructure::DigitalOceanClient::new(do_token)
+                        {
                             let _ = client.destroy_droplet(did).await;
                         }
                     }
@@ -389,7 +398,9 @@ pub fn spawn_cleanup_task(pool: sqlx::PgPool, secrets: crate::SecretsManager) {
             match find_orphaned_bots(&pool, &config).await {
                 Ok(orphans) => {
                     for (bot_id, status, droplet_id) in orphans {
-                        if let Err(e) = cleanup_orphaned_bot(bot_id, &status, droplet_id, &pool, &secrets).await {
+                        if let Err(e) =
+                            cleanup_orphaned_bot(bot_id, &status, droplet_id, &pool, &secrets).await
+                        {
                             error!("Failed to cleanup orphaned bot {}: {}", bot_id, e);
                         }
                     }
@@ -428,30 +439,30 @@ async fn cleanup_old_data(
     config: &DataRetentionConfig,
 ) -> anyhow::Result<(u64, u64)> {
     // Delete old events
-    let events_result = sqlx::query(
-        "DELETE FROM events WHERE created_at < NOW() - INTERVAL '1 day' * $1"
-    )
-    .bind(config.events_retention_days)
-    .execute(pool)
-    .await?;
+    let events_result =
+        sqlx::query("DELETE FROM events WHERE created_at < NOW() - INTERVAL '1 day' * $1")
+            .bind(config.events_retention_days)
+            .execute(pool)
+            .await?;
 
     let events_deleted = events_result.rows_affected();
 
     // Delete old metrics
-    let metrics_result = sqlx::query(
-        "DELETE FROM metrics WHERE timestamp < NOW() - INTERVAL '1 day' * $1"
-    )
-    .bind(config.metrics_retention_days)
-    .execute(pool)
-    .await?;
+    let metrics_result =
+        sqlx::query("DELETE FROM metrics WHERE timestamp < NOW() - INTERVAL '1 day' * $1")
+            .bind(config.metrics_retention_days)
+            .execute(pool)
+            .await?;
 
     let metrics_deleted = metrics_result.rows_affected();
 
     if events_deleted > 0 || metrics_deleted > 0 {
         info!(
             "Data retention cleanup: deleted {} events (>{}d), {} metrics (>{}d)",
-            events_deleted, config.events_retention_days,
-            metrics_deleted, config.metrics_retention_days
+            events_deleted,
+            config.events_retention_days,
+            metrics_deleted,
+            config.metrics_retention_days
         );
     }
 
@@ -476,7 +487,7 @@ pub fn spawn_data_retention_task(pool: sqlx::PgPool) {
 }
 
 /// Idempotency key for bot creation
-/// 
+///
 /// Format: "bot:{bot_id}:{timestamp}:{nonce}"
 #[derive(Debug, Clone)]
 pub struct IdempotencyKey {
@@ -491,7 +502,7 @@ impl IdempotencyKey {
             key: format!("bot:{}:{}:{}", bot_id, timestamp, nonce),
         }
     }
-    
+
     pub fn as_str(&self) -> &str {
         &self.key
     }

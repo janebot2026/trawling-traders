@@ -1,12 +1,8 @@
 //! Health check endpoints for load balancers and monitoring
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Json,
-};
-use std::sync::Arc;
+use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
+use std::sync::Arc;
 
 use crate::AppState;
 
@@ -23,17 +19,13 @@ pub async fn readyz(
 ) -> Result<Json<ReadinessResponse>, StatusCode> {
     // Try a simple DB query
     match sqlx::query("SELECT 1").fetch_one(&state.db).await {
-        Ok(_) => {
-            Ok(Json(ReadinessResponse {
-                status: "ready".to_string(),
-                checks: vec![
-                    HealthCheck {
-                        name: "database".to_string(),
-                        status: "ok".to_string(),
-                    },
-                ],
-            }))
-        }
+        Ok(_) => Ok(Json(ReadinessResponse {
+            status: "ready".to_string(),
+            checks: vec![HealthCheck {
+                name: "database".to_string(),
+                status: "ok".to_string(),
+            }],
+        })),
         Err(e) => {
             tracing::error!("Readiness check failed: {}", e);
             Err(StatusCode::SERVICE_UNAVAILABLE)
@@ -65,14 +57,22 @@ pub async fn health_detail(
     // Check secrets encryption
     checks.push(HealthCheck {
         name: "secrets".to_string(),
-        status: if state.secrets.is_encryption_active() { "encrypted".to_string() } else { "plaintext".to_string() },
+        status: if state.secrets.is_encryption_active() {
+            "encrypted".to_string()
+        } else {
+            "plaintext".to_string()
+        },
     });
 
     // Get metrics snapshot
     let metrics = state.metrics.snapshot().await;
 
     let response = DetailedHealthResponse {
-        status: if all_ok { "healthy".to_string() } else { "degraded".to_string() },
+        status: if all_ok {
+            "healthy".to_string()
+        } else {
+            "degraded".to_string()
+        },
         version: env!("CARGO_PKG_VERSION").to_string(),
         checks,
         metrics: HealthMetrics {

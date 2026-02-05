@@ -1,8 +1,8 @@
 //! Trading signals - output from brain engine
 
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 
 /// Trading signal type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 /// Universal price data point from any source
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PricePoint {
-    pub symbol: String,          // Full symbol like "BTC/USD", "AAPL"
+    pub symbol: String, // Full symbol like "BTC/USD", "AAPL"
     pub price: Decimal,
-    pub source: String,          // "coingecko", "binance", "pyth"
+    pub source: String, // "coingecko", "binance", "pyth"
     pub timestamp: DateTime<Utc>,
-    pub confidence: Option<f64>,  // 0.0 - 1.0 based on source quality, None if unknown
+    pub confidence: Option<f64>, // 0.0 - 1.0 based on source quality, None if unknown
 }
 
 impl PricePoint {
@@ -29,12 +29,16 @@ impl PricePoint {
             confidence,
         }
     }
-    
+
     /// Get asset part of symbol (e.g., "BTC" from "BTC/USD")
     pub fn asset(&self) -> String {
-        self.symbol.split('/').next().unwrap_or(&self.symbol).to_string()
+        self.symbol
+            .split('/')
+            .next()
+            .unwrap_or(&self.symbol)
+            .to_string()
     }
-    
+
     /// Get quote part of symbol (e.g., "USD" from "BTC/USD")
     pub fn quote(&self) -> Option<String> {
         self.symbol.split('/').nth(1).map(|s| s.to_string())
@@ -122,9 +126,9 @@ pub struct OnChainMetric {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SentimentData {
     pub asset: String,
-    pub platform: String,        // "twitter", "reddit", "lunarcrush"
-    pub sentiment_score: f64,    // -1.0 to 1.0
-    pub volume: u64,             // Mention count
+    pub platform: String,     // "twitter", "reddit", "lunarcrush"
+    pub sentiment_score: f64, // -1.0 to 1.0
+    pub volume: u64,          // Mention count
     pub timestamp: DateTime<Utc>,
 }
 
@@ -137,7 +141,7 @@ pub struct AggregatedPrice {
     pub sources: Vec<PriceSource>,
     pub timestamp: DateTime<Utc>,
     pub confidence: f64,
-    pub spread_percent: f64,     // Max price - min price as % of avg
+    pub spread_percent: f64, // Max price - min price as % of avg
 }
 
 /// Individual source contribution to aggregated price
@@ -165,22 +169,22 @@ pub struct SourceHealth {
 pub enum DataRetrievalError {
     #[error("API request failed: {0}")]
     ApiError(String),
-    
+
     #[error("Rate limit exceeded for {source_name}")]
-    RateLimit { 
-        source_name: String, 
-        retry_after: Option<u64> 
+    RateLimit {
+        source_name: String,
+        retry_after: Option<u64>,
     },
-    
+
     #[error("Invalid response format: {0}")]
     InvalidResponse(String),
-    
+
     #[error("Asset not found: {0}")]
     AssetNotFound(String),
-    
+
     #[error("Cache error: {0}")]
     CacheError(String),
-    
+
     #[error("Source unhealthy: {0}")]
     SourceUnhealthy(String),
 }
@@ -193,7 +197,7 @@ pub type Result<T> = std::result::Result<T, DataRetrievalError>;
 pub trait PriceDataSource: Send + Sync {
     /// Get current price for an asset
     async fn get_price(&self, asset: &str, quote: &str) -> Result<PricePoint>;
-    
+
     /// Get historical candles
     async fn get_candles(
         &self,
@@ -202,10 +206,10 @@ pub trait PriceDataSource: Send + Sync {
         timeframe: TimeFrame,
         limit: usize,
     ) -> Result<Vec<Candle>>;
-    
+
     /// Get source health status
     async fn health(&self) -> SourceHealth;
-    
+
     /// Source name
     fn name(&self) -> &str;
 }

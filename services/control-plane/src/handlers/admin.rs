@@ -10,11 +10,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::info;
 
-use crate::{
-    models::*,
-    middleware::AdminContext,
-    AppState,
-};
+use crate::{middleware::AdminContext, models::*, AppState};
 
 const MASKED_VALUE: &str = "********";
 
@@ -25,12 +21,11 @@ pub async fn list_config(
 ) -> Result<Json<ConfigListResponse>, (StatusCode, String)> {
     info!("Admin {} listing platform config", admin.admin_id);
 
-    let configs: Vec<PlatformConfig> = sqlx::query_as(
-        "SELECT * FROM platform_config ORDER BY category, key"
-    )
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let configs: Vec<PlatformConfig> =
+        sqlx::query_as("SELECT * FROM platform_config ORDER BY category, key")
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Collect unique categories
     let categories: Vec<String> = configs
@@ -71,16 +66,17 @@ pub async fn get_config(
 ) -> Result<Json<ConfigEntry>, (StatusCode, String)> {
     info!("Admin {} getting config key: {}", admin.admin_id, key);
 
-    let config: PlatformConfig = sqlx::query_as(
-        "SELECT * FROM platform_config WHERE key = $1"
-    )
-    .bind(&key)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| match e {
-        sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, format!("Config key '{}' not found", key)),
-        _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    })?;
+    let config: PlatformConfig = sqlx::query_as("SELECT * FROM platform_config WHERE key = $1")
+        .bind(&key)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => (
+                StatusCode::NOT_FOUND,
+                format!("Config key '{}' not found", key),
+            ),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
 
     Ok(Json(ConfigEntry {
         key: config.key,
@@ -103,19 +99,22 @@ pub async fn update_config(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(request): Json<UpdateConfigRequest>,
 ) -> Result<Json<UpdateConfigResponse>, (StatusCode, String)> {
-    info!("Admin {} updating {} config entries", admin.admin_id, request.updates.len());
+    info!(
+        "Admin {} updating {} config entries",
+        admin.admin_id,
+        request.updates.len()
+    );
 
     let mut updated = Vec::new();
     let mut failed = Vec::new();
 
     for update in request.updates {
         // Get current config to check if it exists and if encrypted
-        let current: Result<PlatformConfig, _> = sqlx::query_as(
-            "SELECT * FROM platform_config WHERE key = $1"
-        )
-        .bind(&update.key)
-        .fetch_one(&state.db)
-        .await;
+        let current: Result<PlatformConfig, _> =
+            sqlx::query_as("SELECT * FROM platform_config WHERE key = $1")
+                .bind(&update.key)
+                .fetch_one(&state.db)
+                .await;
 
         let config = match current {
             Ok(c) => c,
@@ -194,7 +193,10 @@ pub async fn update_config(
         .execute(&state.db)
         .await;
 
-        info!("Config '{}' updated by admin {}", update.key, admin.admin_id);
+        info!(
+            "Config '{}' updated by admin {}",
+            update.key, admin.admin_id
+        );
         updated.push(update.key);
     }
 
@@ -208,12 +210,11 @@ pub async fn get_audit_log(
 ) -> Result<Json<Vec<ConfigAuditLog>>, (StatusCode, String)> {
     info!("Admin {} viewing audit log", admin.admin_id);
 
-    let logs: Vec<ConfigAuditLog> = sqlx::query_as(
-        "SELECT * FROM config_audit_log ORDER BY changed_at DESC LIMIT 100"
-    )
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let logs: Vec<ConfigAuditLog> =
+        sqlx::query_as("SELECT * FROM config_audit_log ORDER BY changed_at DESC LIMIT 100")
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(logs))
 }
@@ -224,7 +225,10 @@ pub async fn test_webhook(
     Extension(admin): Extension<AdminContext>,
     Json(request): Json<TestWebhookRequest>,
 ) -> Result<Json<TestWebhookResponse>, (StatusCode, String)> {
-    info!("Admin {} testing {} webhook", admin.admin_id, request.webhook_type);
+    info!(
+        "Admin {} testing {} webhook",
+        admin.admin_id, request.webhook_type
+    );
 
     // Get webhook URL from config
     let webhook_key = match request.webhook_type.as_str() {
@@ -238,12 +242,11 @@ pub async fn test_webhook(
         }
     };
 
-    let config: Result<PlatformConfig, _> = sqlx::query_as(
-        "SELECT * FROM platform_config WHERE key = $1"
-    )
-    .bind(webhook_key)
-    .fetch_one(&state.db)
-    .await;
+    let config: Result<PlatformConfig, _> =
+        sqlx::query_as("SELECT * FROM platform_config WHERE key = $1")
+            .bind(webhook_key)
+            .fetch_one(&state.db)
+            .await;
 
     let config = match config {
         Ok(c) => c,
@@ -337,7 +340,7 @@ pub async fn sync_env_to_db(
             // Update config
             let result = sqlx::query(
                 "UPDATE platform_config SET value = $1, updated_at = NOW(), updated_by = $2
-                 WHERE key = $3 AND (value = '' OR value IS NULL)"
+                 WHERE key = $3 AND (value = '' OR value IS NULL)",
             )
             .bind(&value_to_store)
             .bind(&admin.admin_id)

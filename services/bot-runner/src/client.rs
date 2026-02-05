@@ -24,9 +24,7 @@ pub struct ControlPlaneClient {
 impl ControlPlaneClient {
     /// Create new control plane client
     pub fn new(base_url: &str, bot_id: Uuid) -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()?;
+        let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
 
         Ok(Self {
             client,
@@ -77,7 +75,9 @@ impl ControlPlaneClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("{} failed after {} retries", operation, MAX_RETRIES)))
+        Err(last_error.unwrap_or_else(|| {
+            anyhow::anyhow!("{} failed after {} retries", operation, MAX_RETRIES)
+        }))
     }
 
     /// Register bot with control plane on first boot
@@ -102,7 +102,11 @@ impl ControlPlaneClient {
         } else {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            Err(anyhow::anyhow!("Registration failed: {} - {}", status, text))
+            Err(anyhow::anyhow!(
+                "Registration failed: {} - {}",
+                status,
+                text
+            ))
         }
     }
 
@@ -124,7 +128,11 @@ impl ControlPlaneClient {
         } else {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            Err(anyhow::anyhow!("Wallet report failed: {} - {}", status, text))
+            Err(anyhow::anyhow!(
+                "Wallet report failed: {} - {}",
+                status,
+                text
+            ))
         }
     }
 

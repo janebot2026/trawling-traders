@@ -5,8 +5,8 @@
 //! not environment variables.
 
 use axum::Router;
-use std::sync::Arc;
 use sqlx::PgPool;
+use std::sync::Arc;
 
 /// Build full Cedros Pay router
 ///
@@ -16,11 +16,10 @@ use sqlx::PgPool;
 /// at /v1/pay/admin/config. Server URL is derived from platform_config.
 pub async fn full_router(pool: PgPool) -> anyhow::Result<Router> {
     // Get control_plane_url from platform_config for server public URL
-    let control_plane_url: Option<String> = sqlx::query_scalar(
-        "SELECT value FROM platform_config WHERE key = 'control_plane_url'"
-    )
-    .fetch_optional(&pool)
-    .await?;
+    let control_plane_url: Option<String> =
+        sqlx::query_scalar("SELECT value FROM platform_config WHERE key = 'control_plane_url'")
+            .fetch_optional(&pool)
+            .await?;
 
     let public_url = control_plane_url
         .filter(|s| !s.is_empty())
@@ -50,11 +49,7 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<Router> {
 
     // Build Cedros Pay router with shared pool
     // cedros-pay will load Stripe/X402 config from its own admin-managed tables
-    let pay_router = cedros_pay::router_with_pool(
-        &cfg,
-        store,
-        Some(pool),
-    ).await?;
+    let pay_router = cedros_pay::router_with_pool(&cfg, store, Some(pool)).await?;
 
     Ok(pay_router)
 }
@@ -62,7 +57,7 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<Router> {
 /// Simple placeholder routes (used when full integration not configured)
 pub fn placeholder_routes() -> Router {
     use axum::routing::get;
-    
+
     Router::new()
         .route("/discovery", get(discovery))
         .route("/health", get(health))
@@ -84,7 +79,7 @@ async fn discovery() -> axum::Json<serde_json::Value> {
             },
             {
                 "id": "check_subscription",
-                "name": "Check Subscription Status", 
+                "name": "Check Subscription Status",
                 "description": "Get user's current subscription status",
                 "endpoint": "GET /v1/pay/subscription/status"
             }

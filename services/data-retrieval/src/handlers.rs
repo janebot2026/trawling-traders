@@ -30,7 +30,7 @@ pub async fn get_price(
 ) -> Result<Json<PriceResponse>, (StatusCode, String)> {
     let symbol = query.symbol.to_uppercase();
     let quote = query.quote.to_uppercase();
-    
+
     info!("Fetching price for {}/{}", symbol, quote);
 
     // Route to appropriate source based on asset class (using consistent AssetClass enum)
@@ -48,7 +48,11 @@ pub async fn get_price(
         }
         AssetClass::Crypto => {
             // Use aggregator for crypto
-            match state.price_aggregator.get_price_realtime(&symbol, &quote).await {
+            match state
+                .price_aggregator
+                .get_price_realtime(&symbol, &quote)
+                .await
+            {
                 Ok(p) => p,
                 Err(e) => {
                     warn!("Aggregator error for {}: {}", symbol, e);
@@ -57,7 +61,7 @@ pub async fn get_price(
             }
         }
     };
-    
+
     Ok(Json(PriceResponse {
         symbol: price.symbol,
         price: price.price,
@@ -74,7 +78,7 @@ pub async fn get_prices_batch(
 ) -> Result<Json<BatchPriceResponse>, (StatusCode, String)> {
     let mut results = HashMap::new();
     let mut errors = Vec::new();
-    
+
     for symbol in &req.symbols {
         let sym = symbol.to_uppercase();
 
@@ -84,27 +88,32 @@ pub async fn get_prices_batch(
             AssetClass::Stock | AssetClass::Etf | AssetClass::Metal => {
                 state.pyth_client.get_price(&sym).await.ok()
             }
-            AssetClass::Crypto => {
-                state.price_aggregator.get_price_realtime(&sym, "USD").await.ok()
-            }
+            AssetClass::Crypto => state
+                .price_aggregator
+                .get_price_realtime(&sym, "USD")
+                .await
+                .ok(),
         };
-        
+
         match price {
             Some(p) => {
-                results.insert(sym.clone(), PriceResponse {
-                    symbol: p.symbol,
-                    price: p.price,
-                    source: p.source,
-                    timestamp: p.timestamp,
-                    confidence: p.confidence,
-                });
+                results.insert(
+                    sym.clone(),
+                    PriceResponse {
+                        symbol: p.symbol,
+                        price: p.price,
+                        source: p.source,
+                        timestamp: p.timestamp,
+                        confidence: p.confidence,
+                    },
+                );
             }
             None => {
                 errors.push(sym);
             }
         }
     }
-    
+
     Ok(Json(BatchPriceResponse {
         prices: results,
         errors,
@@ -116,7 +125,7 @@ pub async fn get_supported_symbols(
     State(state): State<Arc<AppState>>,
 ) -> Json<SupportedSymbolsResponse> {
     let supported = state.price_aggregator.get_supported_symbols();
-    
+
     Json(SupportedSymbolsResponse {
         crypto: supported.crypto.iter().map(|s| s.to_string()).collect(),
         stocks: supported.stocks.iter().map(|s| s.to_string()).collect(),
@@ -126,15 +135,17 @@ pub async fn get_supported_symbols(
 }
 
 /// GET /health - Service health check
-pub async fn health_check(
-    State(state): State<Arc<AppState>>,
-) -> Json<HealthResponse> {
+pub async fn health_check(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
     let source_health = state.price_aggregator.health_check().await;
-    
+
     let all_healthy = source_health.iter().all(|h| h.is_healthy);
-    
+
     Json(HealthResponse {
-        status: if all_healthy { "healthy".to_string() } else { "degraded".to_string() },
+        status: if all_healthy {
+            "healthy".to_string()
+        } else {
+            "degraded".to_string()
+        },
         sources: source_health,
     })
 }

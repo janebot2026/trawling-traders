@@ -1,8 +1,5 @@
+use axum::{routing::get, Router};
 use std::sync::Arc;
-use axum::{
-    routing::get,
-    Router,
-};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn, Level};
@@ -17,16 +14,14 @@ pub struct AppState {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize logging
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .init();
-    
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+
     info!("Starting Data Retrieval Service...");
-    
+
     // Initialize CoinGecko client (REST) for crypto
     let coingecko = Arc::new(data_retrieval::CoinGeckoClient::new(None));
     info!("✓ CoinGecko client initialized");
-    
+
     // Initialize Binance WebSocket (real-time) for crypto - optional, may be geo-blocked
     let binance_ws = match data_retrieval::BinanceWebSocketClient::new().await {
         Ok(client) => {
@@ -45,7 +40,10 @@ async fn main() -> anyhow::Result<()> {
             Some(ws)
         }
         Err(e) => {
-            warn!("⚠ Binance WebSocket unavailable ({}), continuing without real-time data", e);
+            warn!(
+                "⚠ Binance WebSocket unavailable ({}), continuing without real-time data",
+                e
+            );
             None
         }
     };
@@ -64,35 +62,38 @@ async fn main() -> anyhow::Result<()> {
         aggregator.start_realtime_consumer().await;
         info!("✓ Real-time price consumer started");
     }
-    
+
     // Create app state
     let state = Arc::new(AppState {
         price_aggregator: aggregator,
         pyth_client,
     });
-    
+
     // Build router
     let app = Router::new()
         .route("/prices/{symbol}", get(handlers::get_price))
         .route("/prices", get(handlers::get_price))
-        .route("/prices/batch", axum::routing::post(handlers::get_prices_batch))
+        .route(
+            "/prices/batch",
+            axum::routing::post(handlers::get_prices_batch),
+        )
         .route("/prices/supported", get(handlers::get_supported_symbols))
         .route("/health", get(handlers::health_check))
         .layer(CorsLayer::new().allow_origin(Any))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
-    
+
     // Start server
     let port = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8080);
-    
+
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
     info!("🚀 Data Retrieval Service listening on port {}", port);
-    
+
     axum::serve(listener, app).await?;
-    
+
     Ok(())
 }
 

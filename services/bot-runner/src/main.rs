@@ -41,7 +41,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Load configuration from environment
     let config = Config::from_env()?;
-    info!("Bot ID: {}, Control Plane: {}", config.bot_id, config.control_plane_url);
+    info!(
+        "Bot ID: {}, Control Plane: {}",
+        config.bot_id, config.control_plane_url
+    );
 
     // Create control plane client
     let client = Arc::new(ControlPlaneClient::new(
@@ -60,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
 async fn register_bot(client: &ControlPlaneClient) -> anyhow::Result<()> {
     // Get wallet address if available
     let wallet = std::env::var("AGENT_WALLET").ok();
-    
+
     match client.register(wallet.clone()).await {
         Ok(_) => {
             info!("✓ Bot registered with control plane");

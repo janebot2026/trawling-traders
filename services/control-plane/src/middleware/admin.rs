@@ -3,13 +3,7 @@
 //! Validates that the authenticated user has admin privileges.
 //! Must be used after auth_middleware in the middleware stack.
 
-use axum::{
-    body::Body,
-    extract::Request,
-    http::StatusCode,
-    middleware::Next,
-    response::Response,
-};
+use axum::{body::Body, extract::Request, http::StatusCode, middleware::Next, response::Response};
 use serde::{Deserialize, Serialize};
 
 use super::AuthContext;
@@ -39,7 +33,9 @@ pub async fn admin_middleware(
         .get::<AuthContext>()
         .cloned()
         .ok_or_else(|| {
-            tracing::error!("admin_middleware: AuthContext not found - ensure auth_middleware runs first");
+            tracing::error!(
+                "admin_middleware: AuthContext not found - ensure auth_middleware runs first"
+            );
             StatusCode::UNAUTHORIZED
         })?;
 

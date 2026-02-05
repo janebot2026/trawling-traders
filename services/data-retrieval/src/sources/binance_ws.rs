@@ -3,8 +3,8 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde_json::Value;
-use std::str::FromStr;
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -39,11 +39,9 @@ impl BinanceWebSocketClient {
         // Binance WebSocket URL for combined streams
         let url = "wss://stream.binance.com:9443/ws";
 
-        let (ws_stream, _) = connect_async(url)
-            .await
-            .map_err(|e| DataRetrievalError::ApiError(format!(
-                "WebSocket connection failed: {}", e
-            )))?;
+        let (ws_stream, _) = connect_async(url).await.map_err(|e| {
+            DataRetrievalError::ApiError(format!("WebSocket connection failed: {}", e))
+        })?;
 
         info!("Connected to Binance WebSocket");
 
@@ -83,36 +81,32 @@ impl BinanceWebSocketClient {
             connected: Arc::clone(&self.connected),
         }
     }
-    
+
     /// Subscribe to real-time trades for a symbol
-    pub async fn subscribe_trades(&self,
-        symbol: &str,
-    ) -> Result<()> {
+    pub async fn subscribe_trades(&self, symbol: &str) -> Result<()> {
         let stream_name = format!("{}@trade", symbol.to_lowercase());
-        
+
         {
             let subs = self.subscriptions.read().await;
             if subs.contains_key(symbol) {
                 return Ok(()); // Already subscribed
             }
         }
-        
+
         let subscribe_msg = serde_json::json!({
             "method": "SUBSCRIBE",
             "params": [&stream_name],
             "id": 1,
         });
-        
+
         let msg = Message::Text(subscribe_msg.to_string());
 
         // Use ws_sink (write half) - doesn't block message handler
         {
             let mut sink = self.ws_sink.lock().await;
-            sink.send(msg).await.map_err(|e| {
-                DataRetrievalError::ApiError(format!(
-                    "Failed to subscribe: {}", e
-                ))
-            })?;
+            sink.send(msg)
+                .await
+                .map_err(|e| DataRetrievalError::ApiError(format!("Failed to subscribe: {}", e)))?;
         }
 
         {
@@ -151,21 +145,19 @@ impl BinanceWebSocketClient {
         {
             let mut sink = self.ws_sink.lock().await;
             sink.send(msg).await.map_err(|e| {
-                DataRetrievalError::ApiError(format!(
-                    "Failed to subscribe to klines: {}", e
-                ))
+                DataRetrievalError::ApiError(format!("Failed to subscribe to klines: {}", e))
             })?;
         }
-        
+
         {
             let mut subs = self.subscriptions.write().await;
             subs.insert(format!("{}_kline_{}", symbol, interval), stream_name);
         }
-        
+
         info!("Subscribed to {} {} klines", symbol, interval);
         Ok(())
     }
-    
+
     /// Handle incoming WebSocket messages
     ///
     /// Uses the read half (ws_reader) so subscriptions can be sent
@@ -216,15 +208,12 @@ impl BinanceWebSocketClient {
 
         warn!("WebSocket message handler exited");
     }
-    
+
     /// Process a single message
-    async fn process_message(
-        &self,
-        text: &str,
-    ) -> Result<()> {
+    async fn process_message(&self, text: &str) -> Result<()> {
         let value: Value = serde_json::from_str(text)
             .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()))?;
-        
+
         // Check if it's a trade or kline message
         if let Some(event_type) = value.get("e").and_then(|v| v.as_str()) {
             match event_type {
@@ -239,36 +228,30 @@ impl BinanceWebSocketClient {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Process trade message
-    async fn process_trade(
-        &self,
-        value: &Value,
-    ) -> Result<()> {
-        let symbol = value.get("s")
+    async fn process_trade(&self, value: &Value) -> Result<()> {
+        let symbol = value
+            .get("s")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| DataRetrievalError::InvalidResponse(
-                "Missing symbol".to_string()
-            ))?;
-        
-        let price_str = value.get("p")
+            .ok_or_else(|| DataRetrievalError::InvalidResponse("Missing symbol".to_string()))?;
+
+        let price_str = value
+            .get("p")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| DataRetrievalError::InvalidResponse(
-                "Missing price".to_string()
-            ))?;
-        
-        let timestamp_ms = value.get("T")
+            .ok_or_else(|| DataRetrievalError::InvalidResponse("Missing price".to_string()))?;
+
+        let timestamp_ms = value
+            .get("T")
             .and_then(|v| v.as_i64())
-            .ok_or_else(|| DataRetrievalError::InvalidResponse(
-                "Missing timestamp".to_string()
-            ))?;
+            .ok_or_else(|| DataRetrievalError::InvalidResponse("Missing timestamp".to_string()))?;
 
         // Convert millisecond timestamp to DateTime<Utc>
-        let timestamp = chrono::DateTime::from_timestamp_millis(timestamp_ms)
-            .unwrap_or_else(chrono::Utc::now);
+        let timestamp =
+            chrono::DateTime::from_timestamp_millis(timestamp_ms).unwrap_or_else(chrono::Utc::now);
 
         // Parse directly to Decimal to avoid f64 precision loss
         let price = Decimal::from_str(price_str)
@@ -276,9 +259,9 @@ impl BinanceWebSocketClient {
 
         // Format symbol as BTC/USDT from BTCUSDT
         let formatted_symbol = if symbol.ends_with("USDT") {
-            format!("{}/USDT", &symbol[..symbol.len()-4])
+            format!("{}/USDT", &symbol[..symbol.len() - 4])
         } else if symbol.ends_with("USD") {
-            format!("{}/USD", &symbol[..symbol.len()-3])
+            format!("{}/USD", &symbol[..symbol.len() - 3])
         } else {
             symbol.to_string()
         };
@@ -290,66 +273,55 @@ impl BinanceWebSocketClient {
             timestamp,
             confidence: Some(0.95), // Binance is real-time exchange data
         };
-        
+
         // Send to channel
         if let Err(e) = self.price_tx.send(price_point).await {
             warn!("Failed to send price update: {}", e);
         }
-        
+
         Ok(())
     }
-    
+
     /// Process kline (candlestick) message
-    async fn process_kline(
-        &self,
-        value: &Value,
-    ) -> Result<()> {
+    async fn process_kline(&self, value: &Value) -> Result<()> {
         // Kline messages have a nested "k" object
-        let kline = value.get("k")
-            .ok_or_else(|| DataRetrievalError::InvalidResponse(
-                "Missing kline data".to_string()
-            ))?;
-        
-        let symbol = value.get("s")
-            .and_then(|v| v.as_str())
-            .unwrap_or("UNKNOWN");
-        
-        let is_closed = kline.get("x")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        
+        let kline = value
+            .get("k")
+            .ok_or_else(|| DataRetrievalError::InvalidResponse("Missing kline data".to_string()))?;
+
+        let symbol = value.get("s").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
+
+        let is_closed = kline.get("x").and_then(|v| v.as_bool()).unwrap_or(false);
+
         // Only process closed candles for OHLCV
         if !is_closed {
             return Ok(());
         }
-        
+
         debug!("Kline closed for {}: {:?}", symbol, kline);
-        
+
         // TODO: Send to candle channel for aggregation
-        
+
         Ok(())
     }
-    
+
     /// Receive the next price update
-    pub async fn next_price(&self,
-    ) -> Option<PricePoint> {
+    pub async fn next_price(&self) -> Option<PricePoint> {
         let mut rx = self.price_rx.lock().await;
         rx.recv().await
     }
-    
+
     /// Get latest price for a symbol (non-blocking)
-    pub async fn try_recv_price(&self,
-    ) -> Option<PricePoint> {
+    pub async fn try_recv_price(&self) -> Option<PricePoint> {
         let mut rx = self.price_rx.lock().await;
         rx.try_recv().ok()
     }
-    
+
     /// Check if connected
-    pub async fn is_connected(&self,
-    ) -> bool {
+    pub async fn is_connected(&self) -> bool {
         *self.connected.read().await
     }
-    
+
     /// Reconnect to WebSocket
     ///
     /// Uses interior mutability (Arc<Mutex>) so this can be called from shared references.
@@ -359,9 +331,7 @@ impl BinanceWebSocketClient {
         // Connect new WebSocket
         let (ws_stream, _) = connect_async("wss://stream.binance.com:9443/ws")
             .await
-            .map_err(|e| DataRetrievalError::ApiError(format!(
-                "Reconnection failed: {}", e
-            )))?;
+            .map_err(|e| DataRetrievalError::ApiError(format!("Reconnection failed: {}", e)))?;
 
         // Split into read/write halves
         let (ws_sink, ws_reader) = ws_stream.split();
@@ -394,9 +364,7 @@ impl BinanceWebSocketClient {
             {
                 let mut sink = self.ws_sink.lock().await;
                 sink.send(msg).await.map_err(|e| {
-                    DataRetrievalError::ApiError(format!(
-                        "Resubscription failed: {}", e
-                    ))
+                    DataRetrievalError::ApiError(format!("Resubscription failed: {}", e))
                 })?;
             }
         }
@@ -425,9 +393,7 @@ impl BinanceWebSocketClient {
         {
             let mut sink = self.ws_sink.lock().await;
             sink.close().await.map_err(|e| {
-                DataRetrievalError::ApiError(format!(
-                    "Failed to close WebSocket: {}", e
-                ))
+                DataRetrievalError::ApiError(format!("Failed to close WebSocket: {}", e))
             })?;
         }
 
@@ -443,22 +409,22 @@ impl BinanceWebSocketClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_connect() {
         let client = BinanceWebSocketClient::new().await.unwrap();
         assert!(client.is_connected().await);
-        
+
         // Subscribe to BTC
         client.subscribe_trades("BTCUSDT").await.unwrap();
-        
+
         // Wait a bit for connection
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        
+
         // Try to receive a trade
         let timeout = tokio::time::Duration::from_secs(10);
         let price = tokio::time::timeout(timeout, client.next_price()).await;
-        
+
         match price {
             Ok(Some(p)) => {
                 println!("Received price: {} = ${}", p.symbol, p.price);
@@ -468,7 +434,7 @@ mod tests {
             Ok(None) => println!("Channel closed"),
             Err(_) => println!("Timeout - no trades received"),
         }
-        
+
         client.close().await.unwrap();
     }
 }

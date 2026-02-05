@@ -10,13 +10,12 @@ use sqlx::PgPool;
 ///
 /// Returns None if key doesn't exist or value is empty.
 pub async fn get_config(pool: &PgPool, key: &str) -> Option<String> {
-    let result: Option<(String, bool)> = sqlx::query_as(
-        "SELECT value, encrypted FROM platform_config WHERE key = $1"
-    )
-    .bind(key)
-    .fetch_optional(pool)
-    .await
-    .ok()?;
+    let result: Option<(String, bool)> =
+        sqlx::query_as("SELECT value, encrypted FROM platform_config WHERE key = $1")
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .ok()?;
 
     match result {
         Some((value, _encrypted)) if !value.is_empty() => Some(value),
@@ -32,13 +31,12 @@ pub async fn get_config_decrypted(
     secrets: &SecretsManager,
     key: &str,
 ) -> Option<String> {
-    let result: Option<(String, bool)> = sqlx::query_as(
-        "SELECT value, encrypted FROM platform_config WHERE key = $1"
-    )
-    .bind(key)
-    .fetch_optional(pool)
-    .await
-    .ok()?;
+    let result: Option<(String, bool)> =
+        sqlx::query_as("SELECT value, encrypted FROM platform_config WHERE key = $1")
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .ok()?;
 
     match result {
         Some((value, encrypted)) if !value.is_empty() => {
@@ -54,7 +52,9 @@ pub async fn get_config_decrypted(
 
 /// Get a configuration value with a default fallback
 pub async fn get_config_or(pool: &PgPool, key: &str, default: &str) -> String {
-    get_config(pool, key).await.unwrap_or_else(|| default.to_string())
+    get_config(pool, key)
+        .await
+        .unwrap_or_else(|| default.to_string())
 }
 
 /// Get a decrypted configuration value with a default fallback
