@@ -58,8 +58,12 @@ async fn main() -> anyhow::Result<()> {
     
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
     info!("🚀 Control Plane listening on port {}", port);
-    
-    axum::serve(listener, app).await?;
+
+    // Use into_make_service_with_connect_info to enable ConnectInfo for IP tracking
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>()
+    ).await?;
     
     Ok(())
 }
@@ -121,6 +125,23 @@ async fn build_router(
         ))
         .with_state(state.clone());
     
+    // Admin routes (require auth + admin check)
+    let admin_routes = Router::new()
+        .route("/config", get(control_plane::handlers::admin::list_config))
+        .route("/config/{key}", get(control_plane::handlers::admin::get_config))
+        .route("/config", patch(control_plane::handlers::admin::update_config))
+        .route("/config/audit", get(control_plane::handlers::admin::get_audit_log))
+        .route("/config/test-webhook", post(control_plane::handlers::admin::test_webhook))
+        .route("/config/sync-env", post(control_plane::handlers::admin::sync_env_to_db))
+        .layer(axum::middleware::from_fn(
+            control_plane::middleware::admin_middleware
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            control_plane::middleware::auth_middleware
+        ))
+        .with_state(state.clone());
+
     // Cedros Pay routes - try full integration, fallback to placeholder
     let cedros_routes = match control_plane::cedros::full_router(pool).await {
         Ok(router) => {
@@ -132,14 +153,15 @@ async fn build_router(
             control_plane::cedros::placeholder_routes()
         }
     };
-    
+
     // Build combined router
     let router = Router::new()
         .nest("/v1", app_routes)
         .nest("/v1", bot_routes)
+        .nest("/v1/admin", admin_routes)
         .nest("/v1/pay", cedros_routes)
         .layer(cors)
         .layer(TraceLayer::new_for_http());
-    
+
     Ok(router)
 }

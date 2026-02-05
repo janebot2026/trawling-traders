@@ -466,3 +466,91 @@ pub struct RegistrationResponse {
     pub status: String,
     pub config_url: String,
 }
+
+// ============================================================================
+// Platform Configuration (Admin)
+// ============================================================================
+
+/// Platform configuration entry from database
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct PlatformConfig {
+    pub key: String,
+    #[serde(skip_serializing_if = "is_encrypted_value")]
+    pub value: String,
+    pub encrypted: bool,
+    pub description: Option<String>,
+    pub category: String,
+    pub updated_at: DateTime<Utc>,
+    pub updated_by: Option<String>,
+}
+
+fn is_encrypted_value(_: &String) -> bool {
+    false // We'll handle masking in the handler
+}
+
+/// Config entry for API responses (masks encrypted values)
+#[derive(Debug, Serialize)]
+pub struct ConfigEntry {
+    pub key: String,
+    pub value: String,
+    pub encrypted: bool,
+    pub description: Option<String>,
+    pub category: String,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Response for listing all config
+#[derive(Debug, Serialize)]
+pub struct ConfigListResponse {
+    pub configs: Vec<ConfigEntry>,
+    pub categories: Vec<String>,
+}
+
+/// Request to update config values
+#[derive(Debug, Deserialize)]
+pub struct UpdateConfigRequest {
+    pub updates: Vec<ConfigUpdate>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConfigUpdate {
+    pub key: String,
+    pub value: String,
+}
+
+/// Response after updating config
+#[derive(Debug, Serialize)]
+pub struct UpdateConfigResponse {
+    pub updated: Vec<String>,
+    pub failed: Vec<ConfigUpdateError>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConfigUpdateError {
+    pub key: String,
+    pub error: String,
+}
+
+/// Config audit log entry
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct ConfigAuditLog {
+    pub id: Uuid,
+    pub config_key: String,
+    pub old_value: Option<String>,
+    pub new_value: Option<String>,
+    pub changed_by: String,
+    pub changed_at: DateTime<Utc>,
+    pub ip_address: Option<String>,
+}
+
+/// Request to test webhook
+#[derive(Debug, Deserialize)]
+pub struct TestWebhookRequest {
+    pub webhook_type: String, // "discord" or "email"
+}
+
+#[derive(Debug, Serialize)]
+pub struct TestWebhookResponse {
+    pub success: bool,
+    pub message: String,
+}
