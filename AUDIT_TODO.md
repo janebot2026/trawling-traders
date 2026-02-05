@@ -409,12 +409,14 @@
 - **Test Plan:** Security checklist
 - **Status:** Not started
 
-### [ ] INF-02: Duplicate index in migrations
+### [x] INF-02: Duplicate index in migrations
 - **Files:** `services/control-plane/migrations/002_add_agent_wallet_column.sql`
 - **Planned Fix:**
   - Remove duplicate index statement (already in 001)
 - **Test Plan:** Lint migrations
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** Index only in 001_initial_schema.sql
+- **Note:** Replaced with comment noting index exists in 001
 
 ### [ ] DR-11: Missing rate limit backoff
 - **Files:** `services/data-retrieval/src/sources/coingecko.rs`
@@ -632,9 +634,9 @@
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
 | High | 16 | 9 | 7 |
-| Medium | 32 | 0 | 32 |
+| Medium | 32 | 1 | 31 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **16** | **55** |
+| **Total** | **71** | **17** | **54** |
 
 ---
 
@@ -668,5 +670,6 @@
 | CP-07 | 9fd6f43d | 2026-02-04 | Replaced probabilistic cleanup with deterministic |
 | BR-08 | ec210837 | 2026-02-04 | Fixed slippage calc with Decimal and absolute value |
 | BR-09 | 7fa63286 | 2026-02-05 | Added retry logic with exponential backoff |
-| CP-05 | (pending) | 2026-02-05 | Transaction with FOR UPDATE for atomic bot creation |
+| CP-05 | 047bded5 | 2026-02-05 | Transaction with FOR UPDATE for atomic bot creation |
+| INF-02 | (pending) | 2026-02-05 | Removed duplicate index from migration 002 |
 
