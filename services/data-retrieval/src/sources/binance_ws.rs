@@ -350,7 +350,9 @@ impl BinanceWebSocketClient {
     }
     
     /// Reconnect to WebSocket
-    pub async fn reconnect(&mut self) -> Result<()> {
+    ///
+    /// Uses interior mutability (Arc<Mutex>) so this can be called from shared references.
+    pub async fn reconnect(&self) -> Result<()> {
         info!("Reconnecting to Binance WebSocket...");
 
         // Connect new WebSocket

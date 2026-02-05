@@ -19,6 +19,14 @@ use tracing::{info, warn};
 use chrono::{Duration, Utc};
 use std::collections::HashMap;
 
+/// Helper to reconnect WebSocket client
+///
+/// Delegates to client.reconnect() which uses interior mutability
+/// to replace the connection and resubscribe to streams.
+async fn reconnect_ws(client: &Arc<BinanceWebSocketClient>) -> Result<()> {
+    client.reconnect().await
+}
+
 /// Maximum number of symbols in the price cache (prevent unbounded growth)
 const MAX_CACHE_SIZE: usize = 10000;
 /// Price TTL in seconds (prices older than this are evicted)
@@ -108,17 +116,45 @@ impl PriceAggregator {
     }
     
     /// Start background task to consume real-time price updates
+    ///
+    /// Includes automatic reconnection with exponential backoff when disconnected.
     pub async fn start_realtime_consumer(&self,
     ) {
         let latest_prices = Arc::clone(&self.latest_prices);
-        
+
         for source in &self.realtime_sources {
             let source = Arc::clone(source);
             let prices = Arc::clone(&latest_prices);
-            
+
             tokio::spawn(async move {
                 let mut eviction_counter = 0u32;
+                let mut reconnect_delay_secs = 1u64;
+                const MAX_RECONNECT_DELAY: u64 = 60;
+
                 loop {
+                    // Check connection status and attempt reconnect if needed
+                    if !source.is_connected().await {
+                        warn!("WebSocket disconnected, attempting reconnect in {}s...", reconnect_delay_secs);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(reconnect_delay_secs)).await;
+
+                        // Clone the source for reconnection (need mutable access)
+                        // Note: reconnect() requires &mut self, so we work around via interior mutability
+                        // The reconnect method already handles this internally via Arc<Mutex>
+                        let source_clone = Arc::clone(&source);
+                        match reconnect_ws(&source_clone).await {
+                            Ok(()) => {
+                                info!("WebSocket reconnected successfully");
+                                reconnect_delay_secs = 1; // Reset backoff on success
+                            }
+                            Err(e) => {
+                                warn!("WebSocket reconnection failed: {}", e);
+                                // Exponential backoff, capped at MAX_RECONNECT_DELAY
+                                reconnect_delay_secs = (reconnect_delay_secs * 2).min(MAX_RECONNECT_DELAY);
+                                continue; // Try again after delay
+                            }
+                        }
+                    }
+
                     if let Some(price) = source.next_price().await {
                         // Use the symbol field directly
                         let key = price.symbol.clone();
@@ -153,8 +189,9 @@ impl PriceAggregator {
                             }
                         }
                     } else {
-                        // Channel closed or disconnected
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        // Channel returned None - likely disconnected
+                        // Short sleep before checking connection status again
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     }
                 }
             });
