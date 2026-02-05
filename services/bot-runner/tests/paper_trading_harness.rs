@@ -7,10 +7,7 @@ mod mock_executor;
 
 use bot_runner::{
     client::{EventInput, MetricInput},
-    config::{
-        AlgorithmMode, AssetFocus, BotConfig, ExecutionConfig, Persona, RiskCaps, Strictness,
-        TradingMode,
-    },
+    config::{AssetFocus, BotConfig, ExecutionConfig, Persona, RiskCaps, TradingMode},
     executor::{TradeError, TradeSide, TradeStage},
     intent::{IntentRegistry, TradeIntentState},
     portfolio::{Portfolio, Position},
@@ -68,8 +65,6 @@ pub fn create_test_config(version: i32) -> BotConfig {
         name: format!("TestBot-v{}", version),
         persona: Persona::Beginner,
         asset_focus: AssetFocus::Majors,
-        algorithm_mode: AlgorithmMode::Trend,
-        strictness: Strictness::Medium,
         trading_mode: TradingMode::Paper,
         risk_caps: RiskCaps {
             max_position_size_percent: 10,
@@ -85,6 +80,9 @@ pub fn create_test_config(version: i32) -> BotConfig {
         },
         llm_provider: "test".to_string(),
         llm_api_key: "test".to_string(),
+        strategy_preset: "conservative".to_string(),
+        strategy_params: serde_json::json!({}),
+        asset_universe: vec![],
     }
 }
 

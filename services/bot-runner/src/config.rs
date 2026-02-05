@@ -69,13 +69,38 @@ pub struct BotConfig {
     pub name: String,
     pub persona: Persona,
     pub asset_focus: AssetFocus,
-    pub algorithm_mode: AlgorithmMode,
-    pub strictness: Strictness,
     pub trading_mode: TradingMode,
     pub risk_caps: RiskCaps,
     pub execution: ExecutionConfig,
     pub llm_provider: String,
     pub llm_api_key: String,
+    /// OpenClaw strategy preset (e.g., "conservative", "momentum", "arbitrage")
+    #[serde(default = "default_strategy_preset")]
+    pub strategy_preset: String,
+    /// Strategy-specific parameters (preset-dependent)
+    #[serde(default)]
+    pub strategy_params: serde_json::Value,
+    /// Tradeable asset universe
+    #[serde(default)]
+    pub asset_universe: Vec<AssetSpec>,
+}
+
+fn default_strategy_preset() -> String {
+    "conservative".to_string()
+}
+
+/// Asset specification for trading universe
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AssetSpec {
+    pub symbol: String,
+    pub mint: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    pub max_allocation_pct: Option<i32>,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 impl BotConfig {
@@ -99,8 +124,6 @@ impl BotConfig {
             name: config.agent_config.name,
             persona: config.agent_config.persona,
             asset_focus: config.trading_params.asset_focus,
-            algorithm_mode: config.trading_params.algorithm_mode,
-            strictness: config.trading_params.strictness,
             trading_mode: config.trading_params.trading_mode,
             risk_caps: RiskCaps {
                 max_position_size_percent: config.agent_config.max_position_size_percent,
@@ -111,6 +134,9 @@ impl BotConfig {
             execution: config.execution.unwrap_or_default(),
             llm_provider: config.llm_config.provider,
             llm_api_key: config.llm_config.api_key,
+            strategy_preset: config.openclaw.strategy_preset,
+            strategy_params: config.openclaw.strategy_params,
+            asset_universe: config.openclaw.asset_universe,
         })
     }
 }
@@ -125,6 +151,29 @@ struct BotConfigInner {
     execution: Option<ExecutionConfig>,
     #[serde(rename = "llm_config")]
     llm_config: LlmConfigInner,
+    /// OpenClaw strategy configuration
+    #[serde(default)]
+    openclaw: OpenClawConfigInner,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OpenClawConfigInner {
+    #[serde(default = "default_strategy_preset")]
+    strategy_preset: String,
+    #[serde(default)]
+    strategy_params: serde_json::Value,
+    #[serde(default)]
+    asset_universe: Vec<AssetSpec>,
+}
+
+impl Default for OpenClawConfigInner {
+    fn default() -> Self {
+        Self {
+            strategy_preset: default_strategy_preset(),
+            strategy_params: serde_json::Value::Object(serde_json::Map::new()),
+            asset_universe: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -140,9 +189,8 @@ struct AgentConfigInner {
 #[derive(Debug, Clone, Deserialize, Default)]
 struct TradingParamsInner {
     asset_focus: AssetFocus,
-    algorithm_mode: AlgorithmMode,
-    strictness: Strictness,
     trading_mode: TradingMode,
+    // NOTE: algorithm_mode and strictness removed - OpenClaw now handles strategy decisions
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

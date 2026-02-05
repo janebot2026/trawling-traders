@@ -2,7 +2,6 @@
 
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
-use rust_decimal::MathematicalOps;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -171,6 +170,24 @@ pub struct NormalizedTradeResult {
     pub side: TradeSide,
     pub trading_mode: TradingMode,
     pub shield_result: Option<ShieldCheck>,
+}
+
+impl Default for NormalizedTradeResult {
+    fn default() -> Self {
+        Self {
+            intent_id: String::new(),
+            stage_reached: TradeStage::Blocked,
+            signature: None,
+            quote: QuoteData::default(),
+            execution: ExecutionData::default(),
+            error: None,
+            input_mint: String::new(),
+            output_mint: String::new(),
+            side: TradeSide::Buy,
+            trading_mode: TradingMode::Paper,
+            shield_result: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -908,124 +925,9 @@ impl From<NormalizedTradeResult> for TradeResult {
     }
 }
 
-// ==================== ALGORITHM SIGNAL GENERATORS ====================
-
-/// Generate trend-following signal
-pub fn generate_trend_signal(prices: &[Decimal], _current_price: Decimal) -> TradingSignal {
-    if prices.len() < 2 {
-        return TradingSignal::Hold;
-    }
-
-    // Simple SMA crossover logic
-    let short_period = prices.len() / 2;
-    let long_period = prices.len();
-
-    let sma_short = prices.iter().rev().take(short_period).sum::<Decimal>()
-        / Decimal::from(short_period as i64);
-    let sma_long = prices.iter().sum::<Decimal>() / Decimal::from(long_period as i64);
-
-    // Calculate trend strength
-    let diff = (sma_short - sma_long).abs();
-    let trend_strength = if sma_long != Decimal::ZERO {
-        diff / sma_long
-    } else {
-        Decimal::ZERO
-    };
-
-    // Map trend to confidence
-    let confidence = trend_strength
-        .to_string()
-        .parse::<f64>()
-        .unwrap_or(0.0)
-        .min(0.95);
-
-    if sma_short > sma_long && confidence > 0.5 {
-        TradingSignal::Buy { confidence }
-    } else if sma_short < sma_long && confidence > 0.5 {
-        TradingSignal::Sell { confidence }
-    } else {
-        TradingSignal::Hold
-    }
-}
-
-/// Generate mean reversion signal
-pub fn generate_reversion_signal(prices: &[Decimal], current_price: Decimal) -> TradingSignal {
-    if prices.is_empty() {
-        return TradingSignal::Hold;
-    }
-
-    // Calculate mean
-    let mean = prices.iter().sum::<Decimal>() / Decimal::from(prices.len() as i64);
-
-    // Calculate standard deviation
-    let variance = prices
-        .iter()
-        .map(|p| {
-            let diff = *p - mean;
-            diff * diff
-        })
-        .sum::<Decimal>()
-        / Decimal::from(prices.len() as i64);
-
-    let std_dev = variance.sqrt().unwrap_or(Decimal::ZERO);
-
-    if std_dev == Decimal::ZERO {
-        return TradingSignal::Hold;
-    }
-
-    // Calculate z-score
-    let z_score = (current_price - mean) / std_dev;
-    let z_f64 = z_score.to_string().parse::<f64>().unwrap_or(0.0);
-
-    // Extreme values indicate reversion opportunity
-    if z_f64 < -2.0 {
-        // Price 2 std dev below mean = buy signal (expect reversion up)
-        let confidence = z_f64.abs().min(0.95);
-        TradingSignal::Buy { confidence }
-    } else if z_f64 > 2.0 {
-        // Price 2 std dev above mean = sell signal (expect reversion down)
-        let confidence = z_f64.min(0.95);
-        TradingSignal::Sell { confidence }
-    } else {
-        TradingSignal::Hold
-    }
-}
-
-/// Generate breakout signal
-pub fn generate_breakout_signal(prices: &[Decimal], current_price: Decimal) -> TradingSignal {
-    if prices.len() < 5 {
-        return TradingSignal::Hold;
-    }
-
-    // Find recent high/low
-    let recent = &prices[prices.len().saturating_sub(5)..];
-    let high = recent.iter().max().copied().unwrap_or(current_price);
-    let low = recent.iter().min().copied().unwrap_or(current_price);
-
-    // Check for breakout (2% threshold)
-    let range = high - low;
-    let threshold_pct = Decimal::from_str_exact("0.02").unwrap_or(Decimal::ZERO);
-    let breakout_threshold = range * threshold_pct;
-
-    if current_price > high + breakout_threshold {
-        // Breakout above resistance
-        let confidence = 0.7;
-        TradingSignal::Buy { confidence }
-    } else if current_price < low - breakout_threshold {
-        // Breakdown below support
-        let confidence = 0.7;
-        TradingSignal::Sell { confidence }
-    } else {
-        TradingSignal::Hold
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum TradingSignal {
-    Buy { confidence: f64 },
-    Sell { confidence: f64 },
-    Hold,
-}
+// NOTE: Signal generation functions (generate_trend_signal, generate_reversion_signal,
+// generate_breakout_signal) have been removed. Trading decisions now come from OpenClaw gateway.
+// See runner.rs decision_tick() for the new flow.
 
 /// Convert symbol to mint address
 pub fn symbol_to_mint(symbol: &str) -> Option<&'static str> {

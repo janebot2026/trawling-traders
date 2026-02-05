@@ -1,24 +1,33 @@
 //! Bot Runner - Main orchestration loop
+//!
+//! Executes trading decisions from OpenClaw gateway and enforces risk rails.
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
-use crate::amount::{get_tokens_for_focus, to_raw_amount, TokenInfo};
 use crate::client::{ControlPlaneClient, EventInput, MetricInput};
-use crate::config::Config;
-use crate::config::{AlgorithmMode, BotConfig, Strictness, TradingMode};
-use crate::executor::{
-    generate_breakout_signal, generate_reversion_signal, generate_trend_signal,
-    NormalizedTradeResult, TradeExecutor, TradeSide, TradingSignal,
-};
-use crate::intent::{IntentRegistry, TradeIntent, TradeIntentState};
+use crate::config::{BotConfig, Config, TradingMode};
+use crate::executor::{NormalizedTradeResult, TradeExecutor, TradeSide};
+use crate::gateway::GatewayManager;
+use crate::intent::IntentRegistry;
+use crate::openclaw::OpenClawClient;
 use crate::portfolio::{Portfolio, PortfolioSnapshot};
 use crate::reconciler::HoldingsReconciler;
+use crate::types::{
+    DecisionContext, DecisionJournalEntry, ExecutionOutcome, Holding, IntentValidation,
+    LastTradeOutcome, OpenClawIntent, PortfolioSnapshot as OcPortfolioSnapshot, PriceQuote,
+    RiskRails, RunnerState, RunnerStatus, TradeAction, TradeEvent,
+};
+
+/// State directory for runner files
+const DEFAULT_STATE_DIR: &str = "/opt/bot-runner/state";
 
 /// Main bot runner that manages the trading loop
 pub struct BotRunner {
@@ -30,6 +39,20 @@ pub struct BotRunner {
     portfolio: Portfolio,
     reconciler: Option<HoldingsReconciler>,
     trade_count: u32,
+    /// OpenClaw gateway HTTP client
+    openclaw_client: OpenClawClient,
+    /// Gateway configuration manager
+    gateway_manager: GatewayManager,
+    /// State directory for runner files (now.json, journal/)
+    state_dir: PathBuf,
+    /// Current runner status
+    status: RunnerStatus,
+    /// Last decision plan ID
+    last_plan_id: Option<uuid::Uuid>,
+    /// Last trade outcome for state tracking
+    last_trade_outcome: Option<LastTradeOutcome>,
+    /// Daily realized PnL tracking
+    realized_pnl_today: Decimal,
 }
 
 impl BotRunner {
@@ -37,6 +60,23 @@ impl BotRunner {
     pub fn new(client: Arc<ControlPlaneClient>, config: Config) -> Self {
         // Initialize portfolio with starting cash
         let portfolio = Portfolio::new(Decimal::from(10000));
+
+        // Initialize OpenClaw components
+        let openclaw_client = OpenClawClient::new();
+        let gateway_manager = GatewayManager::new();
+
+        // State directory from env or default
+        let state_dir = std::env::var("BOT_STATE_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(DEFAULT_STATE_DIR));
+
+        // Ensure state directories exist
+        if let Err(e) = std::fs::create_dir_all(&state_dir) {
+            warn!("Failed to create state dir: {}", e);
+        }
+        if let Err(e) = std::fs::create_dir_all(state_dir.join("journal/decisions")) {
+            warn!("Failed to create journal dir: {}", e);
+        }
 
         Self {
             client,
@@ -47,6 +87,13 @@ impl BotRunner {
             portfolio,
             reconciler: None,
             trade_count: 0,
+            openclaw_client,
+            gateway_manager,
+            state_dir,
+            status: RunnerStatus::Idle,
+            last_plan_id: None,
+            last_trade_outcome: None,
+            realized_pnl_today: Decimal::ZERO,
         }
     }
 
@@ -120,8 +167,8 @@ impl BotRunner {
                     }
                 }
                 _ = trading_interval.tick() => {
-                    if let Err(e) = self.run_trading_cycle().await {
-                        error!("Trading cycle error: {}", e);
+                    if let Err(e) = self.decision_tick().await {
+                        error!("Decision tick error: {}", e);
                     }
                 }
                 _ = reconcile_interval.tick() => {
@@ -222,6 +269,19 @@ impl BotRunner {
             }
         }
 
+        // Render OpenClaw configuration files
+        if let Err(e) = self.gateway_manager.render_config(&config) {
+            error!("Failed to render OpenClaw config: {}", e);
+            // Continue anyway - gateway might work with existing config
+        } else {
+            // Reload gateway with new config
+            if self.gateway_manager.is_installed() {
+                if let Err(e) = self.gateway_manager.reload_gateway().await {
+                    warn!("Failed to reload gateway: {}", e);
+                }
+            }
+        }
+
         // Log mode
         match config.trading_mode {
             TradingMode::Paper => {
@@ -232,6 +292,9 @@ impl BotRunner {
             }
         }
 
+        // Get gateway version for event metadata
+        let gateway_version = self.gateway_manager.gateway_version().unwrap_or_default();
+
         // Send event
         let event = EventInput {
             event_type: "config_applied".to_string(),
@@ -240,10 +303,11 @@ impl BotRunner {
                 "version_id": config.version_id,
                 "version": config.version,
                 "persona": config.persona,
-                "algorithm": config.algorithm_mode,
+                "strategy_preset": config.strategy_preset,
                 "risk_caps": config.risk_caps,
                 "trading_mode": config.trading_mode,
                 "execution": config.execution,
+                "gateway_version": gateway_version,
             })),
             timestamp: chrono::Utc::now(),
         };
@@ -311,13 +375,13 @@ impl BotRunner {
         }
     }
 
-    /// Run one trading cycle - check signals and execute trades
-    async fn run_trading_cycle(&mut self) -> anyhow::Result<()> {
+    /// Run one decision tick - request decision from OpenClaw and execute
+    async fn decision_tick(&mut self) -> anyhow::Result<()> {
         // Check if we have config and executor
         let config = match &self.current_config {
             Some(c) => c.clone(),
             None => {
-                debug!("No config yet, skipping trading cycle");
+                debug!("No config yet, skipping decision tick");
                 return Ok(());
             }
         };
@@ -326,7 +390,7 @@ impl BotRunner {
         let max_trades = config.risk_caps.max_trades_per_day as u32;
         if self.trade_count >= max_trades {
             debug!(
-                "Daily trade limit reached ({}/{}), skipping trading cycle",
+                "Daily trade limit reached ({}/{}), skipping decision tick",
                 self.trade_count, max_trades
             );
             return Ok(());
@@ -337,55 +401,372 @@ impl BotRunner {
             return Ok(());
         }
 
-        // Get tokens for this asset focus
-        let tokens = get_tokens_for_focus(&config.asset_focus);
-        let usdc_info = crate::amount::get_token_info("USDC").unwrap();
-
-        // Check each token for trading signals
-        for token in tokens {
-            match self.evaluate_and_trade(&token, &usdc_info, &config).await {
-                Ok(Some((intent, result))) => {
-                    self.trade_count += 1;
-
-                    // Check if we just hit the limit
-                    if self.trade_count >= max_trades {
-                        info!(
-                            "Daily trade limit reached ({}/{}), no more trades until reset",
-                            self.trade_count, max_trades
-                        );
-                    }
-
-                    // Update portfolio based on trade result
-                    self.update_portfolio_from_trade(&result, &token, &usdc_info);
-
-                    // Emit standardized events based on trade stage
-                    self.emit_trade_events(&intent, &result, &config).await;
-
-                    info!(
-                        "Trade #{} for {} | Intent: {} | Stage: {:?} | TX: {:?}",
-                        self.trade_count,
-                        token.symbol,
-                        intent.id,
-                        result.stage_reached,
-                        result.signature
-                    );
-                }
-                Ok(None) => {
-                    debug!("No trade for {}", token.symbol);
-                }
-                Err(e) => {
-                    warn!("Error trading {}: {}", token.symbol, e);
-                }
-            }
+        // Check if OpenClaw gateway is available
+        if !self.openclaw_client.is_available().await {
+            debug!("OpenClaw gateway not available, skipping tick");
+            return Ok(());
         }
+
+        // Update status
+        self.status = RunnerStatus::Deciding;
+        self.write_state_file().ok();
+
+        // Build decision context
+        let context = self.build_decision_context(&config).await?;
+
+        // Write context to file for debugging
+        self.write_context_file(&context).ok();
+
+        // Request decision plan from OpenClaw
+        let plan = match self.openclaw_client.tick(&context).await {
+            Ok(plan) => plan,
+            Err(e) => {
+                warn!("OpenClaw decision request failed: {}", e);
+                self.status = RunnerStatus::Idle;
+                self.write_state_file().ok();
+                return Ok(());
+            }
+        };
+
+        info!(
+            "Received decision plan: plan_id={}, intents={}",
+            plan.plan_id,
+            plan.intents.len()
+        );
+
+        self.last_plan_id = Some(plan.plan_id);
+
+        // Update status
+        self.status = RunnerStatus::Executing;
+        self.write_state_file().ok();
+
+        // Validate and execute each intent
+        for intent in &plan.intents {
+            // Validate against hard risk rails
+            let validation = self.validate_intent(intent, &config);
+
+            // Write journal entry
+            let journal_entry = DecisionJournalEntry {
+                intent_id: intent.intent_id,
+                plan_id: plan.plan_id,
+                plan_hash: plan.plan_hash.clone(),
+                intent: intent.clone(),
+                validation: validation.clone(),
+                execution: None,
+                timestamp: chrono::Utc::now(),
+            };
+
+            if !validation.approved {
+                info!(
+                    "Intent {} blocked: {:?}",
+                    intent.intent_id, validation.rejection_reason
+                );
+                self.write_journal_entry(&journal_entry).ok();
+
+                // Emit blocked event
+                self.emit_intent_blocked(&intent, &validation).await;
+                continue;
+            }
+
+            // Execute approved intent
+            let result = self.execute_openclaw_intent(intent, &config).await;
+
+            // Update journal with execution result
+            let mut final_entry = journal_entry;
+            final_entry.execution = Some(ExecutionOutcome {
+                stage: format!("{:?}", result.stage_reached),
+                signature: result.signature.clone(),
+                out_amount: Some(result.execution.out_amount_raw),
+                error: result.error.as_ref().map(|e| e.message.clone()),
+            });
+            self.write_journal_entry(&final_entry).ok();
+
+            // Update trade count and state
+            if result.stage_reached == crate::executor::TradeStage::Confirmed {
+                self.trade_count += 1;
+                self.last_trade_outcome = Some(LastTradeOutcome {
+                    intent_id: intent.intent_id,
+                    stage: format!("{:?}", result.stage_reached),
+                    symbol: self.get_symbol_for_mint(&intent.output_mint).unwrap_or_default(),
+                    side: format!("{:?}", intent.action),
+                    amount_usd: intent.amount_usd,
+                    timestamp: chrono::Utc::now(),
+                });
+            }
+
+            // Emit trade events
+            self.emit_openclaw_trade_events(intent, &result, &config).await;
+        }
+
+        // Update status back to idle
+        self.status = RunnerStatus::Idle;
+        self.write_state_file().ok();
 
         Ok(())
     }
 
-    /// Emit standardized trade events based on trade stage
-    async fn emit_trade_events(
+    /// Build decision context to send to OpenClaw
+    async fn build_decision_context(&self, config: &BotConfig) -> anyhow::Result<DecisionContext> {
+        let snapshot = self.portfolio.snapshot();
+
+        // Build portfolio snapshot for OpenClaw
+        let portfolio = OcPortfolioSnapshot {
+            equity_usd: snapshot.total_equity,
+            cash_usd: snapshot.cash_usdc,
+            positions_count: snapshot.positions.len(),
+            unrealized_pnl_usd: snapshot.unrealized_pnl,
+            realized_pnl_today_usd: self.realized_pnl_today,
+            trades_today: self.trade_count as i32,
+        };
+
+        // Build holdings list from position snapshots
+        let holdings: Vec<Holding> = snapshot
+            .positions
+            .iter()
+            .map(|pos| Holding {
+                mint: pos.mint.clone(),
+                symbol: pos.symbol.clone(),
+                quantity: pos.quantity,
+                value_usd: pos.market_value,
+                avg_entry_price: Some(pos.avg_entry),
+            })
+            .collect();
+
+        // Build recent prices from executor cache (if available)
+        let recent_prices = self.get_recent_prices().await;
+
+        // Build risk rails
+        let risk_rails = RiskRails {
+            max_position_size_percent: config.risk_caps.max_position_size_percent,
+            max_daily_loss_usd: config.risk_caps.max_daily_loss_usd,
+            max_drawdown_percent: config.risk_caps.max_drawdown_percent,
+            max_trades_per_day: config.risk_caps.max_trades_per_day,
+            governor_paused: false, // TODO: Check governor state
+        };
+
+        // Get recent events (last 10)
+        let recent_events = self.get_recent_events();
+
+        Ok(DecisionContext {
+            bot_id: self.config.bot_id,
+            timestamp: chrono::Utc::now(),
+            portfolio,
+            holdings,
+            recent_prices,
+            risk_rails,
+            recent_events,
+            config_version: config.version_id.to_string(),
+        })
+    }
+
+    /// Validate intent against hard risk rails
+    fn validate_intent(&self, intent: &OpenClawIntent, config: &BotConfig) -> IntentValidation {
+        // Check trade limit
+        let max_trades = config.risk_caps.max_trades_per_day as u32;
+        if self.trade_count >= max_trades {
+            return IntentValidation {
+                intent: intent.clone(),
+                approved: false,
+                rejection_reason: Some(format!(
+                    "Daily trade limit reached ({}/{})",
+                    self.trade_count, max_trades
+                )),
+                blocked_by: Some("max_trades_per_day".to_string()),
+            };
+        }
+
+        // Check position size limit
+        let snapshot = self.portfolio.snapshot();
+        let max_position_value = snapshot.total_equity
+            * Decimal::from(config.risk_caps.max_position_size_percent)
+            / Decimal::from(100);
+
+        if intent.amount_usd > max_position_value {
+            return IntentValidation {
+                intent: intent.clone(),
+                approved: false,
+                rejection_reason: Some(format!(
+                    "Amount ${} exceeds max position size ${}",
+                    intent.amount_usd, max_position_value
+                )),
+                blocked_by: Some("max_position_size_percent".to_string()),
+            };
+        }
+
+        // Check daily loss limit
+        let max_daily_loss = Decimal::from(config.risk_caps.max_daily_loss_usd);
+        if self.realized_pnl_today < -max_daily_loss {
+            return IntentValidation {
+                intent: intent.clone(),
+                approved: false,
+                rejection_reason: Some(format!(
+                    "Daily loss limit exceeded: ${} loss vs ${} max",
+                    -self.realized_pnl_today, max_daily_loss
+                )),
+                blocked_by: Some("max_daily_loss_usd".to_string()),
+            };
+        }
+
+        // All checks passed
+        IntentValidation {
+            intent: intent.clone(),
+            approved: true,
+            rejection_reason: None,
+            blocked_by: None,
+        }
+    }
+
+    /// Execute an OpenClaw intent
+    async fn execute_openclaw_intent(
+        &mut self,
+        intent: &OpenClawIntent,
+        config: &BotConfig,
+    ) -> NormalizedTradeResult {
+        let executor = self.executor.as_ref().unwrap();
+
+        // Determine trade side from action
+        let side = match intent.action {
+            TradeAction::Buy => TradeSide::Buy,
+            TradeAction::Sell => TradeSide::Sell,
+            TradeAction::Hold => {
+                // Hold means no trade - return empty result
+                return NormalizedTradeResult::default();
+            }
+        };
+
+        // Convert USD amount to raw amount
+        let usdc_decimals = 6u8;
+        let in_amount =
+            (intent.amount_usd * Decimal::from(10u64.pow(usdc_decimals as u32))).to_u64().unwrap_or(0);
+
+        // Execute trade
+        executor
+            .execute_trade(
+                &intent.intent_id.to_string(),
+                &intent.input_mint,
+                &intent.output_mint,
+                in_amount,
+                side,
+                config.trading_mode,
+            )
+            .await
+    }
+
+    /// Get recent prices for assets (from executor cache or fresh fetch)
+    async fn get_recent_prices(&self) -> HashMap<String, PriceQuote> {
+        let mut prices = HashMap::new();
+
+        // Get prices for configured asset universe
+        if let Some(config) = &self.current_config {
+            for asset in &config.asset_universe {
+                if !asset.enabled {
+                    continue;
+                }
+
+                // Try to get cached price from executor
+                // For now, return empty - executor will fetch on demand
+                prices.insert(
+                    asset.mint.clone(),
+                    PriceQuote {
+                        mint: asset.mint.clone(),
+                        symbol: asset.symbol.clone(),
+                        price_usd: Decimal::ZERO, // Will be fetched by OpenClaw
+                        change_24h_pct: None,
+                        timestamp: chrono::Utc::now(),
+                        source: "pending".to_string(),
+                    },
+                );
+            }
+        }
+
+        prices
+    }
+
+    /// Get recent trade events for context
+    fn get_recent_events(&self) -> Vec<TradeEvent> {
+        // Return empty for now - events are stored in control plane
+        // Could be populated from local event cache
+        Vec::new()
+    }
+
+    /// Get symbol for a mint address
+    fn get_symbol_for_mint(&self, mint: &str) -> Option<String> {
+        if let Some(config) = &self.current_config {
+            for asset in &config.asset_universe {
+                if asset.mint == mint {
+                    return Some(asset.symbol.clone());
+                }
+            }
+        }
+        None
+    }
+
+    /// Write current state to now.json
+    fn write_state_file(&self) -> anyhow::Result<()> {
+        let snapshot = self.portfolio.snapshot();
+
+        let state = RunnerState {
+            status: self.status,
+            last_plan_id: self.last_plan_id,
+            last_plan_time: self.last_plan_id.map(|_| chrono::Utc::now()),
+            last_trade_outcome: self.last_trade_outcome.clone(),
+            portfolio_equity_usd: snapshot.total_equity,
+            positions_count: snapshot.positions.len(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let path = self.state_dir.join("now.json");
+        let content = serde_json::to_string_pretty(&state)?;
+        std::fs::write(path, content)?;
+
+        Ok(())
+    }
+
+    /// Write decision context to file
+    fn write_context_file(&self, context: &DecisionContext) -> anyhow::Result<()> {
+        let path = self.state_dir.join("decision_context.json");
+        let content = serde_json::to_string_pretty(context)?;
+        std::fs::write(path, content)?;
+        Ok(())
+    }
+
+    /// Write journal entry for decision
+    fn write_journal_entry(&self, entry: &DecisionJournalEntry) -> anyhow::Result<()> {
+        let path = self
+            .state_dir
+            .join("journal/decisions")
+            .join(format!("{}.json", entry.intent_id));
+        let content = serde_json::to_string_pretty(entry)?;
+        std::fs::write(path, content)?;
+        Ok(())
+    }
+
+    /// Emit event when intent is blocked
+    async fn emit_intent_blocked(&self, intent: &OpenClawIntent, validation: &IntentValidation) {
+        let event = EventInput {
+            event_type: "trade_blocked".to_string(),
+            message: validation
+                .rejection_reason
+                .clone()
+                .unwrap_or_else(|| "Intent blocked by risk rails".to_string()),
+            metadata: Some(serde_json::json!({
+                "intent_id": intent.intent_id.to_string(),
+                "action": format!("{:?}", intent.action),
+                "input_mint": intent.input_mint,
+                "output_mint": intent.output_mint,
+                "amount_usd": intent.amount_usd.to_string(),
+                "blocked_by": validation.blocked_by,
+                "rationale": intent.rationale,
+            })),
+            timestamp: chrono::Utc::now(),
+        };
+        self.client.send_events(vec![event]).await.ok();
+    }
+
+    /// Emit trade events for OpenClaw intent execution
+    async fn emit_openclaw_trade_events(
         &self,
-        intent: &TradeIntent,
+        intent: &OpenClawIntent,
         result: &NormalizedTradeResult,
         config: &BotConfig,
     ) {
@@ -394,18 +775,18 @@ impl BotRunner {
         // Always emit trade_intent_created first
         let created_event = EventInput {
             event_type: "trade_intent_created".to_string(),
-            message: format!("Trade intent created for {}", intent.id),
+            message: format!("Trade intent from OpenClaw: {}", intent.intent_id),
             metadata: Some(serde_json::json!({
-                "intent_id": intent.id.to_string(),
+                "intent_id": intent.intent_id.to_string(),
                 "bot_id": self.config.bot_id.to_string(),
-                "input_mint": result.input_mint,
-                "output_mint": result.output_mint,
-                "in_amount": result.quote.in_amount,
-                "side": format!("{:?}", result.side),
+                "input_mint": intent.input_mint,
+                "output_mint": intent.output_mint,
+                "amount_usd": intent.amount_usd.to_string(),
+                "action": format!("{:?}", intent.action),
                 "mode": format!("{:?}", config.trading_mode),
-                "algorithm": intent.algorithm,
                 "confidence": intent.confidence,
                 "rationale": intent.rationale,
+                "source": "openclaw",
             })),
             timestamp: chrono::Utc::now(),
         };
@@ -425,7 +806,7 @@ impl BotRunner {
                         .map(|e| e.message.clone())
                         .unwrap_or_else(|| "Trade blocked".to_string()),
                     metadata: Some(serde_json::json!({
-                        "intent_id": intent.id.to_string(),
+                        "intent_id": intent.intent_id.to_string(),
                         "reason_code": reason_code,
                         "input_mint": result.input_mint,
                         "output_mint": result.output_mint,
@@ -443,7 +824,7 @@ impl BotRunner {
                     event_type: "trade_submitted".to_string(),
                     message: format!("Trade submitted: {:?}", result.signature),
                     metadata: Some(serde_json::json!({
-                        "intent_id": intent.id.to_string(),
+                        "intent_id": intent.intent_id.to_string(),
                         "signature": result.signature,
                         "input_mint": result.input_mint,
                         "output_mint": result.output_mint,
@@ -461,7 +842,7 @@ impl BotRunner {
                     event_type: "trade_confirmed".to_string(),
                     message: format!("Trade confirmed: {:?}", result.signature),
                     metadata: Some(serde_json::json!({
-                        "intent_id": intent.id.to_string(),
+                        "intent_id": intent.intent_id.to_string(),
                         "signature": result.signature,
                         "input_mint": result.input_mint,
                         "output_mint": result.output_mint,
@@ -492,7 +873,7 @@ impl BotRunner {
                         .map(|e| e.message.clone())
                         .unwrap_or_else(|| "Trade failed".to_string()),
                     metadata: Some(serde_json::json!({
-                        "intent_id": intent.id.to_string(),
+                        "intent_id": intent.intent_id.to_string(),
                         "stage": stage,
                         "error_code": code,
                         "input_mint": result.input_mint,
@@ -504,256 +885,6 @@ impl BotRunner {
                 self.client.send_events(vec![failed_event]).await.ok();
             }
         }
-    }
-
-    /// Update portfolio based on trade result
-    fn update_portfolio_from_trade(
-        &mut self,
-        result: &NormalizedTradeResult,
-        token: &TokenInfo,
-        usdc: &TokenInfo,
-    ) {
-        if result.stage_reached != crate::executor::TradeStage::Confirmed {
-            return;
-        }
-
-        // Determine if this was a buy or sell
-        let is_buy = result.input_mint == usdc.mint;
-
-        if is_buy {
-            // Bought token with USDC
-            // Reduce cash
-            let spent = crate::amount::from_raw_amount(result.quote.in_amount, usdc.decimals);
-            let new_cash = self
-                .portfolio
-                .cash_usdc_raw
-                .saturating_sub(result.quote.in_amount);
-            self.portfolio.update_cash(new_cash, "buy trade");
-
-            // Add/update position
-            let received = result.execution.out_amount_raw;
-            if received > 0 {
-                let price = spent / crate::amount::from_raw_amount(received, token.decimals);
-                self.portfolio.update_position(
-                    &token.mint,
-                    &token.symbol,
-                    received,
-                    price,
-                    token.decimals,
-                );
-            }
-        } else {
-            // Sold token for USDC
-            // Remove/reduce position
-            let sold = result.quote.in_amount;
-            let current_pos = self
-                .portfolio
-                .get_position(&token.mint)
-                .map(|p| p.quantity_raw)
-                .unwrap_or(0);
-
-            if sold >= current_pos {
-                // Full close
-                self.portfolio.close_position(&token.mint, token.decimals);
-            } else {
-                // Partial close
-                self.portfolio.update_position(
-                    &token.mint,
-                    &token.symbol,
-                    current_pos - sold,
-                    Decimal::ZERO, // Keep same avg entry
-                    token.decimals,
-                );
-            }
-
-            // Add to cash (saturating to prevent overflow)
-            let received_usdc = self
-                .portfolio
-                .cash_usdc_raw
-                .saturating_add(result.execution.out_amount_raw);
-            if received_usdc == u64::MAX && result.execution.out_amount_raw > 0 {
-                tracing::warn!(
-                    "Cash balance saturated at u64::MAX during sell - potential overflow avoided"
-                );
-            }
-            self.portfolio.update_cash(received_usdc, "sell trade");
-        }
-    }
-
-    /// Evaluate a token and execute trade if signal is strong enough
-    async fn evaluate_and_trade(
-        &mut self,
-        token: &TokenInfo,
-        usdc: &TokenInfo,
-        config: &BotConfig,
-    ) -> anyhow::Result<Option<(TradeIntent, NormalizedTradeResult)>> {
-        // Get executor reference
-        let executor = self.executor.as_ref().unwrap();
-
-        // Calculate position size
-        let max_position_pct =
-            Decimal::from(config.risk_caps.max_position_size_percent) / Decimal::from(100);
-
-        // Get current equity from portfolio snapshot
-        let snapshot = self.portfolio.snapshot();
-        let position_value_usd = snapshot.total_equity * max_position_pct;
-
-        // Convert to raw USDC amount
-        let usdc_amount = to_raw_amount(position_value_usd, usdc.decimals)
-            .map_err(|e| anyhow::anyhow!("Invalid position size: {}", e))?;
-
-        if usdc_amount == 0 {
-            return Ok(None);
-        }
-
-        // Check if we have sufficient balance for a buy
-        if !self.portfolio.can_spend_usdc(usdc_amount) {
-            debug!("Insufficient USDC balance for trade");
-            return Ok(None);
-        }
-
-        // Fetch price quote
-        let quote = executor
-            .fetch_price(&usdc.mint, &token.mint, usdc_amount)
-            .await?;
-
-        // Calculate price for signal generation
-        let price = crate::amount::from_raw_amount(quote.out_amount, token.decimals)
-            / crate::amount::from_raw_amount(quote.in_amount, usdc.decimals);
-
-        // Generate trading signal
-        let price_history = vec![price]; // Simplified
-        let signal = match config.algorithm_mode {
-            AlgorithmMode::Trend => generate_trend_signal(&price_history, price),
-            AlgorithmMode::MeanReversion => generate_reversion_signal(&price_history, price),
-            AlgorithmMode::Breakout => generate_breakout_signal(&price_history, price),
-        };
-
-        // Check confidence threshold
-        let min_confidence = match config.strictness {
-            Strictness::Low => 0.45,
-            Strictness::Medium => 0.60,
-            Strictness::High => 0.75,
-        };
-
-        let (should_trade, side, confidence) = match signal {
-            TradingSignal::Buy { confidence } if confidence >= min_confidence => {
-                (true, TradeSide::Buy, confidence)
-            }
-            TradingSignal::Sell { confidence } if confidence >= min_confidence => {
-                (true, TradeSide::Sell, confidence)
-            }
-            _ => return Ok(None),
-        };
-
-        if !should_trade {
-            return Ok(None);
-        }
-
-        // Check if we can sell (for sell signals)
-        if side == TradeSide::Sell {
-            let token_qty = self
-                .portfolio
-                .get_position(&token.mint)
-                .map(|p| p.quantity_raw)
-                .unwrap_or(0);
-
-            // Estimate how much we'd need to sell
-            let estimated_qty = (position_value_usd / price).to_u64().unwrap_or(0);
-
-            if token_qty < estimated_qty {
-                debug!("Insufficient {} balance to sell", token.symbol);
-                return Ok(None);
-            }
-        }
-
-        // Atomic try_create: check and insert in single operation (TOCTOU-safe)
-        // Enhanced per principal engineer feedback: include mode + strategy_version
-        // to prevent incorrectly suppressing legitimate repeated trades
-        let intent = match self.intent_registry.try_create(
-            &self.config.bot_id.to_string(),
-            &usdc.mint,
-            &token.mint,
-            usdc_amount,
-            &format!("{:?}", config.trading_mode),
-            &format!("{:?}", config.algorithm_mode),
-            confidence,
-            &format!("{:?} signal at {}% confidence", side, confidence * 100.0),
-            Some(config.version_id.to_string()), // Config version as strategy fingerprint
-        ) {
-            Ok(Some(intent)) => intent,
-            Ok(None) => {
-                debug!("Equivalent intent already exists, skipping");
-                return Ok(None);
-            }
-            Err(e) => {
-                warn!("Failed to create intent: {}", e);
-                return Ok(None);
-            }
-        };
-
-        // Determine trade direction
-        let (input_mint, output_mint) = match side {
-            TradeSide::Buy => (&usdc.mint, &token.mint),
-            TradeSide::Sell => (&token.mint, &usdc.mint),
-        };
-
-        // Execute trade with intent_id for tracking
-        let result = executor
-            .execute_trade(
-                &intent.id.to_string(),
-                input_mint,
-                output_mint,
-                usdc_amount,
-                side,
-                config.trading_mode,
-            )
-            .await;
-
-        // Update intent state based on result
-        self.update_intent_state(&intent, &result);
-
-        Ok(Some((intent, result)))
-    }
-
-    /// Update intent state based on normalized trade result
-    fn update_intent_state(&mut self, intent: &TradeIntent, result: &NormalizedTradeResult) {
-        use crate::executor::TradeStage;
-
-        let state = match result.stage_reached {
-            TradeStage::Blocked => {
-                let reason = result
-                    .error
-                    .as_ref()
-                    .map(|e| format!("{}: {}", e.stage, e.code))
-                    .unwrap_or_else(|| "blocked".to_string());
-                TradeIntentState::ShieldCheckFailed { reason }
-            }
-            TradeStage::Submitted => TradeIntentState::Submitted {
-                signature: result.signature.clone().unwrap_or_default(),
-            },
-            TradeStage::Confirmed => TradeIntentState::Confirmed {
-                signature: result.signature.clone().unwrap_or_default(),
-                out_amount: result.execution.out_amount_raw,
-            },
-            TradeStage::Failed => {
-                let stage = result
-                    .error
-                    .as_ref()
-                    .map(|e| e.stage.clone())
-                    .unwrap_or_else(|| "unknown".to_string());
-                let error = result
-                    .error
-                    .as_ref()
-                    .map(|e| e.message.clone())
-                    .unwrap_or_else(|| "failed".to_string());
-                TradeIntentState::Failed { stage, error }
-            }
-        };
-
-        self.intent_registry
-            .update_state(&intent.id.to_string(), state)
-            .ok();
     }
 
     /// Send heartbeat with metrics

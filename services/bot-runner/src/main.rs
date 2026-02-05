@@ -18,10 +18,13 @@ mod amount;
 mod client;
 mod config;
 mod executor;
+mod gateway;
 mod intent;
+mod openclaw;
 mod portfolio;
 mod reconciler;
 mod runner;
+mod types;
 
 pub use client::ControlPlaneClient;
 pub use config::BotConfig;
