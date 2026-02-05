@@ -11,6 +11,7 @@ import {
   Animated,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -138,6 +139,7 @@ const BotCard = React.memo(function BotCard({ bot, onPress, index }: { bot: Bot;
 
 export function BotsListScreen() {
   const navigation = useNavigation<BotsListScreenNavigationProp>();
+  const insets = useSafeAreaInsets();
   const [bots, setBots] = useState<Bot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -199,7 +201,7 @@ export function BotsListScreen() {
   return (
     <OceanBackground>
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           <View style={styles.headerRow}>
             <Image source={LOB_AVATAR} style={styles.headerAvatar} />
             <View>
@@ -278,7 +280,6 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 20,
-    paddingTop: 60,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,

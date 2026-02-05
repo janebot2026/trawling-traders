@@ -11,6 +11,7 @@ import {
   Image,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -27,6 +28,7 @@ type BotDetailScreenNavigationProp = NativeStackNavigationProp<RootStackParamLis
 export function BotDetailScreen() {
   const route = useRoute<BotDetailScreenRouteProp>();
   const navigation = useNavigation<BotDetailScreenNavigationProp>();
+  const insets = useSafeAreaInsets();
   const { botId } = route.params;
 
   const [bot, setBot] = useState<Bot | null>(null);
@@ -157,7 +159,7 @@ export function BotDetailScreen() {
         }
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           <View style={styles.headerTop}>
             <View style={styles.avatarSection}>
               <View style={styles.avatarContainer}>
@@ -321,7 +323,6 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     padding: 20,
-    paddingTop: 60,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
     shadowColor: '#000',

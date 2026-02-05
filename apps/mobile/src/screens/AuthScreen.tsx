@@ -9,6 +9,7 @@ import {
   Animated,
   Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -30,6 +31,7 @@ type AuthScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'A
 
 export function AuthScreen() {
   const navigation = useNavigation<AuthScreenNavigationProp>();
+  const insets = useSafeAreaInsets();
   const { isAuthenticated, isLoading: authLoading, user } = useCedrosLogin();
 
   // Animation values
@@ -139,6 +141,7 @@ export function AuthScreen() {
             {
               opacity: fadeAnim,
               transform: [{ translateY: slideAnim }],
+              paddingTop: insets.top + 24,
             },
           ]}
         >
@@ -247,7 +250,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
-    paddingTop: 60,
     paddingBottom: 40,
   },
   mascotContainer: {

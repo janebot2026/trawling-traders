@@ -11,6 +11,7 @@ import {
   Alert,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -64,6 +65,7 @@ const ASSET_FOCUSES: { value: AssetFocus; label: string; description: string; ti
 
 export function CreateBotScreen() {
   const navigation = useNavigation<CreateBotScreenNavigationProp>();
+  const insets = useSafeAreaInsets();
   const [isLoading, setIsLoading] = useState(false);
 
   // Animation
@@ -176,7 +178,7 @@ export function CreateBotScreen() {
         contentContainerStyle={{ paddingBottom: 40 }}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           <Text style={styles.headerTitle}>Deploy New Trawler</Text>
           <Text style={styles.headerSubtitle}>Configure your LOB trading agent</Text>
         </View>
@@ -417,7 +419,6 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 20,
-    paddingTop: 60,
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,

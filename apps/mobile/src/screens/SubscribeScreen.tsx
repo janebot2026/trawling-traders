@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, Image } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -13,6 +14,7 @@ type SubscribeScreenNavigationProp = NativeStackNavigationProp<RootStackParamLis
 
 export function SubscribeScreen() {
   const navigation = useNavigation<SubscribeScreenNavigationProp>();
+  const insets = useSafeAreaInsets();
 
   const handleSubscribeSuccess = (sessionId: string) => {
     if (__DEV__) {
@@ -30,7 +32,7 @@ export function SubscribeScreen() {
   return (
     <OceanBackground>
       <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <View style={styles.container}>
+        <View style={[styles.container, { paddingTop: insets.top + 16 }]}>
           {/* LOB Mascot */}
           <View style={styles.mascotContainer}>
             <Image source={LOB_AVATAR} style={styles.avatar} />
@@ -103,7 +105,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 24,
-    paddingTop: 40,
   },
   mascotContainer: {
     alignSelf: 'center',

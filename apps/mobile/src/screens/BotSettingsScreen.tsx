@@ -11,6 +11,7 @@ import {
   Alert,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -45,6 +46,7 @@ const ASSET_FOCUSES: { value: AssetFocus; label: string; description: string; ti
 export function BotSettingsScreen() {
   const route = useRoute<BotSettingsScreenRouteProp>();
   const navigation = useNavigation<BotSettingsScreenNavigationProp>();
+  const insets = useSafeAreaInsets();
   const { botId } = route.params;
 
   const [isLoading, setIsLoading] = useState(true);
@@ -195,7 +197,7 @@ export function BotSettingsScreen() {
         contentContainerStyle={{ paddingBottom: 40 }}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           <Text style={styles.headerTitle}>Bot Settings</Text>
           <Text style={styles.headerSubtitle}>Changes apply within 30 seconds</Text>
           {bot?.configStatus === 'pending' && (
@@ -443,7 +445,6 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 20,
-    paddingTop: 60,
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
