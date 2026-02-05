@@ -270,6 +270,16 @@ impl BotRunner {
             }
         };
 
+        // Check daily trade limit
+        let max_trades = config.risk_caps.max_trades_per_day as u32;
+        if self.trade_count >= max_trades {
+            debug!(
+                "Daily trade limit reached ({}/{}), skipping trading cycle",
+                self.trade_count, max_trades
+            );
+            return Ok(());
+        }
+
         if self.executor.is_none() {
             warn!("No executor initialized");
             return Ok(());
@@ -288,7 +298,15 @@ impl BotRunner {
             ).await {
                 Ok(Some((intent, result))) => {
                     self.trade_count += 1;
-                    
+
+                    // Check if we just hit the limit
+                    if self.trade_count >= max_trades {
+                        info!(
+                            "Daily trade limit reached ({}/{}), no more trades until reset",
+                            self.trade_count, max_trades
+                        );
+                    }
+
                     // Update portfolio based on trade result
                     self.update_portfolio_from_trade(&result, &token, &usdc_info);
                     
