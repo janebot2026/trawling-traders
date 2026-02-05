@@ -739,14 +739,11 @@ impl TradeExecutor {
     }
 
     /// Get wallet holdings
-    pub async fn get_holdings(&self,
-    ) -> anyhow::Result<Vec<TokenHolding>> {
-        if !self.is_claw_trader_available() {
-            return Ok(vec![]);
-        }
-        
-        // We need the wallet address from the keypair
-        // For now, return empty - can be enhanced later
+    ///
+    /// Note: Currently returns empty vec. Wallet integration not yet implemented.
+    #[deprecated(since = "0.1.0", note = "Wallet integration not yet implemented; always returns empty")]
+    #[allow(dead_code)]
+    pub async fn get_holdings(&self) -> anyhow::Result<Vec<TokenHolding>> {
         Ok(vec![])
     }
 
