@@ -426,13 +426,15 @@
 - **Verification:** TypeScript syntax valid
 - **Note:** Validates range and shows clear error messages
 
-### [ ] MB-13: Hardcoded paddingTop instead of safe area
+### [x] MB-13: Hardcoded paddingTop instead of safe area
 - **Files:** All screens
 - **Planned Fix:**
   - Use `useSafeAreaInsets()` hook
   - Replace hardcoded padding values
 - **Test Plan:** Test on various device form factors
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** TypeScript syntax valid
+- **Note:** 6 screens updated with dynamic paddingTop based on insets.top
 
 ### [x] MB-19: No fetch timeout in API client
 - **Files:** `packages/api-client/src/index.ts`
@@ -729,9 +731,9 @@
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
 | High | 16 | 15 | 1 (deferred) |
-| Medium | 32 | 28 | 4 |
+| Medium | 32 | 29 | 3 |
 | Low | 15 | 15 | 0 |
-| **Total** | **71** | **65** | **6** |
+| **Total** | **71** | **66** | **5** |
 
 ---
 
@@ -814,4 +816,5 @@
 | DR-14 | f193cdfa | 2026-02-05 | Health check uses internal metrics |
 | BR-10 | fb61550a | 2026-02-05 | Batch eviction instead of O(n) scan |
 | MB-07 | f6f4d3d3 | 2026-02-05 | Differentiate network error types |
+| MB-13 | 28106574 | 2026-02-05 | Use useSafeAreaInsets for dynamic paddingTop |
 
