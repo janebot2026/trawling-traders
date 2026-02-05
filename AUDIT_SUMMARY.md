@@ -225,6 +225,7 @@ With these fixes in place, the following testing is recommended:
 | 3347a678 | MB-11 | Animation cleanup hooks |
 | 8256f96d | MB-14 | Offline handling |
 | ad1045e5 | MB-01 | API key state clear |
+| 3aff7566 | CLEANUP | Rust compiler warning fixes |
 
 ---
 
