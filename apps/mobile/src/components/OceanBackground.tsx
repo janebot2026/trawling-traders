@@ -41,26 +41,3 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.85)', // Semi-transparent white for light
   },
 });
-
-// Dark mode overlay variant
-export function OceanBackgroundDark({ children, style }: OceanBackgroundProps) {
-  return (
-    <ImageBackground
-      source={OCEAN_DARK}
-      style={[styles.background, style]}
-      resizeMode="cover"
-    >
-      <View style={styles.overlayDark}>
-        {children}
-      </View>
-    </ImageBackground>
-  );
-}
-
-const stylesDark = StyleSheet.create({
-  ...styles,
-  overlayDark: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.85)', // Semi-transparent navy for dark
-  },
-});
