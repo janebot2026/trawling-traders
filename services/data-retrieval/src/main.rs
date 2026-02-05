@@ -5,7 +5,7 @@ use axum::{
 };
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
-use tracing::{info, Level};
+use tracing::{info, warn, Level};
 use tracing_subscriber;
 
 /// Application state shared across handlers
@@ -27,30 +27,43 @@ async fn main() -> anyhow::Result<()> {
     let coingecko = Arc::new(data_retrieval::CoinGeckoClient::new(None));
     info!("✓ CoinGecko client initialized");
     
-    // Initialize Binance WebSocket (real-time) for crypto
-    let binance_ws = Arc::new(data_retrieval::BinanceWebSocketClient::new().await?);
-    info!("✓ Binance WebSocket connected");
-    
-    // Subscribe to BTC and ETH real-time trades
-    binance_ws.subscribe_trades("BTCUSDT").await?;
-    binance_ws.subscribe_trades("ETHUSDT").await?;
-    binance_ws.subscribe_trades("SOLUSDT").await?;
-    info!("✓ Subscribed to BTC, ETH, SOL trades");
-    
+    // Initialize Binance WebSocket (real-time) for crypto - optional, may be geo-blocked
+    let binance_ws = match data_retrieval::BinanceWebSocketClient::new().await {
+        Ok(client) => {
+            let ws = Arc::new(client);
+            // Subscribe to BTC, ETH, SOL real-time trades
+            if let Err(e) = ws.subscribe_trades("BTCUSDT").await {
+                warn!("Failed to subscribe to BTCUSDT: {}", e);
+            }
+            if let Err(e) = ws.subscribe_trades("ETHUSDT").await {
+                warn!("Failed to subscribe to ETHUSDT: {}", e);
+            }
+            if let Err(e) = ws.subscribe_trades("SOLUSDT").await {
+                warn!("Failed to subscribe to SOLUSDT: {}", e);
+            }
+            info!("✓ Binance WebSocket connected");
+            Some(ws)
+        }
+        Err(e) => {
+            warn!("⚠ Binance WebSocket unavailable ({}), continuing without real-time data", e);
+            None
+        }
+    };
+
     // Initialize Pyth client for stocks/metals
     let pyth_client = data_retrieval::PythClient::new();
     info!("✓ Pyth client initialized for xStocks/metals");
-    
+
     // Create aggregator with crypto sources
     let mut aggregator = data_retrieval::PriceAggregator::new();
     aggregator.add_crypto_source(coingecko);
     aggregator.add_stock_source(Arc::new(pyth_client.clone()));
     aggregator.add_metal_source(Arc::new(pyth_client.clone()));
-    aggregator.add_realtime_source(binance_ws);
-    
-    // Start real-time consumer
-    aggregator.start_realtime_consumer().await;
-    info!("✓ Real-time price consumer started");
+    if let Some(ws) = binance_ws {
+        aggregator.add_realtime_source(ws);
+        aggregator.start_realtime_consumer().await;
+        info!("✓ Real-time price consumer started");
+    }
     
     // Create app state
     let state = Arc::new(AppState {
@@ -60,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
     
     // Build router
     let app = Router::new()
-        .route("/prices/:symbol", get(handlers::get_price))
+        .route("/prices/{symbol}", get(handlers::get_price))
         .route("/prices", get(handlers::get_price))
         .route("/prices/batch", axum::routing::post(handlers::get_prices_batch))
         .route("/prices/supported", get(handlers::get_supported_symbols))
