@@ -3,7 +3,65 @@ use chrono::{DateTime, Utc};
 use reqwest::Client;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+
+/// Internal health tracking for API-free health checks
+struct HealthTracker {
+    /// Timestamp of last successful request (millis since epoch)
+    last_success_ms: AtomicU64,
+    /// Timestamp of last failed request (millis since epoch)
+    last_failure_ms: AtomicU64,
+    /// Recent success count (approximation)
+    success_count: AtomicU64,
+    /// Recent failure count (approximation)
+    failure_count: AtomicU64,
+    /// Last known latency in ms
+    last_latency_ms: AtomicU64,
+}
+
+impl HealthTracker {
+    fn new() -> Self {
+        Self {
+            last_success_ms: AtomicU64::new(0),
+            last_failure_ms: AtomicU64::new(0),
+            success_count: AtomicU64::new(0),
+            failure_count: AtomicU64::new(0),
+            last_latency_ms: AtomicU64::new(0),
+        }
+    }
+
+    fn record_success(&self, latency_ms: u64) {
+        let now_ms = Utc::now().timestamp_millis() as u64;
+        self.last_success_ms.store(now_ms, Ordering::Relaxed);
+        self.last_latency_ms.store(latency_ms, Ordering::Relaxed);
+        self.success_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_failure(&self) {
+        let now_ms = Utc::now().timestamp_millis() as u64;
+        self.last_failure_ms.store(now_ms, Ordering::Relaxed);
+        self.failure_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn is_healthy(&self) -> bool {
+        let last_success = self.last_success_ms.load(Ordering::Relaxed);
+        let last_failure = self.last_failure_ms.load(Ordering::Relaxed);
+
+        // Healthy if: had at least one success AND (no failures OR last success > last failure)
+        last_success > 0 && (last_failure == 0 || last_success > last_failure)
+    }
+
+    fn success_rate(&self) -> f64 {
+        let successes = self.success_count.load(Ordering::Relaxed);
+        let failures = self.failure_count.load(Ordering::Relaxed);
+        let total = successes + failures;
+        if total == 0 {
+            return 1.0; // No requests yet, assume healthy
+        }
+        successes as f64 / total as f64
+    }
+}
 
 /// CoinGecko API client
 pub struct CoinGeckoClient {
@@ -12,6 +70,8 @@ pub struct CoinGeckoClient {
     api_key: Option<String>,
     rate_limiter: tokio::sync::Semaphore,
     last_request: tokio::sync::Mutex<Instant>,
+    /// Internal health tracking to avoid API calls in health()
+    health_tracker: HealthTracker,
 }
 
 impl CoinGeckoClient {
@@ -24,16 +84,17 @@ impl CoinGeckoClient {
             .pool_idle_timeout(Duration::from_secs(90))
             .build()
             .expect("Failed to create HTTP client");
-        
+
         // Free tier: allow 1 concurrent request to stay under rate limit
         let permits = if api_key.is_some() { 5 } else { 1 };
-        
+
         Self {
             client,
             base_url: "https://api.coingecko.com/api/v3".to_string(),
             api_key,
             rate_limiter: tokio::sync::Semaphore::new(permits),
             last_request: tokio::sync::Mutex::new(Instant::now() - Duration::from_secs(10)),
+            health_tracker: HealthTracker::new(),
         }
     }
     
@@ -57,13 +118,18 @@ impl CoinGeckoClient {
         &self,
         endpoint: &str,
     ) -> Result<T> {
+        let request_start = Instant::now();
+
         // Try up to 2 times (initial + 1 retry on rate limit)
         for attempt in 0..2 {
             let _permit = self
                 .rate_limiter
                 .acquire()
                 .await
-                .map_err(|e| DataRetrievalError::ApiError(e.to_string()))?;
+                .map_err(|e| {
+                    self.health_tracker.record_failure();
+                    DataRetrievalError::ApiError(e.to_string())
+                })?;
 
             // Ensure minimum delay between requests (free tier friendly)
             {
@@ -77,15 +143,22 @@ impl CoinGeckoClient {
 
             // Wrap request in explicit per-request timeout
             let request_future = self.build_request(endpoint).send();
-            let response = tokio::time::timeout(
+            let response = match tokio::time::timeout(
                 Duration::from_secs(Self::REQUEST_TIMEOUT_SECS),
                 request_future
-            )
-            .await
-            .map_err(|_| DataRetrievalError::ApiError(format!(
-                "CoinGecko request to {} timed out after {}s", endpoint, Self::REQUEST_TIMEOUT_SECS
-            )))?
-            .map_err(|e| DataRetrievalError::ApiError(e.to_string()))?;
+            ).await {
+                Ok(Ok(resp)) => resp,
+                Ok(Err(e)) => {
+                    self.health_tracker.record_failure();
+                    return Err(DataRetrievalError::ApiError(e.to_string()));
+                }
+                Err(_) => {
+                    self.health_tracker.record_failure();
+                    return Err(DataRetrievalError::ApiError(format!(
+                        "CoinGecko request to {} timed out after {}s", endpoint, Self::REQUEST_TIMEOUT_SECS
+                    )));
+                }
+            };
 
             let status = response.status();
 
@@ -106,6 +179,7 @@ impl CoinGeckoClient {
                     continue;
                 }
 
+                self.health_tracker.record_failure();
                 return Err(DataRetrievalError::RateLimit {
                     source_name: "coingecko".to_string(),
                     retry_after,
@@ -113,6 +187,7 @@ impl CoinGeckoClient {
             }
 
             if !status.is_success() {
+                self.health_tracker.record_failure();
                 let text = response.text().await.unwrap_or_default();
                 return Err(DataRetrievalError::ApiError(format!(
                     "CoinGecko API error ({}): {}",
@@ -120,10 +195,17 @@ impl CoinGeckoClient {
                 )));
             }
 
+            // Success - record health metrics
+            let latency_ms = request_start.elapsed().as_millis() as u64;
+            self.health_tracker.record_success(latency_ms);
+
             return response
                 .json::<T>()
                 .await
-                .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()));
+                .map_err(|e| {
+                    self.health_tracker.record_failure();
+                    DataRetrievalError::InvalidResponse(e.to_string())
+                });
         }
 
         // Should not reach here, but fallback error
@@ -267,29 +349,29 @@ impl CoinGeckoClient {
         Ok(candles)
     }
     
-    /// Get health status
+    /// Get health status using internal metrics (no API call)
+    ///
+    /// Uses internal health tracking from actual API calls instead of making
+    /// a dedicated health check request. This preserves API quota.
     pub async fn health(&self) -> SourceHealth {
-        let start = Instant::now();
-        let result = self.get_price("BTC", "USD").await;
-        let latency = start.elapsed().as_millis() as u64;
-        
-        match result {
-            Ok(_) => SourceHealth {
-                source: "coingecko".to_string(),
-                is_healthy: true,
-                last_success: Some(Utc::now()),
-                last_error: None,
-                success_rate_24h: 1.0,
-                avg_latency_ms: latency,
-            },
-            Err(e) => SourceHealth {
-                source: "coingecko".to_string(),
-                is_healthy: false,
-                last_success: None,
-                last_error: Some(e.to_string()),
-                success_rate_24h: 0.0,
-                avg_latency_ms: latency,
-            },
+        let last_success_ms = self.health_tracker.last_success_ms.load(Ordering::Relaxed);
+        let last_success = if last_success_ms > 0 {
+            DateTime::from_timestamp_millis(last_success_ms as i64)
+        } else {
+            None
+        };
+
+        let is_healthy = self.health_tracker.is_healthy();
+        let success_rate = self.health_tracker.success_rate();
+        let latency = self.health_tracker.last_latency_ms.load(Ordering::Relaxed);
+
+        SourceHealth {
+            source: "coingecko".to_string(),
+            is_healthy,
+            last_success,
+            last_error: if is_healthy { None } else { Some("Recent failures detected".to_string()) },
+            success_rate_24h: success_rate,
+            avg_latency_ms: latency,
         }
     }
     
