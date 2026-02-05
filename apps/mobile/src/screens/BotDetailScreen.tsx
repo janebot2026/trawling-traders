@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -37,6 +37,14 @@ export function BotDetailScreen() {
   const [isActionLoading, setIsActionLoading] = useState(false);
 
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
+  const isMountedRef = useRef(true);
+
+  // Cleanup on unmount to prevent state updates after unmount
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const fetchBotDetails = useCallback(async () => {
     try {
@@ -44,12 +52,16 @@ export function BotDetailScreen() {
         api.bot.getBot(botId),
         api.bot.getEvents(botId),
       ]);
+      // Guard against state updates after unmount
+      if (!isMountedRef.current) return;
       setBot(botResponse.bot);
       setConfig(botResponse.config);
       setEvents(eventsResponse.events);
     } catch (error) {
+      if (!isMountedRef.current) return;
       Alert.alert('Error', 'Failed to load bot details');
     } finally {
+      if (!isMountedRef.current) return;
       setIsLoading(false);
       setIsRefreshing(false);
     }
@@ -63,7 +75,7 @@ export function BotDetailScreen() {
     if (!isLoading) {
       Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
     }
-  }, [isLoading]);
+  }, [isLoading, fadeAnim]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -78,11 +90,14 @@ export function BotDetailScreen() {
           text: 'Destroy',
           style: 'destructive',
           onPress: async () => {
+            if (!isMountedRef.current) return;
             setIsActionLoading(true);
             try {
               await api.bot.botAction(botId, 'destroy');
+              if (!isMountedRef.current) return;
               navigation.navigate('Main');
             } catch (error) {
+              if (!isMountedRef.current) return;
               Alert.alert('Error', 'Failed to destroy bot');
               setIsActionLoading(false);
             }
@@ -95,10 +110,13 @@ export function BotDetailScreen() {
     setIsActionLoading(true);
     try {
       await api.bot.botAction(botId, action);
+      if (!isMountedRef.current) return;
       await fetchBotDetails();
     } catch (error) {
+      if (!isMountedRef.current) return;
       Alert.alert('Error', `Failed to ${action} bot`);
     } finally {
+      if (!isMountedRef.current) return;
       setIsActionLoading(false);
     }
   };
