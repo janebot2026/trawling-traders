@@ -12,30 +12,30 @@ const PYTH_HERMES_BASE: &str = "https://hermes.pyth.network/v2";
 
 /// Pyth price feed ID mapping for common stocks/metals
 /// Full list: https://pyth.network/price-feeds
+/// Feed IDs sourced from Pyth Hermes API: https://hermes.pyth.network/v2/price_feeds
 pub static PYTH_FEED_IDS: phf::Map<&str, &str> = phf::phf_map! {
-    // Stocks
-    "AAPL" => "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
-    "TSLA" => "c5e0a3cbf1fc4e49bf7fbdc6a5009d8c98a7d9ba2d293b8ab0f0e8a1c4e3d8f9",
-    "GOOGL" => "a2b1c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
-    "AMZN" => "b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c",
-    "MSFT" => "c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d",
-    "NVDA" => "d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
-    "META" => "e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f",
-    "NFLX" => "f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a",
-    
-    // ETFs
-    "SPY" => "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
-    "QQQ" => "b2c3d4e5f6a789012345678901234567890abcdef1234567890abcdef123457",
-    
-    // Metals (xStocks style tokens on Solana)
-    "ORO" => "gold_token_placeholder_1234567890abcdef1234567890abcdef12345678",
-    "XAU" => "c3d4e5f6a7b89012345678901234567890abcdef1234567890abcdef123458",
-    "XAG" => "d4e5f6a7b8c9012345678901234567890abcdef1234567890abcdef123459",
-    
-    // Crypto (for completeness)
+    // US Equities (regular trading hours 9:30-16:00 ET)
+    "AAPL" => "49f6b65cb1de6b10eaf75e7c03ca029c306d0357e91b5311b175084a5ad55688",
+    "TSLA" => "16dad506d7db8da01c87581c87ca897a012a153557d4d578c3b9c9e1bc0632f1",
+    "GOOGL" => "5a48c03e9b9cb337801073ed9d166817473697efff0d138874e0f6a33d6d5aa6",
+    "AMZN" => "b5d0e0fa58a1f8b81498ae670ce93c872d14434b72c364885d4fa1b257cbb07a",
+    "MSFT" => "d0ca23c1cc005e004ccf1db5bf76aeb6a49218f43dac3d4b275e92de12ded4d1",
+    "NVDA" => "b1073854ed24cbc755dc527418f52b7d271f6cc967bbf8d8129112b18860a593",
+    "META" => "78a3e3b8e676a8f73c439f5d749737034b139bbbe899ba5775216fba596607fe",
+    "NFLX" => "8376cfd7ca8bcdf372ced05307b24dced1f15b1afafdeff715664598f15a3dd2",
+
+    // ETFs (regular trading hours)
+    "SPY" => "19e09bb805456ada3979a7d1cbb4b6d63babc3a0f8e8a9509f68afa5c4c11cd5",
+    "QQQ" => "9695e2b96ea7b3859da9ed25b7a46a920a776e2fdae19a7bcfdf2b219230452d",
+
+    // Precious Metals (spot prices)
+    "XAU" => "765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2",
+    "XAG" => "f2fb02c32b055c805e7238d628e5e9dadef274376114eb1f012337cabe93871e",
+
+    // Crypto
     "BTC" => "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
     "ETH" => "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
-    "SOL" => "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cf2f7d6b2b3c4",
+    "SOL" => "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
 };
 
 /// Pyth price update response
@@ -235,7 +235,7 @@ impl PythClient {
 
     /// Get list of supported metal symbols
     pub fn supported_metals() -> Vec<&'static str> {
-        vec!["ORO", "XAU", "XAG"]
+        vec!["XAU", "XAG"]
     }
 }
 
