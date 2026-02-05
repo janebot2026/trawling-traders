@@ -1,8 +1,12 @@
+# DEVELOPMENT ONLY - These credentials are NOT for production use.
+# In production, use proper secrets management (e.g., environment variables,
+# Kubernetes secrets, Vault) with strong unique passwords.
 services:
   postgres:
     image: postgres:16-alpine
     container_name: trawling-traders-db
     environment:
+      # DEV ONLY: Use strong unique credentials in production
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: trawling_traders
