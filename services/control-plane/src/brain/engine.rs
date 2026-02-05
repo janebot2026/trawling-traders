@@ -1,7 +1,7 @@
 //! Brain engine - single evaluation system for all algorithms
 
 use crate::brain::{
-    config::{AlgoConfig, AlgoMode, TraderBrainConfig},
+    config::{AlgoMode, TraderBrainConfig},
     signal::{Signal, SignalType},
 };
 use crate::models::Strictness;

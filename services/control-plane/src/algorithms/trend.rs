@@ -8,7 +8,6 @@
 use super::{Algorithm, AlgorithmParams, Candle, MarketContext, Signal};
 use crate::models::AlgorithmMode;
 use rust_decimal::Decimal;
-use rust_decimal::prelude::*;
 
 /// Trend Following Algorithm
 /// Generates buy signals when fast EMA crosses above slow EMA

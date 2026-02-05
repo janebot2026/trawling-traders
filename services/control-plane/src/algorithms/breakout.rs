@@ -7,7 +7,6 @@
 use super::{Algorithm, AlgorithmParams, Candle, MarketContext, Signal};
 use crate::models::AlgorithmMode;
 use rust_decimal::Decimal;
-use rust_decimal::prelude::*;
 use std::str::FromStr;
 
 /// Breakout Algorithm

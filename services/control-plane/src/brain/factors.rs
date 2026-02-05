@@ -3,8 +3,6 @@
 //! For MVP, factors are hardcoded within each algorithm mode.
 //! This module provides the foundation for custom factor weights later.
 
-use crate::brain::signal::Signal;
-
 /// Factor trait for expert mode
 pub trait Factor {
     fn name(&self) -> &str;

@@ -9,7 +9,6 @@ use std::sync::Arc;
 use tracing::{info, warn, error};
 use uuid::Uuid;
 use chrono::Utc;
-use sqlx::PgPool;
 
 use crate::{
     observability::{Logger, metrics},
