@@ -226,6 +226,9 @@ With these fixes in place, the following testing is recommended:
 | 8256f96d | MB-14 | Offline handling |
 | ad1045e5 | MB-01 | API key state clear |
 | 3aff7566 | CLEANUP | Rust compiler warning fixes |
+| f93042a4 | BUG | Implement actual clipboard copy |
+| a0b7abb9 | CLEANUP | Clarify webhook integration docs |
+| 0d787755 | CHORE | Update package-lock for expo-clipboard |
 
 ---
 
