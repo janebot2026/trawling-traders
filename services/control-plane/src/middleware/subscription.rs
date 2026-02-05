@@ -138,35 +138,21 @@ pub async fn subscription_middleware(
 }
 
 /// Middleware to enforce bot creation limits based on subscription tier
+///
+/// Uses the bot_count cached in SubscriptionContext from subscription_middleware
+/// to avoid N+1 query. This middleware must run after subscription_middleware.
 pub async fn bot_create_limit_middleware(
-    State(state): State<Arc<AppState>>,
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let auth = request
-        .extensions()
-        .get::<AuthContext>()
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
     let sub = request
         .extensions()
         .get::<SubscriptionContext>()
         .ok_or(StatusCode::FORBIDDEN)?;
 
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
-
-    // Count existing bots
-    let bot_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM bots WHERE user_id = $1 AND status != 'destroying'"
-    )
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // Check against tier limit
-    if bot_count >= sub.tier.max_bots() as i64 {
+    // Use cached bot_count from SubscriptionContext (computed in subscription_middleware)
+    // instead of making a separate database query
+    if sub.bot_count >= sub.tier.max_bots() {
         return Err(StatusCode::FORBIDDEN);
     }
 
