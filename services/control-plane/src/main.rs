@@ -38,7 +38,11 @@ async fn main() -> anyhow::Result<()> {
     // Spawn orphan cleanup background task
     control_plane::provisioning::spawn_cleanup_task(db.clone());
     info!("✓ Orphan cleanup task spawned");
-    
+
+    // Spawn data retention cleanup task (events/metrics older than 30/90 days)
+    control_plane::provisioning::spawn_data_retention_task(db.clone());
+    info!("✓ Data retention cleanup task spawned");
+
     // Spawn offline bot checker (alerting)
     control_plane::alerting::spawn_offline_checker(db.clone(), state.alerts.clone());
     info!("✓ Offline bot checker spawned");

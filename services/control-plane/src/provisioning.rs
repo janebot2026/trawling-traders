@@ -376,10 +376,10 @@ pub fn spawn_cleanup_task(pool: sqlx::PgPool) {
     tokio::spawn(async move {
         let config = CleanupConfig::default();
         let mut interval = tokio::time::interval(Duration::from_secs(60)); // Run every minute
-        
+
         loop {
             interval.tick().await;
-            
+
             match find_orphaned_bots(&pool, &config).await {
                 Ok(orphans) => {
                     for (bot_id, status, droplet_id) in orphans {
@@ -391,6 +391,79 @@ pub fn spawn_cleanup_task(pool: sqlx::PgPool) {
                 Err(e) => {
                     error!("Failed to find orphaned bots: {}", e);
                 }
+            }
+        }
+    });
+}
+
+// ==================== EVENT/METRICS CLEANUP ====================
+
+/// Event/metrics retention configuration
+#[derive(Debug, Clone)]
+pub struct DataRetentionConfig {
+    /// Max age for events in days
+    pub events_retention_days: i64,
+    /// Max age for metrics in days
+    pub metrics_retention_days: i64,
+}
+
+impl Default for DataRetentionConfig {
+    fn default() -> Self {
+        Self {
+            events_retention_days: 30,
+            metrics_retention_days: 90,
+        }
+    }
+}
+
+/// Delete old events and metrics to prevent unbounded storage growth
+async fn cleanup_old_data(
+    pool: &sqlx::PgPool,
+    config: &DataRetentionConfig,
+) -> anyhow::Result<(u64, u64)> {
+    // Delete old events
+    let events_result = sqlx::query(
+        "DELETE FROM events WHERE created_at < NOW() - INTERVAL '1 day' * $1"
+    )
+    .bind(config.events_retention_days)
+    .execute(pool)
+    .await?;
+
+    let events_deleted = events_result.rows_affected();
+
+    // Delete old metrics
+    let metrics_result = sqlx::query(
+        "DELETE FROM metrics WHERE timestamp < NOW() - INTERVAL '1 day' * $1"
+    )
+    .bind(config.metrics_retention_days)
+    .execute(pool)
+    .await?;
+
+    let metrics_deleted = metrics_result.rows_affected();
+
+    if events_deleted > 0 || metrics_deleted > 0 {
+        info!(
+            "Data retention cleanup: deleted {} events (>{}d), {} metrics (>{}d)",
+            events_deleted, config.events_retention_days,
+            metrics_deleted, config.metrics_retention_days
+        );
+    }
+
+    Ok((events_deleted, metrics_deleted))
+}
+
+/// Spawn a background task to periodically clean up old events and metrics
+pub fn spawn_data_retention_task(pool: sqlx::PgPool) {
+    tokio::spawn(async move {
+        let config = DataRetentionConfig::default();
+        // Run once per hour (cleanup doesn't need to be frequent)
+        let mut interval = tokio::time::interval(Duration::from_secs(3600));
+
+        loop {
+            interval.tick().await;
+
+            if let Err(e) = cleanup_old_data(&pool, &config).await {
+                error!("Data retention cleanup failed: {}", e);
             }
         }
     });
