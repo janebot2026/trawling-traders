@@ -1,12 +1,18 @@
 //! Control Plane API Client
 
-use reqwest::Client;
+use reqwest::{Client, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::config::BotConfig;
+
+/// Maximum retry attempts for transient failures
+const MAX_RETRIES: u32 = 3;
+
+/// Base delay for exponential backoff (doubles each retry)
+const BASE_DELAY_MS: u64 = 1000;
 
 /// Client for communicating with the control plane
 pub struct ControlPlaneClient {
@@ -29,21 +35,64 @@ impl ControlPlaneClient {
         })
     }
 
+    /// Execute request with retry logic for transient failures
+    ///
+    /// Retries up to MAX_RETRIES times with exponential backoff.
+    /// Does NOT retry on 4xx client errors (except 429 Too Many Requests).
+    async fn with_retry<F, Fut>(&self, operation: &str, make_request: F) -> anyhow::Result<Response>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = Result<Response, reqwest::Error>>,
+    {
+        let mut last_error = None;
+
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                let delay = Duration::from_millis(BASE_DELAY_MS * (1 << (attempt - 1)));
+                warn!(
+                    "{} failed (attempt {}/{}), retrying in {:?}",
+                    operation, attempt, MAX_RETRIES, delay
+                );
+                tokio::time::sleep(delay).await;
+            }
+
+            match make_request().await {
+                Ok(response) => {
+                    let status = response.status();
+                    // Don't retry on client errors (4xx) except 429
+                    if status.is_client_error() && status != StatusCode::TOO_MANY_REQUESTS {
+                        return Ok(response);
+                    }
+                    // Retry on 5xx server errors and 429
+                    if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
+                        last_error = Some(anyhow::anyhow!("{} returned {}", operation, status));
+                        continue;
+                    }
+                    return Ok(response);
+                }
+                Err(e) => {
+                    // Network errors are retryable
+                    last_error = Some(anyhow::anyhow!("{} network error: {}", operation, e));
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("{} failed after {} retries", operation, MAX_RETRIES)))
+    }
+
     /// Register bot with control plane on first boot
     pub async fn register(
         &self,
         wallet_address: Option<String>,
     ) -> anyhow::Result<RegistrationResponse> {
         let url = format!("{}/v1/bot/{}/register", self.base_url, self.bot_id);
-        
+
         let req = RegisterRequest {
             agent_wallet: wallet_address.unwrap_or_default(),
         };
 
-        let response = self.client
-            .post(&url)
-            .json(&req)
-            .send()
+        let response = self
+            .with_retry("register", || self.client.post(&url).json(&req).send())
             .await?;
 
         if response.status().is_success() {
@@ -58,20 +107,15 @@ impl ControlPlaneClient {
     }
 
     /// Report wallet address to control plane (for post-registration update)
-    pub async fn report_wallet(
-        &self,
-        wallet_address: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn report_wallet(&self, wallet_address: &str) -> anyhow::Result<()> {
         let url = format!("{}/v1/bot/{}/wallet", self.base_url, self.bot_id);
-        
+
         let req = WalletReportRequest {
             wallet_address: wallet_address.to_string(),
         };
 
-        let response = self.client
-            .post(&url)
-            .json(&req)
-            .send()
+        let response = self
+            .with_retry("report_wallet", || self.client.post(&url).json(&req).send())
             .await?;
 
         if response.status().is_success() {
@@ -85,25 +129,22 @@ impl ControlPlaneClient {
     }
 
     /// Poll for config updates
-    pub async fn get_config(
-        &self,
-    ) -> anyhow::Result<Option<BotConfig>> {
+    pub async fn get_config(&self) -> anyhow::Result<Option<BotConfig>> {
         let url = format!("{}/v1/bot/{}/config", self.base_url, self.bot_id);
 
         debug!("Polling config from {}", url);
 
-        let response = self.client
-            .get(&url)
-            .send()
+        let response = self
+            .with_retry("get_config", || self.client.get(&url).send())
             .await?;
 
         match response.status() {
-            reqwest::StatusCode::OK => {
+            StatusCode::OK => {
                 let config: BotConfigResponse = response.json().await?;
                 debug!("Received config version: {}", config.version);
                 Ok(Some(BotConfig::from_response(config)))
             }
-            reqwest::StatusCode::NOT_MODIFIED => {
+            StatusCode::NOT_MODIFIED => {
                 debug!("Config unchanged");
                 Ok(None)
             }
@@ -116,10 +157,7 @@ impl ControlPlaneClient {
     }
 
     /// Acknowledge config version
-    pub async fn ack_config(
-        &self,
-        version_id: Uuid,
-    ) -> anyhow::Result<()> {
+    pub async fn ack_config(&self, version_id: Uuid) -> anyhow::Result<()> {
         let url = format!("{}/v1/bot/{}/config_ack", self.base_url, self.bot_id);
 
         let req = ConfigAckRequest {
@@ -128,10 +166,8 @@ impl ControlPlaneClient {
             applied_at: chrono::Utc::now(),
         };
 
-        let response = self.client
-            .post(&url)
-            .json(&req)
-            .send()
+        let response = self
+            .with_retry("ack_config", || self.client.post(&url).json(&req).send())
             .await?;
 
         if response.status().is_success() {
@@ -158,10 +194,8 @@ impl ControlPlaneClient {
             metrics,
         };
 
-        let response = self.client
-            .post(&url)
-            .json(&req)
-            .send()
+        let response = self
+            .with_retry("heartbeat", || self.client.post(&url).json(&req).send())
             .await?;
 
         if response.status().is_success() {
@@ -175,18 +209,13 @@ impl ControlPlaneClient {
     }
 
     /// Send events
-    pub async fn send_events(
-        &self,
-        events: Vec<EventInput>,
-    ) -> anyhow::Result<()> {
+    pub async fn send_events(&self, events: Vec<EventInput>) -> anyhow::Result<()> {
         let url = format!("{}/v1/bot/{}/events", self.base_url, self.bot_id);
 
         let req = EventsBatchRequest { events };
 
-        let response = self.client
-            .post(&url)
-            .json(&req)
-            .send()
+        let response = self
+            .with_retry("send_events", || self.client.post(&url).json(&req).send())
             .await?;
 
         if response.status().is_success() {

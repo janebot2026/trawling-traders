@@ -241,14 +241,16 @@
 - **Test Plan:** Test each symbol against Pyth API
 - **Status:** Not started
 
-### [ ] BR-09: Missing retry logic for control plane calls
+### [x] BR-09: Missing retry logic for control plane calls
 - **Files:** `services/bot-runner/src/client.rs`
 - **Planned Fix:**
   - Add retry wrapper with 3 attempts
   - Exponential backoff (1s, 2s, 4s)
-  - Don't retry on 4xx errors
+  - Don't retry on 4xx errors (except 429)
 - **Test Plan:** Test with simulated network failures
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** with_retry() helper retries 5xx and network errors
 
 ---
 
@@ -627,10 +629,10 @@
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
-| High | 16 | 7 | 9 |
+| High | 16 | 8 | 8 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **14** | **57** |
+| **Total** | **71** | **15** | **56** |
 
 ---
 
@@ -662,5 +664,6 @@
 | CP-06 | dfb719c5 | 2026-02-04 | Added proper Base58 validation for Solana wallets |
 | CP-08 | 7593473d | 2026-02-04 | Added RiskCaps validation with safe value ranges |
 | CP-07 | 9fd6f43d | 2026-02-04 | Replaced probabilistic cleanup with deterministic |
-| BR-08 | (pending) | 2026-02-04 | Fixed slippage calc with Decimal and absolute value |
+| BR-08 | ec210837 | 2026-02-04 | Fixed slippage calc with Decimal and absolute value |
+| BR-09 | (pending) | 2026-02-05 | Added retry logic with exponential backoff |
 
