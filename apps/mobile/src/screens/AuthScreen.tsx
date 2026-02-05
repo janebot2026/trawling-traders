@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import {
   EmailLoginForm,
   GoogleLoginButton,
 } from '@cedros/login-react-native';
+import { api } from '@trawling-traders/api-client';
 
 const { width } = Dimensions.get('window');
 
@@ -37,10 +38,37 @@ export function AuthScreen() {
   const scaleAnim = React.useRef(new Animated.Value(0.8)).current;
   const featureAnim = React.useRef(new Animated.Value(0)).current;
 
-  // Navigate when authenticated
+  // Track if navigation is in progress to prevent race condition
+  const isNavigatingRef = useRef(false);
+
+  // Navigate when authenticated, checking subscription status first
   useEffect(() => {
-    if (isAuthenticated && user) {
-      navigation.navigate('Main');
+    if (isAuthenticated && user && !isNavigatingRef.current) {
+      isNavigatingRef.current = true;
+
+      // Check subscription status before navigating
+      api.getMe()
+        .then((userData) => {
+          const subscription = userData.subscription;
+          const isActive = subscription?.status === 'active';
+
+          if (isActive) {
+            navigation.navigate('Main');
+          } else {
+            // No active subscription - go to subscribe screen
+            navigation.navigate('Subscribe');
+          }
+        })
+        .catch((error) => {
+          if (__DEV__) {
+            console.error('Failed to check subscription status:', error);
+          }
+          // On error, default to Main (subscription middleware will handle)
+          navigation.navigate('Main');
+        })
+        .finally(() => {
+          isNavigatingRef.current = false;
+        });
     }
   }, [isAuthenticated, user, navigation]);
 
