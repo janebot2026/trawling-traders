@@ -300,8 +300,8 @@ impl AlertManager {
             }
         }
 
-        // TODO: Add webhook/email notification here
-        // e.g., send_webhook_notification(&title, &message, severity).await;
+        // Note: For webhook/email notification, use fire_alert_with_webhook()
+        // from webhook.rs which combines logging with external notifications.
     }
 
 
