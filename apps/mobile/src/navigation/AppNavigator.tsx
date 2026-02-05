@@ -3,13 +3,13 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 // Screens
-import { AuthScreen } from './screens/AuthScreen';
-import { SubscribeScreen } from './screens/SubscribeScreen';
-import { BotsListScreen } from './screens/BotsListScreen';
-import { CreateBotScreen } from './screens/CreateBotScreen';
-import { BotDetailScreen } from './screens/BotDetailScreen';
-import { BotSettingsScreen } from './screens/BotSettingsScreen';
-import { ProfileScreen } from './screens/ProfileScreen';
+import { AuthScreen } from '../screens/AuthScreen';
+import { SubscribeScreen } from '../screens/SubscribeScreen';
+import { BotsListScreen } from '../screens/BotsListScreen';
+import { CreateBotScreen } from '../screens/CreateBotScreen';
+import { BotDetailScreen } from '../screens/BotDetailScreen';
+import { BotSettingsScreen } from '../screens/BotSettingsScreen';
+import { ProfileScreen } from '../screens/ProfileScreen';
 
 // Types
 export type RootStackParamList = {
