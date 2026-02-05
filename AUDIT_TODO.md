@@ -524,13 +524,15 @@
 - **Verification:** TypeScript syntax valid
 - **Note:** Added isMountedRef guard to all async state updates
 
-### [ ] MB-11: Animation memory leaks
+### [x] MB-11: Animation memory leaks
 - **Files:** `apps/mobile/src/utils/animations.ts`
 - **Planned Fix:**
   - Refactor to hooks with proper cleanup
   - Return cleanup function
 - **Test Plan:** Profile memory during navigation
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** TypeScript syntax valid
+- **Note:** New hooks with useEffect cleanup; legacy functions marked deprecated
 
 ### [ ] MB-14: No offline handling
 - **Files:** All screens
@@ -731,9 +733,9 @@
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
 | High | 16 | 15 | 1 (deferred) |
-| Medium | 32 | 29 | 3 |
+| Medium | 32 | 30 | 2 |
 | Low | 15 | 15 | 0 |
-| **Total** | **71** | **66** | **5** |
+| **Total** | **71** | **67** | **4** |
 
 ---
 
@@ -817,4 +819,5 @@
 | BR-10 | fb61550a | 2026-02-05 | Batch eviction instead of O(n) scan |
 | MB-07 | f6f4d3d3 | 2026-02-05 | Differentiate network error types |
 | MB-13 | 28106574 | 2026-02-05 | Use useSafeAreaInsets for dynamic paddingTop |
+| MB-11 | 3347a678 | 2026-02-05 | Refactor animations to hooks with cleanup |
 
