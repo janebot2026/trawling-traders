@@ -48,7 +48,10 @@ impl CoinGeckoClient {
         req
     }
     
-    /// Rate-limited request wrapper
+    /// Per-request timeout (10 seconds for individual API calls)
+    const REQUEST_TIMEOUT_SECS: u64 = 10;
+
+    /// Rate-limited request wrapper with per-request timeout
     async fn rate_limited_request<T: serde::de::DeserializeOwned>(
         &self,
         endpoint: &str,
@@ -58,7 +61,7 @@ impl CoinGeckoClient {
             .acquire()
             .await
             .map_err(|e| DataRetrievalError::ApiError(e.to_string()))?;
-        
+
         // Ensure minimum delay between requests (free tier friendly)
         {
             let mut last = self.last_request.lock().await;
@@ -68,11 +71,18 @@ impl CoinGeckoClient {
             }
             *last = Instant::now();
         }
-        
-        let response = self.build_request(endpoint)
-            .send()
-            .await
-            .map_err(|e| DataRetrievalError::ApiError(e.to_string()))?;
+
+        // Wrap request in explicit per-request timeout
+        let request_future = self.build_request(endpoint).send();
+        let response = tokio::time::timeout(
+            Duration::from_secs(Self::REQUEST_TIMEOUT_SECS),
+            request_future
+        )
+        .await
+        .map_err(|_| DataRetrievalError::ApiError(format!(
+            "CoinGecko request to {} timed out after {}s", endpoint, Self::REQUEST_TIMEOUT_SECS
+        )))?
+        .map_err(|e| DataRetrievalError::ApiError(e.to_string()))?;
         
         let status = response.status();
         
