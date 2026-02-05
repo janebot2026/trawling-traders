@@ -534,13 +534,15 @@
 - **Verification:** TypeScript syntax valid
 - **Note:** New hooks with useEffect cleanup; legacy functions marked deprecated
 
-### [ ] MB-14: No offline handling
+### [x] MB-14: No offline handling
 - **Files:** All screens
 - **Planned Fix:**
   - Add NetInfo listener
   - Show offline message instead of "Failed to load"
 - **Test Plan:** Test offline scenarios
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** TypeScript syntax valid
+- **Note:** NetworkContext with offline banner, BotsListScreen shows specific message
 
 ### [x] MB-15: BotCard not memoized
 - **Files:** `apps/mobile/src/screens/BotsListScreen.tsx`
@@ -733,9 +735,9 @@
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
 | High | 16 | 15 | 1 (deferred) |
-| Medium | 32 | 30 | 2 |
+| Medium | 32 | 31 | 1 |
 | Low | 15 | 15 | 0 |
-| **Total** | **71** | **67** | **4** |
+| **Total** | **71** | **68** | **3** |
 
 ---
 
@@ -820,4 +822,5 @@
 | MB-07 | f6f4d3d3 | 2026-02-05 | Differentiate network error types |
 | MB-13 | 28106574 | 2026-02-05 | Use useSafeAreaInsets for dynamic paddingTop |
 | MB-11 | 3347a678 | 2026-02-05 | Refactor animations to hooks with cleanup |
+| MB-14 | 8256f96d | 2026-02-05 | Add offline detection and user-friendly messages |
 
