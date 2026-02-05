@@ -1,6 +1,8 @@
 //! Authentication middleware for Cedros Login JWT validation
 //!
 //! Protects app-facing routes by validating JWT tokens from Cedros Login.
+//!
+//! Requires `JWT_SECRET` environment variable to be set for signature verification.
 
 use axum::{
     body::Body,
@@ -9,6 +11,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -31,6 +34,8 @@ pub struct CedrosClaims {
     pub iat: i64,           // Issued at timestamp
     #[serde(default)]
     pub is_admin: bool,
+    #[serde(default)]
+    pub iss: Option<String>, // Issuer (optional)
 }
 
 /// Auth middleware that validates Cedros Login JWT tokens
@@ -57,14 +62,9 @@ pub async fn auth_middleware(
         .strip_prefix("Bearer ")
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    // Validate JWT (simplified - in production, use proper JWT validation with JWKS)
+    // Validate JWT with signature verification
+    // Note: jsonwebtoken crate handles expiration validation internally
     let claims = validate_jwt(token).await?;
-
-    // Check token expiration
-    let now = chrono::Utc::now().timestamp();
-    if claims.exp < now {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
 
     // Create auth context
     let auth_context = AuthContext {
@@ -79,40 +79,48 @@ pub async fn auth_middleware(
     Ok(next.run(request).await)
 }
 
-/// Validate JWT token
+/// Validate JWT token with proper signature verification
 ///
-/// In production, this should:
-/// 1. Fetch JWKS from Cedros Login
-/// 2. Verify signature against public key
-/// 3. Check issuer and audience claims
+/// Validates the JWT signature using the `JWT_SECRET` environment variable.
+/// Also validates expiration and optionally issuer/audience claims.
 ///
-/// For now, we do basic validation and trust the token structure.
-async fn validate_jwt(
-    token: &str,
-) -> Result<CedrosClaims, StatusCode> {
-    // Parse JWT (header.payload.signature)
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 3 {
-        return Err(StatusCode::UNAUTHORIZED);
+/// # Security
+/// - Signature is verified using HMAC-SHA256
+/// - Token expiration is checked
+/// - Invalid tokens are rejected with 401 Unauthorized
+///
+/// # Environment Variables
+/// - `JWT_SECRET`: Required. The secret key for HMAC signature verification (min 32 bytes recommended)
+/// - `JWT_ISSUER`: Optional. If set, validates the `iss` claim matches this value
+async fn validate_jwt(token: &str) -> Result<CedrosClaims, StatusCode> {
+    // Get JWT secret from environment
+    let jwt_secret = std::env::var("JWT_SECRET").map_err(|_| {
+        tracing::error!("JWT_SECRET environment variable not set - cannot validate tokens");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if jwt_secret.len() < 32 {
+        tracing::warn!("JWT_SECRET is shorter than 32 bytes - consider using a stronger secret");
     }
 
-    // Decode payload (base64url)
-    let payload = base64_decode(parts[1]).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    // Configure validation
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
 
-    // Parse claims
-    let claims: CedrosClaims =
-        serde_json::from_slice(&payload).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    // Optionally validate issuer if configured
+    if let Ok(issuer) = std::env::var("JWT_ISSUER") {
+        validation.set_issuer(&[issuer]);
+    }
 
-    // TODO: In production, verify signature against Cedros Login JWKS
-    // For hackathon MVP, we trust the token structure from Cedros Login
+    // Decode and verify the token
+    let decoding_key = DecodingKey::from_secret(jwt_secret.as_bytes());
 
-    Ok(claims)
-}
+    let token_data = decode::<CedrosClaims>(token, &decoding_key, &validation).map_err(|e| {
+        tracing::debug!("JWT validation failed: {:?}", e);
+        StatusCode::UNAUTHORIZED
+    })?;
 
-/// Base64URL decode (no padding)
-fn base64_decode(input: &str) -> Result<Vec<u8>, ()> {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-    URL_SAFE_NO_PAD.decode(input).map_err(|_| ())
+    Ok(token_data.claims)
 }
 
 /// Extract AuthContext from request extensions

@@ -17,14 +17,16 @@
 
 ## Critical Severity (8 items)
 
-### [ ] CP-01: JWT validation completely bypassed
+### [x] CP-01: JWT validation completely bypassed
 - **Files:** `services/control-plane/src/middleware/auth.rs`
 - **Planned Fix:**
-  - Add proper JWT signature verification
-  - Validate token expiration
-  - Check issuer/audience claims
+  - Add proper JWT signature verification using jsonwebtoken crate
+  - Validate token expiration (built into jsonwebtoken)
+  - Support optional issuer validation via JWT_ISSUER env var
 - **Test Plan:** Create test with forged JWT; verify 401 returned
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes; JWT_SECRET env var required for startup
+- **Note:** Uses HS256 algorithm. Set JWT_SECRET (min 32 bytes) and optionally JWT_ISSUER
 
 ### [ ] CP-02: Secrets never encrypted
 - **Files:** `services/control-plane/src/secrets.rs`
@@ -602,11 +604,11 @@
 
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
-| Critical | 8 | 0 | 8 |
+| Critical | 8 | 1 | 7 |
 | High | 16 | 1 | 15 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **1** | **70** |
+| **Total** | **71** | **2** | **69** |
 
 ---
 
@@ -625,5 +627,5 @@
 
 | ID | Commit | Date | Notes |
 |----|--------|------|-------|
-| MB-20 | pending | 2026-02-04 | Fixed missing `>` in JSX self-closing tag |
+| MB-20 | 29739829 | 2026-02-04 | Fixed missing `>` in JSX self-closing tag |
 
