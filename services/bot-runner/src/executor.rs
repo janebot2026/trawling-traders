@@ -93,16 +93,26 @@ impl QuoteCache {
         };
 
         let mut entries = self.entries.write().await;
-        
+
+        // Batch eviction: when full, remove 10% oldest entries at once
+        // This amortizes the O(n) scan cost instead of doing it on every insert
         if entries.len() >= self.max_size {
-            let oldest = entries.iter()
-                .min_by_key(|(_, entry)| entry.cached_at)
-                .map(|(k, _)| k.clone());
-            if let Some(k) = oldest {
+            let evict_count = (self.max_size / 10).max(1);
+            let mut items: Vec<_> = entries.iter()
+                .map(|(k, e)| (k.clone(), e.cached_at))
+                .collect();
+            items.sort_by_key(|(_, t)| *t);
+
+            for (k, _) in items.into_iter().take(evict_count) {
                 entries.remove(&k);
             }
+
+            debug!(
+                "Quote cache batch eviction: removed {} entries, {} remaining",
+                evict_count, entries.len()
+            );
         }
-        
+
         entries.insert(key, QuoteCacheEntry {
             price,
             cached_at: Instant::now(),
