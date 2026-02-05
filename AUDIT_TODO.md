@@ -106,12 +106,14 @@
 
 ## High Severity (16 items)
 
-### [ ] CP-03: SQL injection risk via unsafe type casting
+### [x] CP-03: SQL injection risk via unsafe type casting
 - **Files:** `services/control-plane/src/handlers/bots.rs`
 - **Planned Fix:**
   - Use native enum binding instead of string with `::bot_status` cast
 - **Test Plan:** Static analysis; verify all status sources are trusted enums
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** BotStatus enum bound directly via sqlx::Type, removed string casts
 
 ### [x] CP-05: Race condition in bot creation
 - **Files:** `services/control-plane/src/handlers/bots.rs`
@@ -154,13 +156,15 @@
 - **Verification:** cargo check passes
 - **Note:** Added RiskCaps::validate() and call it in create_bot and update_config
 
-### [ ] BR-06: Race condition in intent registry (TOCTOU)
+### [x] BR-06: Race condition in intent registry (TOCTOU)
 - **Files:** `services/bot-runner/src/runner.rs`, `services/bot-runner/src/intent.rs`
 - **Planned Fix:**
   - Create atomic `try_create()` pattern
   - Check and insert in single operation
 - **Test Plan:** Concurrent signal test; verify no duplicate intents
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo test passes (test_try_create_atomic)
+- **Note:** try_create() atomically checks for equivalent and creates new intent
 
 ### [x] BR-08: Incorrect slippage calculation
 - **Files:** `services/bot-runner/src/executor.rs`
@@ -191,32 +195,38 @@
 - **Verification:** cargo check passes
 - **Note:** Uses DateTime::from_timestamp_millis() with fallback to now()
 
-### [ ] DR-06: No WebSocket reconnection logic
-- **Files:** `services/data-retrieval/src/lib.rs`
+### [x] DR-06: No WebSocket reconnection logic
+- **Files:** `services/data-retrieval/src/lib.rs`, `services/data-retrieval/src/sources/binance_ws.rs`
 - **Planned Fix:**
   - Add reconnection logic with exponential backoff
   - Log reconnection attempts
   - Update health status on disconnect
 - **Test Plan:** Simulate disconnect; verify reconnection
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Exponential backoff 1s-60s, calls client.reconnect() which resubscribes
 
-### [ ] MB-02: No token expiration handling in API client
+### [x] MB-02: No token expiration handling in API client
 - **Files:** `packages/api-client/src/index.ts`
 - **Planned Fix:**
   - Detect 401 responses
   - Attempt token refresh
   - Redirect to login if refresh fails
 - **Test Plan:** Test with expired token; verify refresh flow
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** TypeScript syntax valid
+- **Note:** Auto-refresh via TokenManager, throws AuthExpiredError on failure
 
-### [ ] MB-16: Logout doesn't clear auth state
+### [x] MB-16: Logout doesn't clear auth state
 - **Files:** `apps/mobile/src/screens/ProfileScreen.tsx`
 - **Planned Fix:**
   - Call `logout()` from Cedros SDK
   - Clear AsyncStorage
   - Reset navigation stack to Auth
 - **Test Plan:** Test logout; verify back button shows auth screen
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** TypeScript syntax valid
+- **Note:** Uses CommonActions.reset to prevent back navigation to auth screens
 
 ### [x] MB-20: Syntax error in AnimatedBotCard (build fails)
 - **Files:** `apps/mobile/src/components/AnimatedBotCard.tsx`
@@ -227,13 +237,15 @@
 - **Verification:** Babel parser confirms valid JSX syntax
 - **Note:** External dependency @cedros/pay-react-native has separate syntax errors (not our code)
 
-### [ ] DR-12: CoinGecko candle logic completely wrong
+### [x] DR-12: CoinGecko candle logic completely wrong
 - **Files:** `services/data-retrieval/src/sources/coingecko.rs`
 - **Planned Fix:**
   - Use `/coins/{id}/ohlc` endpoint instead of market_chart
   - Parse OHLC data correctly
 - **Test Plan:** Verify candles match exchange data
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Uses proper OHLC endpoint, maps timeframes to CoinGecko day values
 
 ### [ ] DR-13: Pyth feed IDs are placeholder/fake values
 - **Files:** `services/data-retrieval/src/sources/pyth.rs`
@@ -258,13 +270,15 @@
 
 ## Medium Severity (32 items)
 
-### [ ] CP-09: Decimal-to-BigDecimal silent data loss
-- **Files:** `services/control-plane/src/models/mod.rs`
+### [x] CP-09: Decimal-to-BigDecimal silent data loss
+- **Files:** `services/control-plane/src/models/mod.rs`, `handlers/sync.rs`
 - **Planned Fix:**
   - Return Result instead of using `unwrap_or_default()`
   - Propagate conversion errors
 - **Test Plan:** Test with edge-case Decimal values
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Conversions now return Result, sync returns 400 on invalid values
 
 ### [ ] CP-10: Authorization check duplicated in every handler
 - **Files:** `services/control-plane/src/handlers/bots.rs`
@@ -393,13 +407,15 @@
 - **Test Plan:** Test on various device form factors
 - **Status:** Not started
 
-### [ ] MB-19: No fetch timeout in API client
+### [x] MB-19: No fetch timeout in API client
 - **Files:** `packages/api-client/src/index.ts`
 - **Planned Fix:**
   - Add 30s timeout via AbortController
   - Throw ApiError on timeout
 - **Test Plan:** Test with simulated network hang
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** TypeScript syntax valid
+- **Note:** Added TimeoutError class for distinguishing timeout errors
 
 ### [ ] INF-01: Weak postgres credentials in docker-compose
 - **Files:** `docker-compose.yml`
@@ -442,12 +458,14 @@
 - **Test Plan:** Test under high concurrency
 - **Status:** Not started
 
-### [ ] MB-05: fetchBots in both useEffect and useFocusEffect
+### [x] MB-05: fetchBots in both useEffect and useFocusEffect
 - **Files:** `apps/mobile/src/screens/BotsListScreen.tsx`
 - **Planned Fix:**
   - Remove useEffect, keep only useFocusEffect
 - **Test Plan:** Monitor network tab for duplicate requests
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** TypeScript syntax valid
+- **Note:** useFocusEffect handles both initial load and refocus
 
 ### [ ] MB-06: Missing pulseAnim in useEffect dependencies
 - **Files:** `apps/mobile/src/components/AnimatedBotCard.tsx`
@@ -633,10 +651,10 @@
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
-| High | 16 | 9 | 7 |
-| Medium | 32 | 1 | 31 |
+| High | 16 | 15 | 1 (deferred) |
+| Medium | 32 | 4 | 28 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **17** | **54** |
+| **Total** | **71** | **26** | **45** |
 
 ---
 
@@ -645,7 +663,7 @@
 *Items that require larger architectural changes or external dependencies:*
 
 - **CP-04**: Secrets in droplet user-data - requires new endpoint and bot-side changes
-- **DR-13**: Pyth feed IDs - requires research into real feed IDs
+- **DR-13**: Pyth feed IDs - requires research into real Pyth Oracle feed IDs from pyth.network
 
 ---
 
@@ -671,5 +689,14 @@
 | BR-08 | ec210837 | 2026-02-04 | Fixed slippage calc with Decimal and absolute value |
 | BR-09 | 7fa63286 | 2026-02-05 | Added retry logic with exponential backoff |
 | CP-05 | 047bded5 | 2026-02-05 | Transaction with FOR UPDATE for atomic bot creation |
-| INF-02 | (pending) | 2026-02-05 | Removed duplicate index from migration 002 |
+| INF-02 | a76a5137 | 2026-02-05 | Removed duplicate index from migration 002 |
+| CP-03 | 5f552759 | 2026-02-05 | Use native enum binding instead of string casts |
+| BR-06 | 602fc281 | 2026-02-05 | Atomic try_create prevents TOCTOU race condition |
+| DR-06 | 3cb511ce | 2026-02-05 | WebSocket reconnection with exponential backoff |
+| MB-02 | 08775798 | 2026-02-05 | Token expiration handling with auto-refresh |
+| MB-16 | 9f464e00 | 2026-02-05 | Logout clears auth state and resets navigation |
+| DR-12 | 222c2e2a | 2026-02-05 | Use CoinGecko OHLC endpoint for proper candles |
+| CP-09 | 4187204e | 2026-02-05 | Proper error handling for Decimal conversions |
+| MB-19 | 0977fe65 | 2026-02-05 | Add 30s timeout to fetch requests |
+| MB-05 | b5f3a75b | 2026-02-05 | Remove duplicate fetchBots call |
 
