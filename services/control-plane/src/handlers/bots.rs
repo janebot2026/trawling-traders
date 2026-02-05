@@ -94,7 +94,7 @@ pub async fn create_bot(
     .bind(req.risk_caps.max_trades_per_day)
     .bind(req.trading_mode)
     .bind(&req.llm_provider)
-    .bind(state.secrets.encrypt(&req.llm_api_key))
+    .bind(req.llm_api_key.as_ref().map(|k| state.secrets.encrypt(k).unwrap_or_default()).unwrap_or_default())
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -343,6 +343,9 @@ async fn spawn_bot_droplet(
     metrics: crate::MetricsCollector,
     semaphore: Arc<tokio::sync::Semaphore>,
 ) {
+    // Track in-flight metric before acquiring permit
+    let available_permits = semaphore.available_permits();
+
     // Acquire concurrency permit (owned so we can move it into spawned task)
     let _permit = match semaphore.acquire_owned().await {
         Ok(p) => p,
@@ -352,9 +355,8 @@ async fn spawn_bot_droplet(
             return;
         }
     };
-    
-    // Track in-flight metric
-    metrics.gauge(crate::observability::metrics::PROVISION_QUEUE_DEPTH, semaphore.available_permits() as f64).await;
+
+    metrics.gauge(crate::observability::metrics::PROVISION_QUEUE_DEPTH, available_permits as f64).await;
     
     let do_token = match std::env::var("DIGITALOCEAN_TOKEN") {
         Ok(token) => token,
@@ -394,7 +396,7 @@ async fn spawn_bot_droplet(
     // Generate comprehensive user_data script with secrets
     let user_data = generate_user_data(bot_id, &bot_name, &control_plane_url, &data_retrieval_url, &jupiter_api_key);
     
-    let droplet_req = Arc::new(claw_spawn::domain::DropletCreateRequest {
+    let droplet_req = claw_spawn::domain::DropletCreateRequest {
         name: droplet_name,
         region: "nyc3".to_string(),
         size: "s-1vcpu-2gb".to_string(),
@@ -618,7 +620,7 @@ pub async fn update_bot_config(
     .bind(req.config.risk_caps.max_trades_per_day)
     .bind(req.config.trading_mode)
     .bind(&req.config.llm_provider)
-    .bind(state.secrets.encrypt(&req.llm_api_key))
+    .bind(req.config.llm_api_key.as_ref().map(|k| state.secrets.encrypt(k).unwrap_or_default()).unwrap_or_default())
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;

@@ -7,10 +7,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use crate::{
-    types::*,
-    AppState,
-};
+use crate::AppState;
+use data_retrieval::types::SourceHealth;
 
 /// Query params for price endpoint
 #[derive(Debug, serde::Deserialize)]
@@ -29,7 +27,7 @@ fn default_quote() -> String {
 pub async fn get_price(
     State(state): State<Arc<AppState>>,
     Query(query): Query<PriceQuery>,
-) -> Result<Json<PriceResponse>>, (StatusCode, String)> {
+) -> Result<Json<PriceResponse>, (StatusCode, String)> {
     let symbol = query.symbol.to_uppercase();
     let quote = query.quote.to_uppercase();
     
@@ -69,7 +67,7 @@ pub async fn get_price(
 pub async fn get_prices_batch(
     State(state): State<Arc<AppState>>,
     Json(req): Json<BatchPriceRequest>,
-) -> Result<Json<BatchPriceResponse>>, (StatusCode, String)> {
+) -> Result<Json<BatchPriceResponse>, (StatusCode, String)> {
     let mut results = HashMap::new();
     let mut errors = Vec::new();
     

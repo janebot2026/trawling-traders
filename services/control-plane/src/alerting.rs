@@ -275,32 +275,8 @@ impl AlertManager {
                  format!("Last heartbeat: {}", last))
             }
             AlertType::ConfigMismatch { bot_id, desired, applied } => {
-            AlertType::RepeatedTradeFailed { bot_id, consecutive_fails } => {
-                (format!("Repeated Trade Failures [{}]", bot_id),
-                 format!("{} consecutive failed trades", consecutive_fails))
-            }
-            AlertType::DrawdownBreach { bot_id, current_dd, limit } => {
-                (format!("Drawdown Breach [{}]", bot_id),
-                 format!("Current: {}%, Limit: {}%", current_dd, limit))
-            }
                 (format!("Config Mismatch [{}]", bot_id),
-            AlertType::RepeatedTradeFailed { bot_id, consecutive_fails } => {
-                (format!("Repeated Trade Failures [{}]", bot_id),
-                 format!("{} consecutive failed trades", consecutive_fails))
-            }
-            AlertType::DrawdownBreach { bot_id, current_dd, limit } => {
-                (format!("Drawdown Breach [{}]", bot_id),
-                 format!("Current: {}%, Limit: {}%", current_dd, limit))
-            }
                  format!("Desired: {}, Applied: {}", desired, applied))
-            AlertType::RepeatedTradeFailed { bot_id, consecutive_fails } => {
-                (format!("Repeated Trade Failures [{}]", bot_id),
-                 format!("{} consecutive failed trades", consecutive_fails))
-            }
-            AlertType::DrawdownBreach { bot_id, current_dd, limit } => {
-                (format!("Drawdown Breach [{}]", bot_id),
-                 format!("Current: {}%, Limit: {}%", current_dd, limit))
-            }
             }
             AlertType::RepeatedTradeFailed { bot_id, consecutive_fails } => {
                 (format!("Repeated Trade Failures [{}]", bot_id),
@@ -330,18 +306,18 @@ impl AlertManager {
 
 
     /// Record a trade failure and check for repeated failures
-    pub async fn record_trade_failure(u0026self, bot_id: u0026str) -> Optionu003cAlertTypeu003e {
+    pub async fn record_trade_failure(&self, bot_id: &str) -> Option<AlertType> {
         let mut failures = self.trade_failures.write().await;
         let count = failures.entry(bot_id.to_string()).or_insert(0);
         *count += 1;
-        
+
         let current_count = *count;
         drop(failures);
-        
+
         // Alert on 3+ consecutive failures
         if current_count >= 3 {
             let key = format!("trade_fails:{}", bot_id);
-            if self.should_fire(u0026key, 600).await { // 10 min cooldown
+            if self.should_fire(&key, 600).await { // 10 min cooldown
                 self.record_fired(key).await;
                 return Some(AlertType::RepeatedTradeFailed {
                     bot_id: bot_id.to_string(),
@@ -353,7 +329,7 @@ impl AlertManager {
     }
     
     /// Reset trade failure count on success
-    pub async fn reset_trade_failures(u0026self, bot_id: u0026str) {
+    pub async fn reset_trade_failures(&self, bot_id: &str) {
         let mut failures = self.trade_failures.write().await;
         failures.remove(bot_id);
     }

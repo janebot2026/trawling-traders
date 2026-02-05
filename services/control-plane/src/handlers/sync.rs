@@ -174,11 +174,12 @@ pub async fn heartbeat(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
     if let Some(metrics_batch) = req.metrics {
+        let batch_len = metrics_batch.len();
         for metric in metrics_batch {
             // Convert Decimal to BigDecimal for database storage
             let equity_bd = bigdecimal_from_decimal(metric.equity);
             let pnl_bd = bigdecimal_from_decimal(metric.pnl);
-            
+
             sqlx::query(
                 "INSERT INTO metrics (bot_id, timestamp, equity, pnl) VALUES ($1, $2, $3, $4)"
             )
@@ -190,8 +191,8 @@ pub async fn heartbeat(
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         }
-        
-        state.metrics.increment(metrics::METRICS_BATCH_RECEIVED, metrics_batch.len() as u64).await;
+
+        state.metrics.increment(metrics::METRICS_BATCH_RECEIVED, batch_len as u64).await;
     }
     
     let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")

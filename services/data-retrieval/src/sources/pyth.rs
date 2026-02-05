@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
 
-use crate::types::PricePoint;
+use crate::types::{Candle, DataRetrievalError, PriceDataSource, PricePoint, SourceHealth, TimeFrame};
 
 const PYTH_HERMES_BASE: &str = "https://hermes.pyth.network/v2";
 
@@ -67,6 +67,7 @@ pub struct PriceData {
 }
 
 /// Pyth Network client for price feeds
+#[derive(Clone)]
 pub struct PythClient {
     client: Client,
     base_url: String,
@@ -233,6 +234,52 @@ impl PythClient {
     /// Get list of supported metal symbols
     pub fn supported_metals() -> Vec<&'static str> {
         vec!["ORO", "XAU", "XAG"]
+    }
+}
+
+#[async_trait::async_trait]
+impl PriceDataSource for PythClient {
+    async fn get_price(&self, asset: &str, _quote: &str) -> crate::types::Result<PricePoint> {
+        PythClient::get_price(self, asset)
+            .await
+            .map_err(|e| DataRetrievalError::ApiError(e.to_string()))
+    }
+
+    async fn get_candles(
+        &self,
+        _asset: &str,
+        _quote: &str,
+        _timeframe: TimeFrame,
+        _limit: usize,
+    ) -> crate::types::Result<Vec<Candle>> {
+        Err(DataRetrievalError::ApiError(
+            "Pyth does not support historical candles".to_string(),
+        ))
+    }
+
+    async fn health(&self) -> SourceHealth {
+        match PythClient::get_price(self, "BTC").await {
+            Ok(_) => SourceHealth {
+                source: "pyth".to_string(),
+                is_healthy: true,
+                last_success: Some(Utc::now()),
+                last_error: None,
+                success_rate_24h: 1.0,
+                avg_latency_ms: 0,
+            },
+            Err(e) => SourceHealth {
+                source: "pyth".to_string(),
+                is_healthy: false,
+                last_success: None,
+                last_error: Some(e.to_string()),
+                success_rate_24h: 0.0,
+                avg_latency_ms: 0,
+            },
+        }
+    }
+
+    fn name(&self) -> &str {
+        "pyth"
     }
 }
 

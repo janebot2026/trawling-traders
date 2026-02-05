@@ -282,6 +282,31 @@ struct MarketChartResponse {
     total_volumes: Vec<[f64; 2]>,
 }
 
+#[async_trait::async_trait]
+impl PriceDataSource for CoinGeckoClient {
+    async fn get_price(&self, asset: &str, quote: &str) -> Result<PricePoint> {
+        CoinGeckoClient::get_price(self, asset, quote).await
+    }
+
+    async fn get_candles(
+        &self,
+        asset: &str,
+        quote: &str,
+        timeframe: TimeFrame,
+        limit: usize,
+    ) -> Result<Vec<Candle>> {
+        CoinGeckoClient::get_candles(self, asset, quote, timeframe, limit).await
+    }
+
+    async fn health(&self) -> SourceHealth {
+        CoinGeckoClient::health(self).await
+    }
+
+    fn name(&self) -> &str {
+        "coingecko"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

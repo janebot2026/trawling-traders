@@ -254,6 +254,8 @@ pub struct CreateBotRequest {
     pub risk_caps: RiskCaps,
     #[validate(length(min = 1))]
     pub llm_provider: String,
+    /// Optional LLM API key (will be encrypted at rest)
+    pub llm_api_key: Option<String>,
     pub custom_assets: Option<Vec<String>>,
 }
 
@@ -267,6 +269,8 @@ pub struct BotConfigInput {
     pub trading_mode: TradingMode,
     pub risk_caps: RiskCaps,
     pub llm_provider: String,
+    /// Optional LLM API key (will be encrypted at rest)
+    pub llm_api_key: Option<String>,
     pub custom_assets: Option<Vec<String>>,
 }
 

@@ -52,6 +52,7 @@ reqwest = { version = "0.11", features = ["json"] }
 # Crypto (for secrets)
 aes-gcm = "0.10"
 base64 = "0.21"
+hex = "0.4"
 
 # Decimal for prices - use rust_decimal for logic, bigdecimal for sqlx DB
 rust_decimal = { version = "1.40", features = ["serde", "maths"] }

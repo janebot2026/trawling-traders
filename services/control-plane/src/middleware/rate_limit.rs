@@ -25,6 +25,7 @@ struct RateLimitBucket {
 }
 
 /// In-memory rate limiter (per-process, not distributed)
+#[derive(Clone)]
 pub struct RateLimiter {
     buckets: Arc<RwLock<HashMap<String, RateLimitBucket>>>,
     window_secs: u64,
