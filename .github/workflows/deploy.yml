@@ -179,7 +179,6 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.DEPLOY_KEY }}
-          key_format: base64
           script: |
             set -e
             echo "=== Trawling Traders Deployment ==="
