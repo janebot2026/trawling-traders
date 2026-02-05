@@ -54,6 +54,9 @@ aes-gcm = "0.10"
 base64 = "0.21"
 hex = "0.4"
 
+# Solana wallet validation
+bs58 = "0.5"
+
 # Decimal for prices - use rust_decimal for logic, bigdecimal for sqlx DB
 rust_decimal = { version = "1.40", features = ["serde", "maths"] }
 bigdecimal = { version = "0.4", features = ["serde"] }

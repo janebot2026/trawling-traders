@@ -124,9 +124,17 @@ pub async fn report_wallet(
     Path(bot_id): Path<Uuid>,
     Json(req): Json<WalletReportRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Validate wallet address format (basic Solana address check)
-    if req.wallet_address.len() != 44 || !req.wallet_address.chars().all(|c| c.is_alphanumeric()) {
-        return Err((StatusCode::BAD_REQUEST, "Invalid Solana wallet address format".to_string()));
+    // Validate wallet address format using proper Base58 decoding
+    // Solana public keys are 32 bytes, Base58-encoded to 43-44 characters
+    let decoded = bs58::decode(&req.wallet_address)
+        .into_vec()
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid Solana wallet address: not valid Base58".to_string()))?;
+
+    if decoded.len() != 32 {
+        return Err((StatusCode::BAD_REQUEST, format!(
+            "Invalid Solana wallet address: expected 32 bytes, got {}",
+            decoded.len()
+        )));
     }
     
     // Update bot with wallet address

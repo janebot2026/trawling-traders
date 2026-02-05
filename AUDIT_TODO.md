@@ -121,13 +121,15 @@
 - **Test Plan:** Concurrent request test; verify limit enforced
 - **Status:** Not started
 
-### [ ] CP-06: Broken Solana wallet validation
-- **Files:** `services/control-plane/src/handlers/sync.rs`
+### [x] CP-06: Broken Solana wallet validation
+- **Files:** `services/control-plane/src/handlers/sync.rs`, `Cargo.toml`
 - **Planned Fix:**
   - Add `bs58` crate dependency
   - Validate with proper Base58 decode (must be 32 bytes)
 - **Test Plan:** Test with invalid Base58 strings; verify rejection
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Added bs58 crate, validates decoded bytes == 32
 
 ### [ ] CP-07: Rate limiter memory leak (probabilistic cleanup)
 - **Files:** `services/control-plane/src/middleware/rate_limit.rs`
@@ -619,10 +621,10 @@
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
-| High | 16 | 3 | 13 |
+| High | 16 | 4 | 12 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **10** | **61** |
+| **Total** | **71** | **11** | **60** |
 
 ---
 
@@ -650,5 +652,6 @@
 | DR-03 | 6f6b0bb4 | 2026-02-04 | Added TTL eviction and max size limits to price cache |
 | DR-01 | e4ddb6e3 | 2026-02-04 | Split WebSocket into separate read/write halves |
 | DR-02 | b50edd2f | 2026-02-04 | Increased price channel capacity from 100 to 10000 |
-| DR-05 | (pending) | 2026-02-04 | Use actual trade timestamp instead of Utc::now() |
+| DR-05 | 92a9972e | 2026-02-04 | Use actual trade timestamp instead of Utc::now() |
+| CP-06 | (pending) | 2026-02-04 | Added proper Base58 validation for Solana wallets |
 
