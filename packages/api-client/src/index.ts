@@ -29,6 +29,14 @@ export class ApiError extends Error {
   }
 }
 
+// Auth session expired error - caller should redirect to login
+export class AuthExpiredError extends ApiError {
+  constructor(message: string = 'Session expired. Please log in again.') {
+    super(401, message);
+    this.name = 'AuthExpiredError';
+  }
+}
+
 // Get auth token from Cedros Login (via AsyncStorage)
 async function getAuthToken(): Promise<string | null> {
   try {
@@ -41,13 +49,41 @@ async function getAuthToken(): Promise<string | null> {
   }
 }
 
-// HTTP client with auth
+// Attempt to refresh the access token
+async function refreshAuthToken(): Promise<string | null> {
+  try {
+    const { TokenManager } = await import('@cedros/login-react-native');
+    // TokenManager should have a refresh method that uses the refresh token
+    // to get a new access token
+    if (typeof TokenManager.refreshAccessToken === 'function') {
+      return await TokenManager.refreshAccessToken();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Clear auth state on permanent auth failure
+async function clearAuthState(): Promise<void> {
+  try {
+    const { TokenManager } = await import('@cedros/login-react-native');
+    if (typeof TokenManager.clearTokens === 'function') {
+      await TokenManager.clearTokens();
+    }
+  } catch {
+    // Best effort
+  }
+}
+
+// HTTP client with auth and automatic token refresh
 async function fetchApi(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  isRetry: boolean = false
 ): Promise<any> {
   const url = `${API_BASE_URL}${endpoint}`;
-  
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) || {}),
@@ -63,6 +99,19 @@ async function fetchApi(
     ...options,
     headers,
   });
+
+  // Handle 401 Unauthorized - attempt token refresh
+  if (response.status === 401 && !isRetry) {
+    const newToken = await refreshAuthToken();
+    if (newToken) {
+      // Retry request with new token
+      return fetchApi(endpoint, options, true);
+    } else {
+      // Refresh failed - clear auth state and throw
+      await clearAuthState();
+      throw new AuthExpiredError();
+    }
+  }
 
   if (!response.ok) {
     const error = await response.text();
