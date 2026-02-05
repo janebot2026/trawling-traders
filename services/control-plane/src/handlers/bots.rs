@@ -20,6 +20,36 @@ use crate::{
     db::Db,
 };
 
+/// Helper: Get bot with authorization check
+///
+/// Validates that:
+/// 1. The user_id from auth context is valid
+/// 2. The bot exists
+/// 3. The authenticated user owns the bot
+async fn get_authorized_bot(
+    db: &sqlx::PgPool,
+    auth: &AuthContext,
+    bot_id: Uuid,
+) -> Result<Bot, (StatusCode, String)> {
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
+
+    let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
+        .bind(bot_id)
+        .fetch_one(db)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?;
+
+    if bot.user_id != user_id {
+        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+    }
+
+    Ok(bot)
+}
+
 /// GET /bots - List all bots for authenticated user
 pub async fn list_bots(
     State(state): State<Arc<AppState>>,
@@ -540,28 +570,14 @@ pub async fn get_bot(
     Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<BotResponse>, (StatusCode, String)> {
-    let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
-        .bind(bot_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        })?;
-    
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
-    
-    if bot.user_id != user_id {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
-    }
-    
+    let bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+
     let config = sqlx::query_as::<_, ConfigVersion>("SELECT * FROM config_versions WHERE id = $1")
         .bind(bot.desired_version_id)
         .fetch_optional(&state.db)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    
+
     Ok(Json(BotResponse { bot, config }))
 }
 
@@ -572,22 +588,9 @@ pub async fn update_bot_config(
     Path(bot_id): Path<Uuid>,
     Json(req): Json<UpdateBotConfigRequest>,
 ) -> Result<Json<ConfigVersion>, (StatusCode, String)> {
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
-    
-    let bot: Bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
-        .bind(bot_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        })?;
-    
-    if bot.user_id != user_id {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
-    }
-    
+    // Verify bot exists and user is authorized
+    let _bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+
     let current_version: i32 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(version), 0) FROM config_versions WHERE bot_id = $1"
     )
@@ -662,22 +665,8 @@ pub async fn bot_action(
     Path(bot_id): Path<Uuid>,
     Json(req): Json<BotActionRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
-    
-    let bot: Bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
-        .bind(bot_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        })?;
-    
-    if bot.user_id != user_id {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
-    }
-    
+    let bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+
     let pool = state.db.clone();
     
     match req.action {
@@ -742,22 +731,9 @@ pub async fn get_metrics(
     Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<MetricsResponse>, (StatusCode, String)> {
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
-    
-    let bot: Bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
-        .bind(bot_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        })?;
-    
-    if bot.user_id != user_id {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
-    }
-    
+    // Verify bot exists and user is authorized
+    let _bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+
     let metrics_db = sqlx::query_as::<_, MetricDb>(
         r#"
         SELECT * FROM metrics 
@@ -786,22 +762,9 @@ pub async fn get_events(
     Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<EventsResponse>, (StatusCode, String)> {
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
-    
-    let bot: Bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
-        .bind(bot_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        })?;
-    
-    if bot.user_id != user_id {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
-    }
-    
+    // Verify bot exists and user is authorized
+    let _bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+
     let events = sqlx::query_as::<_, Event>(
         "SELECT * FROM events WHERE bot_id = $1 ORDER BY created_at DESC LIMIT 100"
     )
