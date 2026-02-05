@@ -173,32 +173,16 @@ jobs:
       (needs.build-control-plane.result == 'success' || needs.build-data-retrieval.result == 'success')
     runs-on: ubuntu-latest
     steps:
-      - name: Debug - Check key format
+      - name: Setup SSH
         run: |
-          KEY="${{ secrets.DEPLOY_KEY }}"
-          if [ -z "$KEY" ]; then
-            echo "ERROR: DEPLOY_KEY secret is empty or not set"
-            exit 1
-          fi
-          echo "Key length: ${#KEY} characters"
-          if echo "$KEY" | grep -q "BEGIN"; then
-            echo "Key contains BEGIN header - good"
-          else
-            echo "WARNING: Key missing BEGIN header"
-          fi
-          if echo "$KEY" | grep -q "END"; then
-            echo "Key contains END footer - good"
-          else
-            echo "WARNING: Key missing END footer"
-          fi
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Deploy to Server
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USERNAME }}
-          key: ${{ secrets.DEPLOY_KEY }}
-          script: |
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_HOST }} << 'ENDSSH'
             set -e
             echo "=== Trawling Traders Deployment ==="
 
@@ -270,6 +254,11 @@ jobs:
             else
               echo "data-retrieval: FAILED - check logs with: docker logs trawling-traders-data-retrieval"
             fi
+          ENDSSH
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
 
   deployment-notification:
     needs: [deploy]
