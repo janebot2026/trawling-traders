@@ -160,14 +160,16 @@
 - **Test Plan:** Concurrent signal test; verify no duplicate intents
 - **Status:** Not started
 
-### [ ] BR-08: Incorrect slippage calculation
+### [x] BR-08: Incorrect slippage calculation
 - **Files:** `services/bot-runner/src/executor.rs`
 - **Planned Fix:**
   - Calculate absolute slippage (not just negative)
   - Use Decimal for precision
   - Handle edge cases properly
 - **Test Plan:** Test with actual < expected and vice versa
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Uses Decimal::abs() for absolute slippage, caps at u32::MAX
 
 ### [x] DR-02: Price channel capacity too small (data loss)
 - **Files:** `services/data-retrieval/src/sources/binance_ws.rs`
@@ -625,10 +627,10 @@
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
-| High | 16 | 6 | 10 |
+| High | 16 | 7 | 9 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **13** | **58** |
+| **Total** | **71** | **14** | **57** |
 
 ---
 
@@ -659,5 +661,6 @@
 | DR-05 | 92a9972e | 2026-02-04 | Use actual trade timestamp instead of Utc::now() |
 | CP-06 | dfb719c5 | 2026-02-04 | Added proper Base58 validation for Solana wallets |
 | CP-08 | 7593473d | 2026-02-04 | Added RiskCaps validation with safe value ranges |
-| CP-07 | (pending) | 2026-02-04 | Replaced probabilistic cleanup with deterministic |
+| CP-07 | 9fd6f43d | 2026-02-04 | Replaced probabilistic cleanup with deterministic |
+| BR-08 | (pending) | 2026-02-04 | Fixed slippage calc with Decimal and absolute value |
 

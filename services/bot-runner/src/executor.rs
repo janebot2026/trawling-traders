@@ -685,11 +685,16 @@ impl TradeExecutor {
                 .or_else(|| order["expectedOutAmount"].as_str().and_then(|s| s.parse().ok()))
                 .unwrap_or(0);
             
-            // Calculate realized slippage
-            let expected_out = result.quote.expected_out as f64;
-            let actual_out = out_amount as f64;
-            let slippage_bps = if expected_out > 0.0 && actual_out < expected_out {
-                (((expected_out - actual_out) / expected_out) * 10000.0) as u32
+            // Calculate realized slippage using Decimal for precision
+            // Slippage is absolute difference from expected (positive = unfavorable, negative = favorable)
+            let expected_out = Decimal::from(result.quote.expected_out);
+            let actual_out_dec = Decimal::from(out_amount);
+            let slippage_bps = if expected_out > Decimal::ZERO {
+                // Use absolute value to capture both positive and negative slippage
+                let diff = (expected_out - actual_out_dec).abs();
+                let slippage_decimal = (diff / expected_out) * Decimal::from(10000);
+                // Convert to u32, capping at max value
+                slippage_decimal.to_u32().unwrap_or(u32::MAX)
             } else {
                 0
             };
