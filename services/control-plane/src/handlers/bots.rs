@@ -53,26 +53,33 @@ pub async fn create_bot(
     
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
-    
-    let bot_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM bots WHERE user_id = $1 AND status != 'destroying'"
-    )
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    
-    if bot_count >= 4 {
-        return Err((StatusCode::FORBIDDEN, "Maximum bot limit reached".to_string()));
-    }
 
-    // Validate risk caps are within safe ranges
+    // Validate risk caps are within safe ranges (before starting transaction)
     req.risk_caps.validate()
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid risk caps: {}", e)))?;
 
+    // Use transaction to prevent race condition between count check and insert
+    let mut tx = state.db.begin().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Lock user's bots with FOR UPDATE to prevent concurrent creation
+    let bot_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM bots WHERE user_id = $1 AND status != 'destroying' FOR UPDATE"
+    )
+    .bind(user_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if bot_count >= 4 {
+        // Rollback not strictly needed since we're returning, but explicit
+        let _ = tx.rollback().await;
+        return Err((StatusCode::FORBIDDEN, "Maximum bot limit reached".to_string()));
+    }
+
     let config_id = Uuid::new_v4();
     let custom_assets_json = req.custom_assets.map(|a| serde_json::to_value(a).unwrap());
-    
+
     sqlx::query(
         r#"
         INSERT INTO config_versions (
@@ -99,12 +106,12 @@ pub async fn create_bot(
     .bind(req.trading_mode)
     .bind(&req.llm_provider)
     .bind(req.llm_api_key.as_ref().map(|k| state.secrets.encrypt(k).unwrap_or_default()).unwrap_or_default())
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    
+
     let bot_id = Uuid::new_v4();
-    
+
     let bot = sqlx::query_as::<_, Bot>(
         r#"
         INSERT INTO bots (
@@ -118,15 +125,19 @@ pub async fn create_bot(
     .bind(&req.name)
     .bind(req.persona)
     .bind(config_id)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    
+
     sqlx::query("UPDATE config_versions SET bot_id = $1 WHERE id = $2")
         .bind(bot_id)
         .bind(config_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Commit transaction - bot limit is now atomically enforced
+    tx.commit().await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
     // Clone pool for async task

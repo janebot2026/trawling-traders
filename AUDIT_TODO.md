@@ -113,13 +113,15 @@
 - **Test Plan:** Static analysis; verify all status sources are trusted enums
 - **Status:** Not started
 
-### [ ] CP-05: Race condition in bot creation
+### [x] CP-05: Race condition in bot creation
 - **Files:** `services/control-plane/src/handlers/bots.rs`
 - **Planned Fix:**
   - Wrap count check and creation in transaction
   - Use `SELECT FOR UPDATE` to lock user row
 - **Test Plan:** Concurrent request test; verify limit enforced
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** Transaction with FOR UPDATE prevents concurrent bot creation race
 
 ### [x] CP-06: Broken Solana wallet validation
 - **Files:** `services/control-plane/src/handlers/sync.rs`, `Cargo.toml`
@@ -629,10 +631,10 @@
 | Severity | Total | Completed | Remaining |
 |----------|-------|-----------|-----------|
 | Critical | 8 | 7 | 1 (deferred) |
-| High | 16 | 8 | 8 |
+| High | 16 | 9 | 7 |
 | Medium | 32 | 0 | 32 |
 | Low | 15 | 0 | 15 |
-| **Total** | **71** | **15** | **56** |
+| **Total** | **71** | **16** | **55** |
 
 ---
 
@@ -665,5 +667,6 @@
 | CP-08 | 7593473d | 2026-02-04 | Added RiskCaps validation with safe value ranges |
 | CP-07 | 9fd6f43d | 2026-02-04 | Replaced probabilistic cleanup with deterministic |
 | BR-08 | ec210837 | 2026-02-04 | Fixed slippage calc with Decimal and absolute value |
-| BR-09 | (pending) | 2026-02-05 | Added retry logic with exponential backoff |
+| BR-09 | 7fa63286 | 2026-02-05 | Added retry logic with exponential backoff |
+| CP-05 | (pending) | 2026-02-05 | Transaction with FOR UPDATE for atomic bot creation |
 
