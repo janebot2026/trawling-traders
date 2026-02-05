@@ -173,6 +173,25 @@ jobs:
       (needs.build-control-plane.result == 'success' || needs.build-data-retrieval.result == 'success')
     runs-on: ubuntu-latest
     steps:
+      - name: Debug - Check key format
+        run: |
+          KEY="${{ secrets.DEPLOY_KEY }}"
+          if [ -z "$KEY" ]; then
+            echo "ERROR: DEPLOY_KEY secret is empty or not set"
+            exit 1
+          fi
+          echo "Key length: ${#KEY} characters"
+          if echo "$KEY" | grep -q "BEGIN"; then
+            echo "Key contains BEGIN header - good"
+          else
+            echo "WARNING: Key missing BEGIN header"
+          fi
+          if echo "$KEY" | grep -q "END"; then
+            echo "Key contains END footer - good"
+          else
+            echo "WARNING: Key missing END footer"
+          fi
+
       - name: Deploy to Server
         uses: appleboy/ssh-action@v1
         with:
