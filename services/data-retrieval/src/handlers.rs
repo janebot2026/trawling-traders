@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::AppState;
-use data_retrieval::types::SourceHealth;
+use data_retrieval::{types::SourceHealth, AssetClass};
 
 /// Query params for price endpoint
 #[derive(Debug, serde::Deserialize)]
@@ -32,24 +32,28 @@ pub async fn get_price(
     let quote = query.quote.to_uppercase();
     
     info!("Fetching price for {}/{}", symbol, quote);
-    
-    // Route to appropriate source based on asset class
-    let price = if is_stock_symbol(&symbol) {
-        // Use Pyth for stocks
-        match state.pyth_client.get_price(&symbol).await {
-            Ok(p) => p,
-            Err(e) => {
-                warn!("Pyth error for {}: {}", symbol, e);
-                return Err((StatusCode::SERVICE_UNAVAILABLE, e.to_string()));
+
+    // Route to appropriate source based on asset class (using consistent AssetClass enum)
+    let asset_class = AssetClass::from_symbol(&symbol);
+    let price = match asset_class {
+        AssetClass::Stock | AssetClass::Etf | AssetClass::Metal => {
+            // Use Pyth for stocks, ETFs, and metals
+            match state.pyth_client.get_price(&symbol).await {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!("Pyth error for {}: {}", symbol, e);
+                    return Err((StatusCode::SERVICE_UNAVAILABLE, e.to_string()));
+                }
             }
         }
-    } else {
-        // Use aggregator for crypto
-        match state.price_aggregator.get_price_realtime(&symbol, &quote).await {
-            Ok(p) => p,
-            Err(e) => {
-                warn!("Aggregator error for {}: {}", symbol, e);
-                return Err((StatusCode::SERVICE_UNAVAILABLE, e.to_string()));
+        AssetClass::Crypto => {
+            // Use aggregator for crypto
+            match state.price_aggregator.get_price_realtime(&symbol, &quote).await {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!("Aggregator error for {}: {}", symbol, e);
+                    return Err((StatusCode::SERVICE_UNAVAILABLE, e.to_string()));
+                }
             }
         }
     };
@@ -73,11 +77,16 @@ pub async fn get_prices_batch(
     
     for symbol in &req.symbols {
         let sym = symbol.to_uppercase();
-        
-        let price = if is_stock_symbol(&sym) {
-            state.pyth_client.get_price(&sym).await.ok()
-        } else {
-            state.price_aggregator.get_price_realtime(&sym, "USD").await.ok()
+
+        // Use consistent asset class detection
+        let asset_class = AssetClass::from_symbol(&sym);
+        let price = match asset_class {
+            AssetClass::Stock | AssetClass::Etf | AssetClass::Metal => {
+                state.pyth_client.get_price(&sym).await.ok()
+            }
+            AssetClass::Crypto => {
+                state.price_aggregator.get_price_realtime(&sym, "USD").await.ok()
+            }
         };
         
         match price {
@@ -128,15 +137,6 @@ pub async fn health_check(
         status: if all_healthy { "healthy".to_string() } else { "degraded".to_string() },
         sources: source_health,
     })
-}
-
-/// Check if symbol is a stock (not crypto)
-fn is_stock_symbol(symbol: &str) -> bool {
-    let stocks = ["AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "NVDA", "META", "NFLX"];
-    let etfs = ["SPY", "QQQ"];
-    let metals = ["ORO", "XAU", "XAG"];
-    
-    stocks.contains(&symbol) || etfs.contains(&symbol) || metals.contains(&symbol)
 }
 
 // Response types
