@@ -52,65 +52,82 @@ impl CoinGeckoClient {
     /// Per-request timeout (10 seconds for individual API calls)
     const REQUEST_TIMEOUT_SECS: u64 = 10;
 
-    /// Rate-limited request wrapper with per-request timeout
+    /// Rate-limited request wrapper with per-request timeout and retry on 429
     async fn rate_limited_request<T: serde::de::DeserializeOwned>(
         &self,
         endpoint: &str,
     ) -> Result<T> {
-        let _permit = self
-            .rate_limiter
-            .acquire()
+        // Try up to 2 times (initial + 1 retry on rate limit)
+        for attempt in 0..2 {
+            let _permit = self
+                .rate_limiter
+                .acquire()
+                .await
+                .map_err(|e| DataRetrievalError::ApiError(e.to_string()))?;
+
+            // Ensure minimum delay between requests (free tier friendly)
+            {
+                let mut last = self.last_request.lock().await;
+                let elapsed = last.elapsed();
+                if elapsed < Duration::from_millis(100) {
+                    tokio::time::sleep(Duration::from_millis(100) - elapsed).await;
+                }
+                *last = Instant::now();
+            }
+
+            // Wrap request in explicit per-request timeout
+            let request_future = self.build_request(endpoint).send();
+            let response = tokio::time::timeout(
+                Duration::from_secs(Self::REQUEST_TIMEOUT_SECS),
+                request_future
+            )
             .await
+            .map_err(|_| DataRetrievalError::ApiError(format!(
+                "CoinGecko request to {} timed out after {}s", endpoint, Self::REQUEST_TIMEOUT_SECS
+            )))?
             .map_err(|e| DataRetrievalError::ApiError(e.to_string()))?;
 
-        // Ensure minimum delay between requests (free tier friendly)
-        {
-            let mut last = self.last_request.lock().await;
-            let elapsed = last.elapsed();
-            if elapsed < Duration::from_millis(100) {
-                tokio::time::sleep(Duration::from_millis(100) - elapsed).await;
+            let status = response.status();
+
+            if status == 429 {
+                let retry_after = response.headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<u64>().ok());
+
+                // If first attempt, wait and retry
+                if attempt == 0 {
+                    let wait_secs = retry_after.unwrap_or(60).min(120); // Cap at 2 minutes
+                    tracing::warn!(
+                        "CoinGecko rate limited, waiting {} seconds before retry",
+                        wait_secs
+                    );
+                    tokio::time::sleep(Duration::from_secs(wait_secs)).await;
+                    continue;
+                }
+
+                return Err(DataRetrievalError::RateLimit {
+                    source_name: "coingecko".to_string(),
+                    retry_after,
+                });
             }
-            *last = Instant::now();
+
+            if !status.is_success() {
+                let text = response.text().await.unwrap_or_default();
+                return Err(DataRetrievalError::ApiError(format!(
+                    "CoinGecko API error ({}): {}",
+                    status, text
+                )));
+            }
+
+            return response
+                .json::<T>()
+                .await
+                .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()));
         }
 
-        // Wrap request in explicit per-request timeout
-        let request_future = self.build_request(endpoint).send();
-        let response = tokio::time::timeout(
-            Duration::from_secs(Self::REQUEST_TIMEOUT_SECS),
-            request_future
-        )
-        .await
-        .map_err(|_| DataRetrievalError::ApiError(format!(
-            "CoinGecko request to {} timed out after {}s", endpoint, Self::REQUEST_TIMEOUT_SECS
-        )))?
-        .map_err(|e| DataRetrievalError::ApiError(e.to_string()))?;
-        
-        let status = response.status();
-        
-        if status == 429 {
-            let retry_after = response.headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse::<u64>().ok());
-            
-            return Err(DataRetrievalError::RateLimit {
-                source_name: "coingecko".to_string(),
-                retry_after,
-            });
-        }
-        
-        if !status.is_success() {
-            let text = response.text().await.unwrap_or_default();
-            return Err(DataRetrievalError::ApiError(format!(
-                "CoinGecko API error ({}): {}",
-                status, text
-            )));
-        }
-        
-        response
-            .json::<T>()
-            .await
-            .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()))
+        // Should not reach here, but fallback error
+        Err(DataRetrievalError::ApiError("Unexpected retry loop exit".to_string()))
     }
     
     /// Get CoinGecko ID for asset symbol
