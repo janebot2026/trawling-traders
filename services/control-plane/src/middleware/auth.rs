@@ -124,7 +124,7 @@ async fn validate_jwt(token: &str) -> Result<CedrosClaims, StatusCode> {
 /// Extract AuthContext from request extensions
 ///
 /// Use this in handlers to get the authenticated user:
-/// ```rust
+/// ```ignore
 /// async fn handler(
 ///     Extension(auth): Extension<AuthContext>,
 /// ) {
