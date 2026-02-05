@@ -582,19 +582,23 @@
 - **Test Plan:** Verify no callers; cargo check passes
 - **Status:** Not started
 
-### [ ] DR-16: Unused imports (8 warnings)
+### [x] DR-16: Unused imports (8 warnings)
 - **Files:** Multiple data-retrieval files
 - **Planned Fix:**
   - Remove unused imports per compiler warnings
 - **Test Plan:** cargo check shows no warnings
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** No unused import warnings remain
+- **Note:** Removed from coingecko.rs and pyth.rs
 
-### [ ] DR-17: forex_commodities.rs entirely unused
+### [x] DR-17: forex_commodities.rs entirely unused
 - **Files:** `services/data-retrieval/src/sources/forex_commodities.rs`
 - **Planned Fix:**
   - Delete entire file
 - **Test Plan:** Verify no references; cargo check passes
-- **Status:** Not started
+- **Status:** COMPLETED
+- **Verification:** cargo check passes
+- **Note:** File deleted (272 lines removed)
 
 ### [ ] BR-12: No timeout on HTTP price fetch
 - **Files:** `services/bot-runner/src/executor.rs`
@@ -672,8 +676,8 @@
 | Critical | 8 | 7 | 1 (deferred) |
 | High | 16 | 15 | 1 (deferred) |
 | Medium | 32 | 13 | 19 |
-| Low | 15 | 1 | 14 |
-| **Total** | **71** | **36** | **35** |
+| Low | 15 | 4 | 11 |
+| **Total** | **71** | **39** | **32** |
 
 ---
 
@@ -720,4 +724,13 @@
 | MB-05 | b5f3a75b | 2026-02-05 | Remove duplicate fetchBots call |
 | DR-08 | a910c8a0 | 2026-02-05 | Add 10s per-request timeout with tokio::time::timeout |
 | INF-01 | 23816bcb | 2026-02-05 | Add dev-only warning comments to docker-compose |
+| CP-10 | cee0061b | 2026-02-05 | Extract get_authorized_bot helper for handlers |
+| DR-09 | 4681bb90 | 2026-02-05 | Use consistent AssetClass enum for routing |
+| MB-06 | 7d3fff01 | 2026-02-05 | Add missing useEffect dependencies |
+| MB-08 | 0a4263d9 | 2026-02-05 | Guard state updates after unmount |
+| MB-15 | b4b3d42a | 2026-02-05 | Memoize BotCard component |
+| DR-15 | b09a5c80 | 2026-02-05 | Add connection pool limits to HTTP clients |
+| CP-14 | 63f6e744 | 2026-02-05 | Use server timestamp for heartbeat |
+| DR-16 | c02624c5 | 2026-02-05 | Remove unused imports |
+| DR-17 | 2769e200 | 2026-02-05 | Remove unused forex_commodities module |
 
