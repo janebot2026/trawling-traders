@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -158,10 +158,8 @@ export function BotsListScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchBots();
-  }, [fetchBots]);
-
+  // useFocusEffect handles both initial load and refocus
+  // (removed duplicate useEffect to prevent double fetching)
   useFocusEffect(
     useCallback(() => {
       fetchBots();
