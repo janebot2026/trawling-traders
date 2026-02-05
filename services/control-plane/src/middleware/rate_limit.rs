@@ -24,12 +24,16 @@ struct RateLimitBucket {
     window_start: Instant,
 }
 
+/// Cleanup interval in seconds
+const CLEANUP_INTERVAL_SECS: u64 = 60;
+
 /// In-memory rate limiter (per-process, not distributed)
 #[derive(Clone)]
 pub struct RateLimiter {
     buckets: Arc<RwLock<HashMap<String, RateLimitBucket>>>,
     window_secs: u64,
     max_requests: u32,
+    last_cleanup: Arc<RwLock<Instant>>,
 }
 
 impl RateLimiter {
@@ -38,20 +42,29 @@ impl RateLimiter {
             buckets: Arc::new(RwLock::new(HashMap::new())),
             window_secs,
             max_requests,
+            last_cleanup: Arc::new(RwLock::new(Instant::now())),
         }
     }
 
     /// Check if request is allowed
-    pub async fn check(&self,
-        key: &str,
-    ) -> bool {
+    pub async fn check(&self, key: &str) -> bool {
         let mut buckets = self.buckets.write().await;
         let now = Instant::now();
         let window = Duration::from_secs(self.window_secs);
 
-        // Clean up expired entries occasionally (1% chance)
-        if rand::random::<f64>() < 0.01 {
+        // Deterministic cleanup every 60 seconds (prevents memory leak)
+        let should_cleanup = {
+            let last = self.last_cleanup.read().await;
+            now.duration_since(*last) >= Duration::from_secs(CLEANUP_INTERVAL_SECS)
+        };
+        if should_cleanup {
+            let before = buckets.len();
             buckets.retain(|_, bucket| now.duration_since(bucket.window_start) < window);
+            let evicted = before.saturating_sub(buckets.len());
+            if evicted > 0 {
+                tracing::debug!("Rate limiter: evicted {} expired buckets", evicted);
+            }
+            *self.last_cleanup.write().await = now;
         }
 
         match buckets.get_mut(key) {
