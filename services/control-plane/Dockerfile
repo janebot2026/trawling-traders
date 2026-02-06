@@ -26,15 +26,6 @@ RUN mkdir -p /app/services/control-plane/migrations && \
 
 WORKDIR /app/services/control-plane
 
-# Fetch dependencies (downloads crates without compiling)
-RUN cargo fetch 2>/dev/null || true
-
-# Fix cedros-login v0.0.4 bug: duplicate migration version 20260130000001
-# (encrypted_settings + treasury_config). treasury_config also references
-# non-existent "orgs" table. Must delete BEFORE compilation because
-# sqlx::migrate! embeds migrations at compile time.
-RUN find /usr/local/cargo/registry/src -path "*/cedros-login-server-*/migrations/20260130000001_treasury_config.sql" -delete 2>/dev/null || true
-
 # Build dependencies only - this layer is cached when only source changes
 RUN cargo build --release 2>/dev/null || true
 
@@ -50,14 +41,7 @@ WORKDIR /app/services/control-plane
 # Touch source files to force rebuild of local crates (not external dependencies)
 RUN touch src/main.rs src/lib.rs ../data-retrieval/src/lib.rs
 
-# Ensure duplicate migration fix persists (file deleted in deps stage, but
-# re-delete in case Docker cache provides a stale deps layer)
-RUN find /usr/local/cargo/registry/src -path "*/cedros-login-server-*/migrations/20260130000001_treasury_config.sql" -delete 2>/dev/null || true
-
-# Force recompile of cedros-login to pick up the deleted migration file
-RUN find /app/services/control-plane/target -name "libcedros_login*" -delete 2>/dev/null || true
-
-# Build release binary
+# Build release binary - only recompiles our crate, deps are cached
 RUN cargo build --release
 
 # Runtime stage

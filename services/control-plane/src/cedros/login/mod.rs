@@ -98,10 +98,9 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
     login_migrations::drop_all_cedros_tables(&pool).await;
     login_migrations::drop_orphaned_cedros_indexes(&pool).await;
 
-    // Pre-insert migration entries for buggy cedros-login v0.0.4 migrations:
+    // Pre-insert migration entries for buggy cedros-login migrations:
     // - 4 migrations use CREATE INDEX CONCURRENTLY (can't run in sqlx transactions)
     // - 20260123000001: duplicate index name conflict
-    // Note: 20260130000001 duplicate version handled in Dockerfile
     login_migrations::pre_apply_buggy_migrations(&pool).await;
 
     let storage_result = cedros_login::Storage::postgres_with_pool(pool.clone()).await;

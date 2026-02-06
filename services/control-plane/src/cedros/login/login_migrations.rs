@@ -1,7 +1,7 @@
-//! Migration workarounds for cedros-login-server v0.0.4 bugs.
+//! Migration workarounds for cedros-login-server v0.0.5 bugs.
 //!
-//! cedros-login v0.0.4 has 55+ non-idempotent DDL statements. On every startup we
-//! wipe all cedros-login migration entries and tables (except `users`), then re-run
+//! cedros-login has 55+ non-idempotent DDL statements. On every startup we wipe
+//! all cedros-login migration entries and tables (except `users`), then re-run
 //! from scratch. This module handles specific migrations that cannot run through
 //! sqlx's migrator at all.
 
@@ -106,14 +106,12 @@ pub async fn drop_orphaned_cedros_indexes(pool: &PgPool) {
     }
 }
 
-/// Pre-apply cedros-login v0.0.4 migrations that cannot run through sqlx's migrator:
+/// Pre-apply cedros-login migrations that cannot run through sqlx's migrator:
 /// - 4 migrations use CREATE INDEX CONCURRENTLY (can't run in transactions)
 /// - 20260123000001: duplicate index name conflict
 ///
 /// Creates indexes without CONCURRENTLY and inserts migration entries with correct
 /// SHA-384 checksums so the migrator skips them.
-/// Note: 20260130000001 duplicate version is handled by deleting the conflicting
-/// file (treasury_config.sql) in the Dockerfile before compilation.
 pub async fn pre_apply_buggy_migrations(pool: &PgPool) {
     // (version, description, checksum_hex, pre_ddl[])
     let skip_migrations: &[(i64, &str, &str, &[&str])] = &[
@@ -156,7 +154,7 @@ pub async fn pre_apply_buggy_migrations(pool: &PgPool) {
             "811c22129f27a2ad379838831cd280fa1bd730b03deac466f0d122437af042302e25d1431ad92b2400a70aa0073a892f",
             &[], // DDL applied in post_apply_skipped_migrations()
         ),
-        // 20260130000001 (duplicate version) handled in Dockerfile by removing treasury_config.sql
+        // 20260130000001 duplicate version fixed in v0.0.5 (treasury_config renamed to 20260130000002)
     ];
 
     for (version, description, checksum_hex, pre_ddl) in skip_migrations {
@@ -177,8 +175,6 @@ pub async fn pre_apply_buggy_migrations(pool: &PgPool) {
 /// Tables referenced here are created by earlier migrations that ran normally.
 pub async fn post_apply_skipped_migrations(pool: &PgPool) {
     post_apply_spl_deposit_tracking(pool).await;
-    // encrypted_settings runs via migrator (treasury_config.sql deleted in Dockerfile)
-    post_apply_treasury_config(pool).await;
     info!("Applied post-migration DDL for skipped migrations");
 }
 
@@ -232,49 +228,4 @@ async fn post_apply_spl_deposit_tracking(pool: &PgPool) {
     for stmt in &indexes {
         sqlx::query(stmt).execute(pool).await.ok();
     }
-}
-
-/// DDL from 20260130000001_treasury_config.sql (deleted in Dockerfile, applied here with fix).
-async fn post_apply_treasury_config(pool: &PgPool) {
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS treasury_config (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            org_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
-            treasury_user_id UUID NOT NULL REFERENCES users(id),
-            wallet_address TEXT NOT NULL,
-            encrypted_private_key TEXT NOT NULL,
-            encryption_key_id TEXT NOT NULL DEFAULT 'v1',
-            authorized_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            authorized_by UUID NOT NULL REFERENCES users(id),
-            UNIQUE (org_id)
-        )",
-    )
-    .execute(pool)
-    .await
-    .ok();
-    let stmts = [
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_treasury_config_global \
-         ON treasury_config ((1)) WHERE org_id IS NULL",
-        "CREATE INDEX IF NOT EXISTS idx_treasury_config_org \
-         ON treasury_config(org_id) WHERE org_id IS NOT NULL",
-        "ALTER TABLE deposit_sessions ADD COLUMN IF NOT EXISTS batch_id UUID",
-        "ALTER TABLE deposit_sessions ADD COLUMN IF NOT EXISTS batched_at TIMESTAMPTZ",
-        "CREATE INDEX IF NOT EXISTS idx_deposit_sessions_pending_batch \
-         ON deposit_sessions(status, deposit_type) \
-         WHERE status = 'pending_batch' AND deposit_type = 'sol_micro'",
-    ];
-    for stmt in &stmts {
-        sqlx::query(stmt).execute(pool).await.ok();
-    }
-    sqlx::query(
-        "INSERT INTO system_settings (key, value, category, description) VALUES \
-         ('micro_batch_threshold_usd', '10', 'deposit', \
-          'Minimum accumulated USD value before triggering batch swap. Default: $10'), \
-         ('micro_batch_poll_secs', '300', 'deposit', \
-          'How often to check for batchable micro deposits in seconds. Default: 5 min') \
-         ON CONFLICT (key) DO NOTHING",
-    )
-    .execute(pool)
-    .await
-    .ok();
 }

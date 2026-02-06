@@ -65,7 +65,7 @@ bigdecimal = { version = "0.4", features = ["serde"] }
 cedros-pay = "1.1.3"
 
 # Cedros Login integration - embedded auth server with auto-migration
-cedros-login-server = { version = "0.0.4", features = ["postgres"] }
+cedros-login-server = { version = "0.0.5", features = ["postgres"] }
 
 # DigitalOcean provisioning - SQLx 0.8 compatible
 claw-spawn = "0.1.2"
