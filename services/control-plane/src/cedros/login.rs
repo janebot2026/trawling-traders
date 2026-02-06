@@ -87,35 +87,14 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         .await
         .ok();
 
-    // Check if cedros-login migrations are fully applied and clean.
-    // cedros-login v0.0.4 has 55+ non-idempotent DDL statements, so partial state
-    // from crash loops cannot be recovered incrementally. Nuclear reset: drop ALL
-    // cedros-login objects and re-run from scratch. Safe on fresh systems; users table
-    // is preserved (our app owns it).
-    let needs_reset = {
-        let total: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version >= 1000000")
-                .fetch_one(&pool)
-                .await
-                .unwrap_or(0);
-        let dirty: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM _sqlx_migrations WHERE version >= 1000000 AND success = false",
-        )
-        .fetch_one(&pool)
+    // cedros-login v0.0.4 has 55+ non-idempotent DDL statements, so we always
+    // reset to avoid partial state. Drop ALL cedros-login objects and re-run from
+    // scratch. Adds ~1s to startup but guarantees correctness. Users table preserved.
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 1000000")
+        .execute(&pool)
         .await
-        .unwrap_or(0);
-        // Reset if: no entries yet (first run) OR any dirty entries
-        total == 0 || dirty > 0
-    };
-
-    if needs_reset {
-        info!("Resetting cedros-login migration state for clean apply");
-        sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 1000000")
-            .execute(&pool)
-            .await
-            .ok();
-        drop_all_cedros_tables(&pool).await;
-    }
+        .ok();
+    drop_all_cedros_tables(&pool).await;
     drop_orphaned_cedros_indexes(&pool).await;
 
     // cedros-login v0.0.4 has 4 migrations using CREATE INDEX CONCURRENTLY, which
