@@ -38,8 +38,8 @@ COPY services/control-plane /app/services/control-plane
 
 WORKDIR /app/services/control-plane
 
-# Touch source files to force rebuild of our code (not dependencies)
-RUN touch src/main.rs src/lib.rs
+# Touch source files to force rebuild of local crates (not external dependencies)
+RUN touch src/main.rs src/lib.rs ../data-retrieval/src/lib.rs
 
 # Build release binary - only recompiles our crate, deps are cached
 RUN cargo build --release
