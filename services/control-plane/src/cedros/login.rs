@@ -97,12 +97,18 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
     drop_all_cedros_tables(&pool).await;
     drop_orphaned_cedros_indexes(&pool).await;
 
-    // cedros-login v0.0.4 has 4 migrations using CREATE INDEX CONCURRENTLY, which
-    // cannot run inside sqlx's default transaction wrapper. Pre-create these indexes
-    // (without CONCURRENTLY) and insert migration entries so the migrator skips them.
-    pre_apply_concurrent_migrations(&pool).await;
+    // Pre-insert migration entries for buggy cedros-login v0.0.4 migrations:
+    // - 4 migrations use CREATE INDEX CONCURRENTLY (can't run in sqlx transactions)
+    // - 1 migration (20260123000001) has duplicate index name conflict
+    pre_apply_buggy_migrations(&pool).await;
 
     let storage_result = cedros_login::Storage::postgres_with_pool(pool.clone()).await;
+
+    // Post-apply DDL for migration 20260123000001 (skipped due to duplicate index bug).
+    // Tables it references are now created by the migrator.
+    if storage_result.is_ok() {
+        post_apply_spl_deposit_migration(&pool).await;
+    }
 
     // Always restore our entries regardless of success/failure
     sqlx::query(
@@ -226,13 +232,14 @@ async fn drop_orphaned_cedros_indexes(pool: &PgPool) {
     }
 }
 
-/// Pre-apply cedros-login v0.0.4 migrations that use CREATE INDEX CONCURRENTLY.
-/// These cannot run inside sqlx's default transaction wrapper. We create the indexes
-/// without CONCURRENTLY and insert migration entries with correct checksums so the
-/// migrator skips them. Checksums are SHA-384 of the SQL file contents (pinned to v0.0.4).
-async fn pre_apply_concurrent_migrations(pool: &PgPool) {
-    // (version, description, checksum_hex, index_ddl[])
-    let concurrent_migrations: &[(i64, &str, &str, &[&str])] = &[
+/// Pre-apply cedros-login v0.0.4 migrations that cannot run through sqlx's migrator:
+/// - 4 migrations use CREATE INDEX CONCURRENTLY (can't run in transactions)
+/// - 1 migration (20260123000001) has a duplicate index name bug
+/// We create indexes without CONCURRENTLY and insert migration entries with correct
+/// SHA-384 checksums so the migrator skips them.
+async fn pre_apply_buggy_migrations(pool: &PgPool) {
+    // (version, description, checksum_hex, pre_ddl[])
+    let skip_migrations: &[(i64, &str, &str, &[&str])] = &[
         (
             20260108000001,
             "webauthn user credentials index",
@@ -264,16 +271,21 @@ async fn pre_apply_concurrent_migrations(pool: &PgPool) {
                  ON memberships(org_id, joined_at ASC)",
             ],
         ),
+        (
+            // Bug: creates idx_credit_transactions_idempotency which already exists
+            // from migration 20260121000002. DDL applied post-migration instead.
+            20260123000001,
+            "spl deposit tracking",
+            "811c22129f27a2ad379838831cd280fa1bd730b03deac466f0d122437af042302e25d1431ad92b2400a70aa0073a892f",
+            &[], // DDL applied in post_apply_spl_deposit_migration()
+        ),
     ];
 
-    for (version, description, checksum_hex, indexes) in concurrent_migrations {
-        // Create the indexes (without CONCURRENTLY, which works in transactions)
-        for ddl in *indexes {
+    for (version, description, checksum_hex, pre_ddl) in skip_migrations {
+        for ddl in *pre_ddl {
             sqlx::query(ddl).execute(pool).await.ok();
         }
 
-        // Insert migration entry so sqlx migrator skips this version.
-        // Uses decode(hex, 'hex') to convert checksum to bytea.
         let insert = format!(
             "INSERT INTO _sqlx_migrations (version, description, installed_on, success, checksum, execution_time) \
              VALUES ({version}, '{description}', now(), true, decode('{checksum_hex}', 'hex'), 0) \
@@ -281,6 +293,68 @@ async fn pre_apply_concurrent_migrations(pool: &PgPool) {
         );
         sqlx::query(&insert).execute(pool).await.ok();
     }
+}
+
+/// Post-apply DDL for migration 20260123000001 (spl_deposit_tracking).
+/// Skipped by the migrator due to duplicate index name bug. Tables referenced
+/// here are created by earlier migrations that ran normally.
+async fn post_apply_spl_deposit_migration(pool: &PgPool) {
+    // ALTER TABLE columns on deposit_sessions (no IF NOT EXISTS for ALTER ADD COLUMN,
+    // but table was just freshly created so columns don't exist yet)
+    let alter_stmts = [
+        "ALTER TABLE deposit_sessions ADD COLUMN IF NOT EXISTS input_token_mint TEXT",
+        "ALTER TABLE deposit_sessions ADD COLUMN IF NOT EXISTS input_token_amount BIGINT",
+        "ALTER TABLE deposit_sessions ADD COLUMN IF NOT EXISTS swap_tx_signature TEXT",
+        "ALTER TABLE deposit_sessions ADD COLUMN IF NOT EXISTS credit_currency TEXT",
+        "ALTER TABLE deposit_sessions ADD COLUMN IF NOT EXISTS credit_amount BIGINT",
+        "ALTER TABLE credit_balances ADD COLUMN IF NOT EXISTS held_balance BIGINT NOT NULL DEFAULT 0",
+        "ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS idempotency_key TEXT",
+        "ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS reference_type TEXT",
+        "ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS reference_id UUID",
+        "ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS hold_id UUID",
+    ];
+    for stmt in &alter_stmts {
+        sqlx::query(stmt).execute(pool).await.ok();
+    }
+
+    // Create pending_spl_deposits table
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS pending_spl_deposits (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL REFERENCES users(id),
+            wallet_address TEXT NOT NULL,
+            token_mint TEXT NOT NULL,
+            token_amount_raw TEXT NOT NULL,
+            token_amount BIGINT,
+            tx_signature TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'pending',
+            deposit_session_id UUID REFERENCES deposit_sessions(id),
+            error_message TEXT,
+            processed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days')
+        )",
+    )
+    .execute(pool)
+    .await
+    .ok();
+
+    // Indexes (all IF NOT EXISTS for idempotency)
+    let index_stmts = [
+        "CREATE INDEX IF NOT EXISTS idx_deposit_sessions_input_token \
+         ON deposit_sessions(input_token_mint) WHERE input_token_mint IS NOT NULL",
+        // Skip idx_credit_transactions_idempotency - already created by migration 20260121000002
+        "CREATE INDEX IF NOT EXISTS idx_pending_spl_deposits_user ON pending_spl_deposits(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pending_spl_deposits_wallet ON pending_spl_deposits(wallet_address)",
+        "CREATE INDEX IF NOT EXISTS idx_pending_spl_deposits_status ON pending_spl_deposits(status)",
+        "CREATE INDEX IF NOT EXISTS idx_pending_spl_deposits_pending \
+         ON pending_spl_deposits(user_id, status) WHERE status = 'pending'",
+    ];
+    for stmt in &index_stmts {
+        sqlx::query(stmt).execute(pool).await.ok();
+    }
+
+    info!("Applied post-migration DDL for spl_deposit_tracking");
 }
 
 /// Simple placeholder routes (used when full integration fails)
