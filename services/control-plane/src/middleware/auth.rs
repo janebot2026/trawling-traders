@@ -129,14 +129,15 @@ async fn validate_jwt(token: &str) -> Result<CedrosClaims, StatusCode> {
     Ok(token_data.claims)
 }
 
-/// Check if user has admin flag set in database
+/// Check if user has admin flag set in database (cedros-login users table)
 async fn check_db_admin(db: &sqlx::PgPool, user_id: &str) -> bool {
     let user_uuid = match uuid::Uuid::parse_str(user_id) {
         Ok(id) => id,
         Err(_) => return false,
     };
 
-    sqlx::query_scalar::<_, bool>("SELECT is_admin FROM users WHERE id = $1")
+    // Query cedros-login's users table is_system_admin field
+    sqlx::query_scalar::<_, bool>("SELECT is_system_admin FROM users WHERE id = $1")
         .bind(user_uuid)
         .fetch_optional(db)
         .await
