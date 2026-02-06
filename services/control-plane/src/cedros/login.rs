@@ -69,7 +69,7 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
     // Build PostgreSQL storage using shared pool (runs auto-migrations)
     let storage = cedros_login::Storage::postgres_with_pool(pool)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to create cedros-login storage: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to create cedros-login storage: {:?}", e))?;
 
     let callback = Arc::new(cedros_login::NoopCallback);
     let router = cedros_login::router_with_storage(config, callback, storage);

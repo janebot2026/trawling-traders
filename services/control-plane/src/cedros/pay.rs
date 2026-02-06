@@ -15,6 +15,10 @@ use std::sync::Arc;
 /// Stripe/X402 configuration is managed through cedros-pay's admin dashboard
 /// at /v1/pay/admin/config. Server URL is derived from platform_config.
 pub async fn full_router(pool: PgPool) -> anyhow::Result<Router> {
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://postgres:postgres@localhost:5432/trawling_traders".to_string()
+    });
+
     // Get control_plane_url from platform_config for server public URL
     let control_plane_url: Option<String> =
         sqlx::query_scalar("SELECT value FROM platform_config WHERE key = 'control_plane_url'")
@@ -34,6 +38,9 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<Router> {
     cfg.server.public_url = public_url;
     cfg.server.route_prefix = "".to_string(); // Empty - nesting at /v1/pay handles the prefix
     cfg.server.cors_disabled = true; // Host app manages CORS for all routes
+
+    // Database URL required for product_source=postgres (default)
+    cfg.paywall.postgres_url = Some(database_url);
 
     // Create PostgresPool wrapper from existing pool
     let cedros_pool = cedros_pay::storage::PostgresPool::from_pool(pool.clone());

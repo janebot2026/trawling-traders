@@ -1,22 +1,47 @@
-# Build stage
-FROM rust:1.85-bookworm AS builder
+# Dependency cache stage - only rebuilds when Cargo.toml/Cargo.lock change
+FROM rust:1.85-bookworm AS deps
 
 WORKDIR /app
 
-# Install build dependencies
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy workspace files
-# Note: control-plane depends on data-retrieval, so we need both
+# Copy only dependency manifests first
+COPY services/data-retrieval/Cargo.toml /app/services/data-retrieval/Cargo.toml
+COPY services/control-plane/Cargo.toml /app/services/control-plane/Cargo.toml
+COPY services/control-plane/Cargo.lock /app/services/control-plane/Cargo.lock
+
+# Create stub source files so cargo can resolve and build dependencies
+RUN mkdir -p /app/services/data-retrieval/src && \
+    echo "pub fn stub() {}" > /app/services/data-retrieval/src/lib.rs && \
+    mkdir -p /app/services/control-plane/src && \
+    echo "fn main() {}" > /app/services/control-plane/src/main.rs && \
+    echo "pub fn stub() {}" > /app/services/control-plane/src/lib.rs
+
+# Create stub migrations dir (needed for sqlx::migrate! macro)
+RUN mkdir -p /app/services/control-plane/migrations && \
+    touch /app/services/control-plane/migrations/.keep
+
+WORKDIR /app/services/control-plane
+
+# Build dependencies only - this layer is cached when only source changes
+RUN cargo build --release 2>/dev/null || true
+
+# Build stage - uses cached dependencies
+FROM deps AS builder
+
+# Copy real source (invalidates this layer on code changes, but deps are cached)
 COPY services/data-retrieval /app/services/data-retrieval
 COPY services/control-plane /app/services/control-plane
 
 WORKDIR /app/services/control-plane
 
-# Build release binary
+# Touch source files to force rebuild of our code (not dependencies)
+RUN touch src/main.rs src/lib.rs
+
+# Build release binary - only recompiles our crate, deps are cached
 RUN cargo build --release
 
 # Runtime stage
@@ -40,10 +65,8 @@ COPY --from=builder /app/services/control-plane/migrations /app/migrations
 RUN useradd -r -s /bin/false appuser
 USER appuser
 
-# Expose default port
 EXPOSE 3000
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/v1/healthz || exit 1
 
