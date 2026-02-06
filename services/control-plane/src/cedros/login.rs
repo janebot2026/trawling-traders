@@ -235,7 +235,8 @@ async fn drop_orphaned_cedros_indexes(pool: &PgPool) {
 /// Pre-apply cedros-login v0.0.4 migrations that cannot run through sqlx's migrator:
 /// - 4 migrations use CREATE INDEX CONCURRENTLY (can't run in transactions)
 /// - 1 migration (20260123000001) has a duplicate index name bug
-/// We create indexes without CONCURRENTLY and insert migration entries with correct
+///
+/// Creates indexes without CONCURRENTLY and inserts migration entries with correct
 /// SHA-384 checksums so the migrator skips them.
 async fn pre_apply_buggy_migrations(pool: &PgPool) {
     // (version, description, checksum_hex, pre_ddl[])
