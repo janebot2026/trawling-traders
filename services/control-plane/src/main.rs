@@ -19,9 +19,11 @@ async fn main() -> anyhow::Result<()> {
     let db = control_plane::db::init_db(&database_url).await?;
     info!("✓ Database connected");
 
-    // Run migrations
+    // Run app migrations (ignore_missing tolerates cedros-login's entries in _sqlx_migrations)
     info!("Running migrations...");
-    sqlx::migrate!("./migrations").run(&db).await?;
+    let mut migrator = sqlx::migrate!("./migrations");
+    migrator.ignore_missing = true;
+    migrator.run(&db).await?;
     info!("✓ Migrations applied");
 
     // Initialize Cedros Login (embedded auth server)

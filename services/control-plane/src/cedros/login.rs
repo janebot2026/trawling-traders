@@ -66,9 +66,41 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
     let jwt_service = JwtService::try_new(&config.jwt)
         .map_err(|e| anyhow::anyhow!("Failed to create JwtService: {}", e))?;
 
-    // Build PostgreSQL storage using shared pool (runs auto-migrations)
-    let storage = cedros_login::Storage::postgres_with_pool(pool)
+    // cedros-login's embedded migrator conflicts with our app migrations because both
+    // use the same _sqlx_migrations table. Temporarily stash our entries so cedros-login
+    // sees a clean table, then merge both sets back afterwards.
+    sqlx::query("ALTER TABLE IF EXISTS _sqlx_migrations RENAME TO _sqlx_migrations_app")
+        .execute(&pool)
         .await
+        .ok();
+
+    let storage_result = cedros_login::Storage::postgres_with_pool(pool.clone()).await;
+
+    if storage_result.is_ok() {
+        // Merge: copy our migration records back alongside cedros-login's
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations SELECT * FROM _sqlx_migrations_app ON CONFLICT (version) DO NOTHING",
+        )
+        .execute(&pool)
+        .await
+        .ok();
+        sqlx::query("DROP TABLE IF EXISTS _sqlx_migrations_app")
+            .execute(&pool)
+            .await
+            .ok();
+    } else {
+        // Restore original state on failure
+        sqlx::query("DROP TABLE IF EXISTS _sqlx_migrations")
+            .execute(&pool)
+            .await
+            .ok();
+        sqlx::query("ALTER TABLE IF EXISTS _sqlx_migrations_app RENAME TO _sqlx_migrations")
+            .execute(&pool)
+            .await
+            .ok();
+    }
+
+    let storage = storage_result
         .map_err(|e| anyhow::anyhow!("Failed to create cedros-login storage: {:?}", e))?;
 
     let callback = Arc::new(cedros_login::NoopCallback);

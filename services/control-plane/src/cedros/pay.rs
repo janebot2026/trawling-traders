@@ -39,8 +39,9 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<Router> {
     cfg.server.route_prefix = "".to_string(); // Empty - nesting at /v1/pay handles the prefix
     cfg.server.cors_disabled = true; // Host app manages CORS for all routes
 
-    // Database URL required for product_source=postgres (default)
-    cfg.paywall.postgres_url = Some(database_url);
+    // Database URL required for product_source=postgres and coupon_source=postgres (both default)
+    cfg.paywall.postgres_url = Some(database_url.clone());
+    cfg.coupons.postgres_url = Some(database_url);
 
     // Create PostgresPool wrapper from existing pool
     let cedros_pool = cedros_pay::storage::PostgresPool::from_pool(pool.clone());
