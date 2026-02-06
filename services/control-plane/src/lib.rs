@@ -78,7 +78,7 @@ impl AppState {
 
 /// Build the API router
 pub async fn app(state: Arc<AppState>) -> Router {
-    use axum::http::{HeaderValue, Method};
+    use axum::http::{header, HeaderValue, Method};
 
     let allowed_origins = [
         "https://trawlingtraders.com",
@@ -101,7 +101,13 @@ pub async fn app(state: Arc<AppState>) -> Router {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers(tower_http::cors::Any)
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            header::COOKIE,
+            header::HeaderName::from_static("x-csrf-token"),
+        ])
         .allow_credentials(true);
 
     // App-facing routes (require auth + subscription + rate limit)

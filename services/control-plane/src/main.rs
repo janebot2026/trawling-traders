@@ -92,7 +92,7 @@ async fn build_router(
     pool: sqlx::PgPool,
     login_integration: Option<control_plane::cedros::login::LoginIntegration>,
 ) -> anyhow::Result<axum::Router> {
-    use axum::http::{HeaderValue, Method};
+    use axum::http::{header, HeaderValue, Method};
     use axum::{
         routing::{get, patch, post},
         Router,
@@ -121,7 +121,13 @@ async fn build_router(
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers(tower_http::cors::Any)
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            header::COOKIE,
+            header::HeaderName::from_static("x-csrf-token"),
+        ])
         .allow_credentials(true);
 
     // App-facing routes (require auth + subscription + rate limit)

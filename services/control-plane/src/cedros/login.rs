@@ -47,11 +47,8 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         solana: Default::default(),
         webauthn: Default::default(),
         cors: cedros_login::config::CorsConfig {
-            allowed_origins: vec![
-                "https://trawlingtraders.com".to_string(),
-                "https://www.trawlingtraders.com".to_string(),
-                "https://trawling-traders-web.vercel.app".to_string(),
-            ],
+            allowed_origins: vec![],
+            disabled: true, // Host app manages CORS for all routes
         },
         cookie: Default::default(),
         webhook: Default::default(),

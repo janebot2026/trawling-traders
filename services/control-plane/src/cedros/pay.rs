@@ -33,6 +33,7 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<Router> {
     cfg.server.address = format!("0.0.0.0:{}", port);
     cfg.server.public_url = public_url;
     cfg.server.route_prefix = "/v1/pay".to_string();
+    cfg.server.cors_disabled = true; // Host app manages CORS for all routes
 
     // Create PostgresPool wrapper from existing pool
     let cedros_pool = cedros_pay::storage::PostgresPool::from_pool(pool.clone());
