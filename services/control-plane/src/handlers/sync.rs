@@ -626,13 +626,12 @@ pub async fn get_bot_secrets(
         }
         None => {
             // Fallback: try to get LLM config from config_versions (legacy)
-            let config_version = sqlx::query_as::<_, ConfigVersion>(
-                "SELECT * FROM config_versions WHERE id = $1",
-            )
-            .bind(bot.desired_version_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            let config_version =
+                sqlx::query_as::<_, ConfigVersion>("SELECT * FROM config_versions WHERE id = $1")
+                    .bind(bot.desired_version_id)
+                    .fetch_optional(&state.db)
+                    .await
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
             match config_version {
                 Some(cv) => {

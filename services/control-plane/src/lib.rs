@@ -26,7 +26,7 @@ use axum::{
 };
 use std::sync::Arc;
 use tokio::sync::Semaphore;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 pub use alerting::{AlertConfig, AlertManager};
@@ -50,6 +50,8 @@ pub struct AppState {
     pub alerts: AlertManager,
     /// Webhook notifier for external alerts
     pub webhooks: WebhookNotifier,
+    /// JWT service for RS256 token validation (from cedros-login)
+    pub jwt_service: Option<cedros_login::services::JwtService>,
 }
 
 impl AppState {
@@ -63,16 +65,44 @@ impl AppState {
             droplet_semaphore: Arc::new(Semaphore::new(3)),
             alerts: AlertManager::new(AlertConfig::default()),
             webhooks: WebhookNotifier::new(WebhookConfig::default()),
+            jwt_service: None,
         }
+    }
+
+    /// Set the JWT service for RS256 token validation
+    pub fn with_jwt_service(mut self, jwt_service: cedros_login::services::JwtService) -> Self {
+        self.jwt_service = Some(jwt_service);
+        self
     }
 }
 
 /// Build the API router
 pub async fn app(state: Arc<AppState>) -> Router {
+    use axum::http::{HeaderValue, Method};
+
+    let allowed_origins = [
+        "https://trawlingtraders.com",
+        "https://www.trawlingtraders.com",
+        "https://trawling-traders-web.vercel.app",
+    ];
+
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin(
+            allowed_origins
+                .iter()
+                .filter_map(|o| o.parse::<HeaderValue>().ok())
+                .collect::<Vec<_>>(),
+        )
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers(tower_http::cors::Any)
+        .allow_credentials(true);
 
     // App-facing routes (require auth + subscription + rate limit)
     let app_routes = Router::new()
@@ -126,7 +156,7 @@ pub async fn app(state: Arc<AppState>) -> Router {
         .with_state(state.clone());
 
     // Cedros Pay routes - try full integration, fallback to placeholder
-    let pay_routes = match cedros::full_router(state.db.clone()).await {
+    let pay_routes = match cedros::pay::full_router(state.db.clone()).await {
         Ok(router) => {
             tracing::info!("Cedros Pay full integration active");
             router
@@ -136,7 +166,7 @@ pub async fn app(state: Arc<AppState>) -> Router {
                 "Cedros Pay full integration failed ({}), using placeholder",
                 e
             );
-            cedros::placeholder_routes()
+            cedros::pay::placeholder_routes()
         }
     };
 

@@ -713,8 +713,7 @@ pub async fn get_current_user(
 
     let user = User {
         id: user_id,
-        email: auth.email.unwrap_or_else(|| "user@example.com".to_string()),
-        cedros_user_id: auth.user_id.clone(),
+        email: auth.email.clone(),
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };

@@ -24,8 +24,24 @@ async fn main() -> anyhow::Result<()> {
     sqlx::migrate!("./migrations").run(&db).await?;
     info!("✓ Migrations applied");
 
+    // Initialize Cedros Login (embedded auth server)
+    let login_integration = match control_plane::cedros::login::full_router(db.clone()).await {
+        Ok(integration) => {
+            info!("✓ Cedros Login integration active");
+            Some(integration)
+        }
+        Err(e) => {
+            info!("⚠ Cedros Login using placeholder mode: {}", e);
+            None
+        }
+    };
+
     // Create app state with all components
-    let state = Arc::new(control_plane::AppState::new(db.clone()));
+    let mut app_state = control_plane::AppState::new(db.clone());
+    if let Some(ref integration) = login_integration {
+        app_state = app_state.with_jwt_service(integration.jwt_service.clone());
+    }
+    let state = Arc::new(app_state);
     info!(
         "✓ App state initialized (secrets: {}, metrics: {})",
         if state.secrets.is_encryption_active() {
@@ -49,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
     info!("✓ Offline bot checker spawned");
 
     // Build router
-    let app = build_router(state, db.clone()).await?;
+    let app = build_router(state, db.clone(), login_integration).await?;
 
     // Start server
     let port = std::env::var("PORT")
@@ -74,18 +90,39 @@ async fn main() -> anyhow::Result<()> {
 async fn build_router(
     state: Arc<control_plane::AppState>,
     pool: sqlx::PgPool,
+    login_integration: Option<control_plane::cedros::login::LoginIntegration>,
 ) -> anyhow::Result<axum::Router> {
+    use axum::http::{HeaderValue, Method};
     use axum::{
         routing::{get, patch, post},
         Router,
     };
-    use tower_http::cors::{Any, CorsLayer};
+    use tower_http::cors::CorsLayer;
     use tower_http::trace::TraceLayer;
 
+    let allowed_origins = [
+        "https://trawlingtraders.com",
+        "https://www.trawlingtraders.com",
+        "https://trawling-traders-web.vercel.app",
+    ];
+
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin(
+            allowed_origins
+                .iter()
+                .filter_map(|o| o.parse::<HeaderValue>().ok())
+                .collect::<Vec<_>>(),
+        )
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers(tower_http::cors::Any)
+        .allow_credentials(true);
 
     // App-facing routes (require auth + subscription + rate limit)
     let app_routes = Router::new()
@@ -208,15 +245,21 @@ async fn build_router(
         .with_state(state.clone());
 
     // Cedros Pay routes - try full integration, fallback to placeholder
-    let cedros_routes = match control_plane::cedros::full_router(pool).await {
+    let cedros_routes = match control_plane::cedros::pay::full_router(pool).await {
         Ok(router) => {
             info!("✓ Cedros Pay full integration active");
             router
         }
         Err(e) => {
             info!("⚠ Cedros Pay using placeholder mode: {}", e);
-            control_plane::cedros::placeholder_routes()
+            control_plane::cedros::pay::placeholder_routes()
         }
+    };
+
+    // Cedros Login routes - embedded auth server or placeholder
+    let login_routes = match login_integration {
+        Some(integration) => integration.router,
+        None => control_plane::cedros::login::placeholder_routes(),
     };
 
     // Health check routes (no auth)
@@ -232,6 +275,7 @@ async fn build_router(
         .nest("/v1", bot_routes)
         .nest("/v1/admin", admin_routes)
         .nest("/v1/pay", cedros_routes)
+        .nest("/v1/auth", login_routes)
         .nest("/v1", health_routes)
         .layer(cors)
         .layer(TraceLayer::new_for_http());

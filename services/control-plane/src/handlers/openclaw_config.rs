@@ -86,13 +86,12 @@ pub async fn update_openclaw_config(
     let llm_model = req.llm_model.clone().unwrap_or_default();
 
     // Check if config exists
-    let existing = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM bot_openclaw_config WHERE bot_id = $1",
-    )
-    .bind(bot_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let existing =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM bot_openclaw_config WHERE bot_id = $1")
+            .bind(bot_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     if let Some(config_id) = existing {
         // Update existing config

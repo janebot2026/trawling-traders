@@ -128,12 +128,7 @@ mod tests {
     #[test]
     fn test_user_data_does_not_contain_xtrace() {
         let config = UserDataConfig::default();
-        let user_data = generate_user_data(
-            Uuid::new_v4(),
-            "TestBot",
-            "test-token",
-            &config,
-        );
+        let user_data = generate_user_data(Uuid::new_v4(), "TestBot", "test-token", &config);
 
         // Ensure xtrace is not enabled (would leak secrets)
         assert!(!user_data.lines().any(|l| l.trim() == "set -x"));
@@ -147,12 +142,7 @@ mod tests {
             ..Default::default()
         };
 
-        let user_data = generate_user_data(
-            Uuid::new_v4(),
-            "TestBot",
-            "test-token",
-            &config,
-        );
+        let user_data = generate_user_data(Uuid::new_v4(), "TestBot", "test-token", &config);
 
         assert!(user_data.contains("TOOLCHAIN_NODE_MAJOR=\"20\""));
         assert!(user_data.contains("TOOLCHAIN_INSTALL_PNPM=\"true\""));
