@@ -10,11 +10,5 @@ pub async fn init_db(database_url: &str) -> anyhow::Result<Db> {
         .connect(database_url)
         .await?;
 
-    // Run migrations
-    sqlx::migrate!("./migrations").run(&pool).await?;
-
     Ok(pool)
 }
-
-// Note: Migrations are managed via sqlx::migrate!("./migrations")
-// See migrations/001_initial_schema.sql for the actual schema
