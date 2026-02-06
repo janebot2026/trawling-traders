@@ -37,8 +37,44 @@ pub async fn get_bot_config(
 
     let config_hash = format!("{}:{}", config.id, config.version);
     let cron_jobs = generate_cron_jobs(&config);
-    let decrypted_key = decrypt_api_key(&config.encrypted_llm_api_key, &state.secrets)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    // Fetch OpenClaw config for LLM model and Telegram token
+    let openclaw_config = sqlx::query_as::<_, BotOpenClawConfig>(
+        "SELECT * FROM bot_openclaw_config WHERE bot_id = $1",
+    )
+    .bind(bot_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Decrypt LLM API key and Telegram token
+    let (llm_provider, llm_model, decrypted_key, telegram_bot_token) = match &openclaw_config {
+        Some(cfg) => {
+            let key = state
+                .secrets
+                .decrypt(&cfg.encrypted_llm_api_key)
+                .unwrap_or_default();
+            let telegram = if cfg.telegram_enabled {
+                cfg.encrypted_telegram_bot_token
+                    .as_ref()
+                    .and_then(|t| state.secrets.decrypt(t).ok())
+            } else {
+                None
+            };
+            (
+                cfg.llm_provider.clone(),
+                cfg.llm_model.clone(),
+                key,
+                telegram,
+            )
+        }
+        None => {
+            // Fallback to config_versions (legacy)
+            let key = decrypt_api_key(&config.encrypted_llm_api_key, &state.secrets)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+            (config.llm_provider.clone(), String::new(), key, None)
+        }
+    };
 
     let payload = BotConfigPayload {
         version: format!("v{}", config.version),
@@ -60,8 +96,10 @@ pub async fn get_bot_config(
             trading_mode: config.trading_mode,
         },
         llm_config: LlmConfig {
-            provider: config.llm_provider.clone(),
+            provider: llm_provider,
+            model: llm_model,
             api_key: decrypted_key,
+            telegram_bot_token,
         },
     };
 

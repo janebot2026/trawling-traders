@@ -106,6 +106,14 @@ impl GatewayManager {
 
     /// Render main openclaw.json configuration
     fn render_main_config(&self, config: &BotConfig) -> Result<()> {
+        // Enable Telegram if token is provided
+        let telegram = config.telegram_bot_token.as_ref().map(|_| TelegramConfig {
+            enabled: true,
+        });
+
+        // Generate character config based on persona
+        let character = self.generate_character_config(config);
+
         let main_config = MainConfig {
             version: "1.0".to_string(),
             bot_name: config.name.clone(),
@@ -114,8 +122,11 @@ impl GatewayManager {
             trading_mode: format!("{:?}", config.trading_mode).to_lowercase(),
             llm: LlmConfig {
                 provider: config.llm_provider.clone(),
+                model: config.llm_model.clone(),
                 // API key is NOT written to disk - passed via env var
             },
+            character,
+            telegram,
             paths: PathsConfig {
                 strategy: "strategy.yaml".to_string(),
                 assets: "assets.yaml".to_string(),
@@ -202,6 +213,64 @@ impl GatewayManager {
 
         debug!("Wrote {}", path.display());
         Ok(())
+    }
+
+    /// Generate character config based on persona
+    fn generate_character_config(&self, config: &BotConfig) -> CharacterConfig {
+        use crate::config::Persona;
+
+        let (bio, style, traits, philosophy) = match config.persona {
+            Persona::Beginner => (
+                format!(
+                    "{} is a cautious trading assistant focused on capital preservation and learning.",
+                    config.name
+                ),
+                "friendly, educational, and reassuring".to_string(),
+                vec![
+                    "patient".to_string(),
+                    "cautious".to_string(),
+                    "educational".to_string(),
+                    "supportive".to_string(),
+                ],
+                "Protect capital first, learn from every trade, and grow steadily over time.".to_string(),
+            ),
+            Persona::Tweaker => (
+                format!(
+                    "{} is an adaptive trading assistant that balances opportunity with risk management.",
+                    config.name
+                ),
+                "analytical, balanced, and informative".to_string(),
+                vec![
+                    "analytical".to_string(),
+                    "adaptive".to_string(),
+                    "detail-oriented".to_string(),
+                    "methodical".to_string(),
+                ],
+                "Find the right balance between risk and reward through careful analysis.".to_string(),
+            ),
+            Persona::QuantLite => (
+                format!(
+                    "{} is a data-driven trading assistant that uses quantitative signals for decisions.",
+                    config.name
+                ),
+                "precise, technical, and data-focused".to_string(),
+                vec![
+                    "quantitative".to_string(),
+                    "systematic".to_string(),
+                    "disciplined".to_string(),
+                    "objective".to_string(),
+                ],
+                "Let the data guide decisions, remove emotion, and execute with precision.".to_string(),
+            ),
+        };
+
+        CharacterConfig {
+            name: config.name.clone(),
+            bio,
+            style,
+            traits,
+            philosophy,
+        }
     }
 
     /// Restart the OpenClaw gateway
@@ -357,12 +426,16 @@ struct MainConfig {
     strategy_preset: String,
     trading_mode: String,
     llm: LlmConfig,
+    character: CharacterConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    telegram: Option<TelegramConfig>,
     paths: PathsConfig,
 }
 
 #[derive(Debug, Serialize)]
 struct LlmConfig {
     provider: String,
+    model: String,
     // API key intentionally omitted - passed via OPENCLAW_LLM_API_KEY env var
 }
 
@@ -371,6 +444,27 @@ struct PathsConfig {
     strategy: String,
     assets: String,
     risk: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TelegramConfig {
+    enabled: bool,
+    // Token is passed via TELEGRAM_BOT_TOKEN env var, not in config file
+}
+
+/// Character configuration for OpenClaw agent personality
+#[derive(Debug, Serialize)]
+struct CharacterConfig {
+    /// Bot display name
+    name: String,
+    /// Short bio/description
+    bio: String,
+    /// Communication style
+    style: String,
+    /// Personality traits
+    traits: Vec<String>,
+    /// Trading philosophy/approach
+    philosophy: String,
 }
 
 #[derive(Debug, Serialize)]

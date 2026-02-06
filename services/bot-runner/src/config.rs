@@ -73,7 +73,10 @@ pub struct BotConfig {
     pub risk_caps: RiskCaps,
     pub execution: ExecutionConfig,
     pub llm_provider: String,
+    pub llm_model: String,
     pub llm_api_key: String,
+    /// Telegram bot token (if enabled)
+    pub telegram_bot_token: Option<String>,
     /// OpenClaw strategy preset (e.g., "conservative", "momentum", "arbitrage")
     #[serde(default = "default_strategy_preset")]
     pub strategy_preset: String,
@@ -133,7 +136,9 @@ impl BotConfig {
             },
             execution: config.execution.unwrap_or_default(),
             llm_provider: config.llm_config.provider,
+            llm_model: config.llm_config.model,
             llm_api_key: config.llm_config.api_key,
+            telegram_bot_token: config.llm_config.telegram_bot_token,
             strategy_preset: config.openclaw.strategy_preset,
             strategy_params: config.openclaw.strategy_params,
             asset_universe: config.openclaw.asset_universe,
@@ -196,7 +201,11 @@ struct TradingParamsInner {
 #[derive(Debug, Clone, Deserialize, Default)]
 struct LlmConfigInner {
     provider: String,
+    #[serde(default)]
+    model: String,
     api_key: String,
+    #[serde(default)]
+    telegram_bot_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Default)]

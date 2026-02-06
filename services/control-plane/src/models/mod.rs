@@ -423,7 +423,10 @@ pub struct TradingParams {
 #[derive(Debug, Serialize)]
 pub struct LlmConfig {
     pub provider: String,
+    pub model: String,
     pub api_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram_bot_token: Option<String>,
 }
 
 /// Cron job definition
