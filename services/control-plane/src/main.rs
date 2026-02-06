@@ -284,13 +284,39 @@ async fn build_router(
         "pay": if pay_error.is_none() { "active" } else { "placeholder" },
         "pay_error": pay_error,
     });
-    let diagnostics_route = Router::new().route(
-        "/debug/startup",
-        get(move || {
-            let d = diag.clone();
-            async move { axum::Json(d) }
-        }),
-    );
+    let diagnostics_route = Router::new()
+        .route(
+            "/debug/startup",
+            get(move || {
+                let d = diag.clone();
+                async move { axum::Json(d) }
+            }),
+        )
+        .route(
+            "/debug/echo-auth",
+            get(|headers: axum::http::HeaderMap| async move {
+                let auth = headers
+                    .get(axum::http::header::AUTHORIZATION)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| {
+                        if s.len() > 20 {
+                            format!("{}...({} chars)", &s[..20], s.len())
+                        } else {
+                            s.to_string()
+                        }
+                    });
+                let origin = headers
+                    .get(axum::http::header::ORIGIN)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                axum::Json(serde_json::json!({
+                    "authorization_present": auth.is_some(),
+                    "authorization_preview": auth,
+                    "origin": origin,
+                    "cookie_present": headers.get(axum::http::header::COOKIE).is_some(),
+                }))
+            }),
+        );
 
     // Health check routes (no auth)
     let health_routes = Router::new()
@@ -305,7 +331,24 @@ async fn build_router(
         .nest("/v1", bot_routes)
         .nest("/v1/admin", admin_routes)
         .merge(cedros_routes) // cedros-pay applies its own /paywall/v1 prefix
-        .nest("/v1/auth", login_routes)
+        .nest("/v1/auth", login_routes.layer(axum::middleware::from_fn(
+            |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| async move {
+                let method = req.method().clone();
+                let uri = req.uri().clone();
+                let has_auth = req.headers().get(axum::http::header::AUTHORIZATION).is_some();
+                let auth_preview = req.headers()
+                    .get(axum::http::header::AUTHORIZATION)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| if s.len() > 25 { format!("{}...", &s[..25]) } else { s.to_string() });
+                tracing::info!(
+                    %method, %uri, has_auth, auth_preview = ?auth_preview,
+                    "cedros-login request"
+                );
+                let resp = next.run(req).await;
+                tracing::info!(%method, %uri, status = %resp.status(), "cedros-login response");
+                resp
+            },
+        )))
         .nest("/v1", health_routes)
         .merge(diagnostics_route)
         .layer(cors)
