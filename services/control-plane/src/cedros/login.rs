@@ -102,18 +102,23 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
     }
     drop_orphaned_cedros_indexes(&pool).await;
 
+    // cedros-login v0.0.4 has 4 migrations using CREATE INDEX CONCURRENTLY, which
+    // cannot run inside sqlx's default transaction wrapper. Pre-create these indexes
+    // (without CONCURRENTLY) and insert migration entries so the migrator skips them.
+    pre_apply_concurrent_migrations(&pool).await;
+
     // Try storage init; if it fails on "already exists", clean up and retry once.
     let storage_result = match cedros_login::Storage::postgres_with_pool(pool.clone()).await {
         Ok(s) => Ok(s),
         Err(e) if format!("{e:?}").contains("already exists") => {
             info!("cedros-login migration hit orphaned object, cleaning up and retrying");
-            // Wipe all cedros-login migration entries so migrator starts fresh
             sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 1000000")
                 .execute(&pool)
                 .await
                 .ok();
             drop_orphaned_cedros_tables(&pool).await;
             drop_orphaned_cedros_indexes(&pool).await;
+            pre_apply_concurrent_migrations(&pool).await;
             cedros_login::Storage::postgres_with_pool(pool.clone()).await
         }
         Err(e) => Err(e),
@@ -210,6 +215,63 @@ async fn drop_orphaned_cedros_indexes(pool: &PgPool) {
             "Dropped {} orphaned cedros-login indexes",
             orphaned_indexes.len()
         );
+    }
+}
+
+/// Pre-apply cedros-login v0.0.4 migrations that use CREATE INDEX CONCURRENTLY.
+/// These cannot run inside sqlx's default transaction wrapper. We create the indexes
+/// without CONCURRENTLY and insert migration entries with correct checksums so the
+/// migrator skips them. Checksums are SHA-384 of the SQL file contents (pinned to v0.0.4).
+async fn pre_apply_concurrent_migrations(pool: &PgPool) {
+    // (version, description, checksum_hex, index_ddl[])
+    let concurrent_migrations: &[(i64, &str, &str, &[&str])] = &[
+        (
+            20260108000001,
+            "webauthn user credentials index",
+            "2130da06130dd2f1c0b793db54ff8e9a4e1850a4b96857de08019ab181a6fe3076ce64970ccae53bc6c3a56bde2a4163",
+            &["CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user_all \
+               ON webauthn_credentials(user_id, created_at DESC)"],
+        ),
+        (
+            20260108000002,
+            "audit session composite index",
+            "8527299795dd0a7dc4cdab698925bd8d32bb458890df2987bc99d8a84eaf2882a5233ceddc27b71675fd49f80ddfb8c2",
+            &["CREATE INDEX IF NOT EXISTS idx_audit_logs_session_time \
+               ON audit_logs(session_id, created_at DESC) WHERE session_id IS NOT NULL"],
+        ),
+        (
+            20260109000002,
+            "drop redundant audit index",
+            "ca26b4793d69df067770936b7f78870995cc0555cb20ff47e10878d3b303bd16eb32217d8a18b78b950f4f0569d98079",
+            &[], // no-op migration (SELECT 1)
+        ),
+        (
+            20260110000001,
+            "memberships composite indexes",
+            "34bfb195fba47d4e58a3ed237c0b70e54b07201bddc28f0390a25605a61b7feebd8578e2e89fba8397d4098436c9e3bc",
+            &[
+                "CREATE INDEX IF NOT EXISTS idx_memberships_user_joined \
+                 ON memberships(user_id, joined_at DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_memberships_org_joined \
+                 ON memberships(org_id, joined_at ASC)",
+            ],
+        ),
+    ];
+
+    for (version, description, checksum_hex, indexes) in concurrent_migrations {
+        // Create the indexes (without CONCURRENTLY, which works in transactions)
+        for ddl in *indexes {
+            sqlx::query(ddl).execute(pool).await.ok();
+        }
+
+        // Insert migration entry so sqlx migrator skips this version.
+        // Uses decode(hex, 'hex') to convert checksum to bytea.
+        let insert = format!(
+            "INSERT INTO _sqlx_migrations (version, description, installed_on, success, checksum, execution_time) \
+             VALUES ({version}, '{description}', now(), true, decode('{checksum_hex}', 'hex'), 0) \
+             ON CONFLICT (version) DO NOTHING"
+        );
+        sqlx::query(&insert).execute(pool).await.ok();
     }
 }
 
