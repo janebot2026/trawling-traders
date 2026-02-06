@@ -62,7 +62,7 @@ rust_decimal = { version = "1.40", features = ["serde", "maths"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 
 # Cedros Pay integration - embedded payments with auto-migration
-cedros-pay = "1.1.3"
+cedros-pay = "1.1.4"
 
 # Cedros Login integration - embedded auth server with auto-migration
 cedros-login-server = { version = "0.0.5", features = ["postgres"] }

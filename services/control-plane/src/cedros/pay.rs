@@ -1,6 +1,6 @@
 //! Cedros Pay integration - Full payment and subscription support
 //!
-//! Uses cedros-pay 1.1.2 with SQLx 0.8 compatibility.
+//! Uses cedros-pay 1.1.4 with SQLx 0.8 compatibility.
 //! Stripe configuration is managed via cedros-pay's admin dashboard,
 //! not environment variables.
 
@@ -52,18 +52,12 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<Router> {
         cedros_pay::config::SchemaMapping::default(),
     ));
 
-    // Build Cedros Pay router with shared pool.
-    // Wrapped in tokio::spawn to catch panics: cedros-pay 1.1.x has :param routes
-    // that panic in axum 0.8 (should be {param}). Placeholder mode until patched.
-    let pay_result =
-        tokio::spawn(async move { cedros_pay::router_with_pool(&cfg, store, Some(pool)).await })
-            .await;
+    // Build Cedros Pay router with shared pool
+    let router = cedros_pay::router_with_pool(&cfg, store, Some(pool))
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    match pay_result {
-        Ok(Ok(router)) => Ok(router),
-        Ok(Err(e)) => Err(anyhow::anyhow!("{}", e)),
-        Err(panic_err) => Err(anyhow::anyhow!("cedros-pay panicked: {}", panic_err)),
-    }
+    Ok(router)
 }
 
 /// Simple placeholder routes (used when full integration not configured)
@@ -106,7 +100,7 @@ async fn health() -> axum::Json<serde_json::Value> {
     axum::Json(serde_json::json!({
         "status": "healthy",
         "service": "cedros-pay",
-        "version": "1.1.2",
+        "version": "1.1.4",
         "mode": "placeholder"
     }))
 }
