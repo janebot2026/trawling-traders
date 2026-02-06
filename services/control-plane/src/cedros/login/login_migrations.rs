@@ -278,4 +278,3 @@ async fn post_apply_treasury_config(pool: &PgPool) {
     .await
     .ok();
 }
-
