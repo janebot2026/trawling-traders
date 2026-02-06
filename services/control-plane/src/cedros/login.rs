@@ -87,26 +87,34 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         .await
         .ok();
 
-    // Clean-slate cedros-login migrations to avoid dirty/partial state from crash loops.
-    // Safe because: IF NOT EXISTS tables keep data, non-IF-NOT-EXISTS tables are service
-    // tables that get recreated. After a successful startup, entries persist for future runs.
-    let has_dirty_state = {
+    // Check if cedros-login migrations are fully applied and clean.
+    // cedros-login v0.0.4 has 55+ non-idempotent DDL statements, so partial state
+    // from crash loops cannot be recovered incrementally. Nuclear reset: drop ALL
+    // cedros-login objects and re-run from scratch. Safe on fresh systems; users table
+    // is preserved (our app owns it).
+    let needs_reset = {
+        let total: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version >= 1000000")
+                .fetch_one(&pool)
+                .await
+                .unwrap_or(0);
         let dirty: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM _sqlx_migrations WHERE version >= 1000000 AND success = false",
         )
         .fetch_one(&pool)
         .await
-        .unwrap_or(1); // Assume dirty if query fails
-        dirty > 0
+        .unwrap_or(0);
+        // Reset if: no entries yet (first run) OR any dirty entries
+        total == 0 || dirty > 0
     };
 
-    if has_dirty_state {
-        info!("Dirty cedros-login migration state detected, resetting");
+    if needs_reset {
+        info!("Resetting cedros-login migration state for clean apply");
         sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 1000000")
             .execute(&pool)
             .await
             .ok();
-        drop_orphaned_cedros_tables(&pool).await;
+        drop_all_cedros_tables(&pool).await;
     }
     drop_orphaned_cedros_indexes(&pool).await;
 
@@ -141,9 +149,10 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
     })
 }
 
-/// Drop cedros-login tables that use CREATE TABLE without IF NOT EXISTS.
-/// Safe to call multiple times; uses DROP IF EXISTS.
-async fn drop_orphaned_cedros_tables(pool: &PgPool) {
+/// Drop ALL cedros-login tables for clean-slate migration reset.
+/// Excludes `users` (shared with our app). Uses CASCADE to handle FK deps.
+async fn drop_all_cedros_tables(pool: &PgPool) {
+    // Tables WITHOUT IF NOT EXISTS (would fail on re-creation)
     for table in [
         "outbox_events",
         "user_credentials",
@@ -160,6 +169,33 @@ async fn drop_orphaned_cedros_tables(pool: &PgPool) {
         "withdrawal_history",
         "treasury_config",
         "pending_wallet_recovery",
+    ] {
+        sqlx::query(&format!("DROP TABLE IF EXISTS {table} CASCADE"))
+            .execute(pool)
+            .await
+            .ok();
+    }
+    // Tables WITH IF NOT EXISTS but having non-idempotent ALTER TABLE/ADD CONSTRAINT.
+    // Must drop so columns+constraints get recreated cleanly. Excludes `users`.
+    for table in [
+        "sessions",
+        "solana_nonces",
+        "verification_tokens",
+        "login_attempts",
+        "totp_secrets",
+        "totp_recovery_codes",
+        "custom_roles",
+        "abac_policies",
+        "organizations",
+        "memberships",
+        "invites",
+        "audit_logs",
+        "sso_providers",
+        "sso_auth_states",
+        "api_keys",
+        "system_settings",
+        "solana_wallet_material",
+        "credit_refund_requests",
     ] {
         sqlx::query(&format!("DROP TABLE IF EXISTS {table} CASCADE"))
             .execute(pool)
