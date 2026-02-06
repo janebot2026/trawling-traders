@@ -98,74 +98,26 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         > 0;
 
     if !has_cedros_entries {
-        // Tables from cedros-login migrations that use CREATE TABLE (no IF NOT EXISTS)
-        for table in [
-            "outbox_events",
-            "user_credentials",
-            "webauthn_credentials",
-            "webauthn_challenges",
-            "deposit_sessions",
-            "deposit_webhook_events",
-            "privacy_notes",
-            "credit_balances",
-            "credit_transactions",
-            "deposit_config",
-            "credit_holds",
-            "pending_spl_deposits",
-            "withdrawal_history",
-            "treasury_config",
-            "pending_wallet_recovery",
-        ] {
-            sqlx::query(&format!("DROP TABLE IF EXISTS {table} CASCADE"))
-                .execute(&pool)
-                .await
-                .ok();
-        }
-
-        // Also drop orphaned indexes on tables created WITH IF NOT EXISTS.
-        // These tables survive crash loops but their indexes (created WITHOUT
-        // IF NOT EXISTS) block re-migration. Query dynamically to handle
-        // future cedros-login updates without hardcoding 50+ index names.
-        let app_tables = [
-            "bots",
-            "config_versions",
-            "metrics",
-            "events",
-            "users",
-            "platform_config",
-            "config_audit_log",
-            "bot_openclaw_config",
-        ];
-        let exclude = app_tables
-            .iter()
-            .map(|t| format!("'{t}'"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let query = format!(
-            "SELECT indexname::text FROM pg_indexes \
-             WHERE schemaname = 'public' \
-             AND indexname LIKE 'idx_%' \
-             AND tablename NOT IN ({exclude})"
-        );
-        let orphaned_indexes: Vec<String> = sqlx::query_scalar(&query)
-            .fetch_all(&pool)
-            .await
-            .unwrap_or_default();
-        for idx in &orphaned_indexes {
-            sqlx::query(&format!("DROP INDEX IF EXISTS \"{idx}\""))
-                .execute(&pool)
-                .await
-                .ok();
-        }
-        if !orphaned_indexes.is_empty() {
-            info!(
-                "Dropped {} orphaned cedros-login indexes",
-                orphaned_indexes.len()
-            );
-        }
+        drop_orphaned_cedros_tables(&pool).await;
     }
+    drop_orphaned_cedros_indexes(&pool).await;
 
-    let storage_result = cedros_login::Storage::postgres_with_pool(pool.clone()).await;
+    // Try storage init; if it fails on "already exists", clean up and retry once.
+    let storage_result = match cedros_login::Storage::postgres_with_pool(pool.clone()).await {
+        Ok(s) => Ok(s),
+        Err(e) if format!("{e:?}").contains("already exists") => {
+            info!("cedros-login migration hit orphaned object, cleaning up and retrying");
+            // Wipe all cedros-login migration entries so migrator starts fresh
+            sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 1000000")
+                .execute(&pool)
+                .await
+                .ok();
+            drop_orphaned_cedros_tables(&pool).await;
+            drop_orphaned_cedros_indexes(&pool).await;
+            cedros_login::Storage::postgres_with_pool(pool.clone()).await
+        }
+        Err(e) => Err(e),
+    };
 
     // Always restore our entries regardless of success/failure
     sqlx::query(
@@ -189,6 +141,76 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         router,
         jwt_service,
     })
+}
+
+/// Drop cedros-login tables that use CREATE TABLE without IF NOT EXISTS.
+/// Safe to call multiple times; uses DROP IF EXISTS.
+async fn drop_orphaned_cedros_tables(pool: &PgPool) {
+    for table in [
+        "outbox_events",
+        "user_credentials",
+        "webauthn_credentials",
+        "webauthn_challenges",
+        "deposit_sessions",
+        "deposit_webhook_events",
+        "privacy_notes",
+        "credit_balances",
+        "credit_transactions",
+        "deposit_config",
+        "credit_holds",
+        "pending_spl_deposits",
+        "withdrawal_history",
+        "treasury_config",
+        "pending_wallet_recovery",
+    ] {
+        sqlx::query(&format!("DROP TABLE IF EXISTS {table} CASCADE"))
+            .execute(pool)
+            .await
+            .ok();
+    }
+}
+
+/// Drop orphaned idx_* indexes on cedros-login tables (not our app tables).
+/// These indexes survive crash loops when their parent tables use IF NOT EXISTS,
+/// but block re-migration because CREATE INDEX lacks IF NOT EXISTS.
+async fn drop_orphaned_cedros_indexes(pool: &PgPool) {
+    let app_tables = [
+        "bots",
+        "config_versions",
+        "metrics",
+        "events",
+        "users",
+        "platform_config",
+        "config_audit_log",
+        "bot_openclaw_config",
+    ];
+    let exclude = app_tables
+        .iter()
+        .map(|t| format!("'{t}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let query = format!(
+        "SELECT indexname::text FROM pg_indexes \
+         WHERE schemaname = 'public' \
+         AND indexname LIKE 'idx_%' \
+         AND tablename NOT IN ({exclude})"
+    );
+    let orphaned_indexes: Vec<String> = sqlx::query_scalar(&query)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    for idx in &orphaned_indexes {
+        sqlx::query(&format!("DROP INDEX IF EXISTS \"{idx}\""))
+            .execute(pool)
+            .await
+            .ok();
+    }
+    if !orphaned_indexes.is_empty() {
+        info!(
+            "Dropped {} orphaned cedros-login indexes",
+            orphaned_indexes.len()
+        );
+    }
 }
 
 /// Simple placeholder routes (used when full integration fails)
