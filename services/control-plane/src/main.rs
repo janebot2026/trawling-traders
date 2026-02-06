@@ -304,7 +304,7 @@ async fn build_router(
         .nest("/v1", app_routes)
         .nest("/v1", bot_routes)
         .nest("/v1/admin", admin_routes)
-        .nest("/v1/pay", cedros_routes)
+        .merge(cedros_routes) // cedros-pay applies its own /paywall/v1 prefix
         .nest("/v1/auth", login_routes)
         .nest("/v1", health_routes)
         .merge(diagnostics_route)

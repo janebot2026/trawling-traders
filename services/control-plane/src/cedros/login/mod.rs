@@ -55,7 +55,10 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
             allowed_origins: vec![],
             disabled: true, // Host app manages CORS for all routes
         },
-        cookie: Default::default(),
+        cookie: cedros_login::config::CookieConfig {
+            enabled: false, // SDK uses Bearer tokens, not cookies
+            ..Default::default()
+        },
         webhook: Default::default(),
         rate_limit: Default::default(),
         notification: Default::default(),

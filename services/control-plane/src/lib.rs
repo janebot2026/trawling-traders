@@ -180,7 +180,7 @@ pub async fn app(state: Arc<AppState>) -> Router {
     Router::new()
         .nest("/v1", app_routes)
         .nest("/v1", bot_routes)
-        .nest("/v1/pay", pay_routes)
+        .merge(pay_routes) // cedros-pay applies its own /paywall/v1 prefix
         .layer(cors)
         .layer(TraceLayer::new_for_http())
 }
