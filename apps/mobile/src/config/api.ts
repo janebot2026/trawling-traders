@@ -11,15 +11,16 @@ const IS_DEV = __DEV__;
 
 export const API_URL = IS_DEV ? DEV_API_URL : PROD_API_URL;
 
-// Cedros configuration
+// Cedros Login configuration
+// SDK appends /auth/* paths, so base must include /v1 to reach /v1/auth/*
 export const CEDROS_CONFIG = {
-  serverUrl: API_URL,
+  serverUrl: `${API_URL}/v1`,
   timeout: 30000,
   retries: 3,
 };
 
 // Cedros Pay configuration
+// SDK appends /paywall/v1/* paths, so base must include /v1/pay to reach /v1/pay/paywall/v1/*
 export const CEDROS_PAY_CONFIG = {
-  apiUrl: API_URL,
-  // Stripe and Solana keys left blank for now per instructions
+  apiUrl: `${API_URL}/v1/pay`,
 };

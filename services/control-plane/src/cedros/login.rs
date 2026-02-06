@@ -28,7 +28,10 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
 
     // Build config - database config not needed since we pass the pool directly
     let config = cedros_login::Config {
-        server: cedros_login::config::ServerConfig::default(),
+        server: cedros_login::config::ServerConfig {
+            auth_base_path: "".to_string(), // Empty - nesting at /v1/auth handles the prefix
+            ..Default::default()
+        },
         jwt: cedros_login::config::JwtConfig {
             secret: jwt_secret,
             rsa_private_key_pem,
