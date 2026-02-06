@@ -25,13 +25,16 @@ async fn main() -> anyhow::Result<()> {
     info!("✓ Migrations applied");
 
     // Initialize Cedros Login (embedded auth server)
+    let mut login_error: Option<String> = None;
     let login_integration = match control_plane::cedros::login::full_router(db.clone()).await {
         Ok(integration) => {
             info!("✓ Cedros Login integration active");
             Some(integration)
         }
         Err(e) => {
-            info!("⚠ Cedros Login using placeholder mode: {}", e);
+            let msg = format!("{}", e);
+            info!("⚠ Cedros Login using placeholder mode: {}", msg);
+            login_error = Some(msg);
             None
         }
     };
@@ -65,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
     info!("✓ Offline bot checker spawned");
 
     // Build router
-    let app = build_router(state, db.clone(), login_integration).await?;
+    let app = build_router(state, db.clone(), login_integration, login_error).await?;
 
     // Start server
     let port = std::env::var("PORT")
@@ -91,6 +94,7 @@ async fn build_router(
     state: Arc<control_plane::AppState>,
     pool: sqlx::PgPool,
     login_integration: Option<control_plane::cedros::login::LoginIntegration>,
+    login_error: Option<String>,
 ) -> anyhow::Result<axum::Router> {
     use axum::http::{header, HeaderValue, Method};
     use axum::{
@@ -251,13 +255,16 @@ async fn build_router(
         .with_state(state.clone());
 
     // Cedros Pay routes - try full integration, fallback to placeholder
+    let mut pay_error: Option<String> = None;
     let cedros_routes = match control_plane::cedros::pay::full_router(pool).await {
         Ok(router) => {
             info!("✓ Cedros Pay full integration active");
             router
         }
         Err(e) => {
-            info!("⚠ Cedros Pay using placeholder mode: {}", e);
+            let msg = format!("{}", e);
+            info!("⚠ Cedros Pay using placeholder mode: {}", msg);
+            pay_error = Some(msg);
             control_plane::cedros::pay::placeholder_routes()
         }
     };
@@ -267,6 +274,21 @@ async fn build_router(
         Some(integration) => integration.router,
         None => control_plane::cedros::login::placeholder_routes(),
     };
+
+    // Startup diagnostics (temporary - shows why integrations failed)
+    let diag = serde_json::json!({
+        "login": if login_error.is_none() { "active" } else { "placeholder" },
+        "login_error": login_error,
+        "pay": if pay_error.is_none() { "active" } else { "placeholder" },
+        "pay_error": pay_error,
+    });
+    let diagnostics_route = Router::new().route(
+        "/debug/startup",
+        get(move || {
+            let d = diag.clone();
+            async move { axum::Json(d) }
+        }),
+    );
 
     // Health check routes (no auth)
     let health_routes = Router::new()
@@ -283,6 +305,7 @@ async fn build_router(
         .nest("/v1/pay", cedros_routes)
         .nest("/v1/auth", login_routes)
         .nest("/v1", health_routes)
+        .merge(diagnostics_route)
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 
