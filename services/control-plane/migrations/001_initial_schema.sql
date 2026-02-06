@@ -130,9 +130,9 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 -- Indexes
-CREATE INDEX idx_bots_user_id ON bots(user_id);
-CREATE INDEX idx_bots_status ON bots(status);
-CREATE INDEX idx_bots_agent_wallet ON bots(agent_wallet) WHERE agent_wallet IS NOT NULL;
-CREATE INDEX idx_config_versions_bot_id ON config_versions(bot_id);
-CREATE INDEX idx_metrics_bot_id_timestamp ON metrics(bot_id, timestamp);
-CREATE INDEX idx_events_bot_id_created_at ON events(bot_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bots_user_id ON bots(user_id);
+CREATE INDEX IF NOT EXISTS idx_bots_status ON bots(status);
+CREATE INDEX IF NOT EXISTS idx_bots_agent_wallet ON bots(agent_wallet) WHERE agent_wallet IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_config_versions_bot_id ON config_versions(bot_id);
+CREATE INDEX IF NOT EXISTS idx_metrics_bot_id_timestamp ON metrics(bot_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_events_bot_id_created_at ON events(bot_id, created_at);
