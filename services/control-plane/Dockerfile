@@ -41,6 +41,11 @@ WORKDIR /app/services/control-plane
 # Touch source files to force rebuild of local crates (not external dependencies)
 RUN touch src/main.rs src/lib.rs ../data-retrieval/src/lib.rs
 
+# Fix cedros-login v0.0.4 bug: duplicate migration version 20260130000001
+# (encrypted_settings + treasury_config). treasury_config also references
+# non-existent "orgs" table. Remove it so sqlx::migrate! only sees one file.
+RUN find /usr/local/cargo/registry/src -path "*/cedros-login-server-*/migrations/20260130000001_treasury_config.sql" -delete 2>/dev/null || true
+
 # Build release binary - only recompiles our crate, deps are cached
 RUN cargo build --release
 

@@ -109,10 +109,11 @@ pub async fn drop_orphaned_cedros_indexes(pool: &PgPool) {
 /// Pre-apply cedros-login v0.0.4 migrations that cannot run through sqlx's migrator:
 /// - 4 migrations use CREATE INDEX CONCURRENTLY (can't run in transactions)
 /// - 20260123000001: duplicate index name conflict
-/// - 20260130000001: duplicate version + references non-existent "orgs" table
 ///
 /// Creates indexes without CONCURRENTLY and inserts migration entries with correct
 /// SHA-384 checksums so the migrator skips them.
+/// Note: 20260130000001 duplicate version is handled by deleting the conflicting
+/// file (treasury_config.sql) in the Dockerfile before compilation.
 pub async fn pre_apply_buggy_migrations(pool: &PgPool) {
     // (version, description, checksum_hex, pre_ddl[])
     let skip_migrations: &[(i64, &str, &str, &[&str])] = &[
@@ -155,15 +156,7 @@ pub async fn pre_apply_buggy_migrations(pool: &PgPool) {
             "811c22129f27a2ad379838831cd280fa1bd730b03deac466f0d122437af042302e25d1431ad92b2400a70aa0073a892f",
             &[], // DDL applied in post_apply_skipped_migrations()
         ),
-        (
-            // Bug: duplicate version (encrypted_settings + treasury_config share this version).
-            // sqlx resolves to encrypted_settings (first alphabetically). treasury_config
-            // references "orgs" (should be "organizations"). Both applied post-migration.
-            20260130000001,
-            "encrypted settings",
-            "7a9bb622ef7252240369c89697eb3271a718ed4232c7e1b406b5e22684f60df2c092170f99be9c77862ae725c7ca5d7f",
-            &[], // DDL applied in post_apply_skipped_migrations()
-        ),
+        // 20260130000001 (duplicate version) handled in Dockerfile by removing treasury_config.sql
     ];
 
     for (version, description, checksum_hex, pre_ddl) in skip_migrations {
@@ -184,7 +177,7 @@ pub async fn pre_apply_buggy_migrations(pool: &PgPool) {
 /// Tables referenced here are created by earlier migrations that ran normally.
 pub async fn post_apply_skipped_migrations(pool: &PgPool) {
     post_apply_spl_deposit_tracking(pool).await;
-    post_apply_encrypted_settings(pool).await;
+    // encrypted_settings runs via migrator (treasury_config.sql deleted in Dockerfile)
     post_apply_treasury_config(pool).await;
     info!("Applied post-migration DDL for skipped migrations");
 }
@@ -241,23 +234,7 @@ async fn post_apply_spl_deposit_tracking(pool: &PgPool) {
     }
 }
 
-/// DDL from 20260130000001_encrypted_settings.sql (lost due to duplicate version).
-async fn post_apply_encrypted_settings(pool: &PgPool) {
-    let stmts = [
-        "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS is_secret BOOLEAN NOT NULL DEFAULT FALSE",
-        "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS encryption_version TEXT",
-        "CREATE INDEX IF NOT EXISTS idx_system_settings_is_secret \
-         ON system_settings(is_secret) WHERE is_secret = TRUE",
-    ];
-    for stmt in &stmts {
-        sqlx::query(stmt).execute(pool).await.ok();
-    }
-    for insert in ENCRYPTED_SETTINGS_SEED_DATA {
-        sqlx::query(insert).execute(pool).await.ok();
-    }
-}
-
-/// DDL from 20260130000001_treasury_config.sql (references "orgs", fixed to "organizations").
+/// DDL from 20260130000001_treasury_config.sql (deleted in Dockerfile, applied here with fix).
 async fn post_apply_treasury_config(pool: &PgPool) {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS treasury_config (
@@ -302,63 +279,3 @@ async fn post_apply_treasury_config(pool: &PgPool) {
     .ok();
 }
 
-/// Seed data from encrypted_settings migration (lost due to duplicate version).
-const ENCRYPTED_SETTINGS_SEED_DATA: &[&str] = &[
-    "INSERT INTO system_settings (key, value, category, description, is_secret) VALUES \
-     ('auth_email_enabled', 'true', 'auth.email', 'Enable email/password authentication', FALSE), \
-     ('auth_email_require_verification', 'true', 'auth.email', 'Require email verification', FALSE), \
-     ('auth_email_block_disposable', 'false', 'auth.email', 'Block disposable email domains', FALSE), \
-     ('auth_google_enabled', 'false', 'auth.google', 'Enable Google Sign-In', FALSE), \
-     ('auth_google_client_id', '', 'auth.google', 'Google OAuth client ID', FALSE), \
-     ('auth_google_client_secret', '', 'auth.google', 'Google OAuth client secret', TRUE), \
-     ('auth_apple_enabled', 'false', 'auth.apple', 'Enable Sign in with Apple', FALSE), \
-     ('auth_apple_client_id', '', 'auth.apple', 'Apple Services ID', FALSE), \
-     ('auth_apple_team_id', '', 'auth.apple', 'Apple Developer Team ID', FALSE), \
-     ('auth_apple_key_id', '', 'auth.apple', 'Apple Sign-In private key ID', FALSE), \
-     ('auth_apple_private_key', '', 'auth.apple', 'Apple Sign-In private key (PEM)', TRUE), \
-     ('auth_solana_enabled', 'false', 'auth.solana', 'Enable Solana wallet authentication', FALSE), \
-     ('auth_solana_challenge_expiry', '300', 'auth.solana', 'Challenge expiration (seconds)', FALSE), \
-     ('auth_webauthn_enabled', 'false', 'auth.webauthn', 'Enable WebAuthn/Passkey auth', FALSE), \
-     ('auth_webauthn_rp_id', '', 'auth.webauthn', 'Relying Party ID (usually domain)', FALSE), \
-     ('auth_webauthn_rp_name', '', 'auth.webauthn', 'Relying Party display name', FALSE), \
-     ('auth_webauthn_rp_origin', '', 'auth.webauthn', 'Allowed origin(s) for WebAuthn', FALSE) \
-     ON CONFLICT (key) DO NOTHING",
-    "INSERT INTO system_settings (key, value, category, description, is_secret) VALUES \
-     ('feature_privacy_cash', 'false', 'features', 'Enable Privacy Cash', FALSE), \
-     ('feature_wallet_signing', 'false', 'features', 'Enable embedded wallet signing', FALSE), \
-     ('feature_sso', 'false', 'features', 'Enable enterprise SSO (SAML/OIDC)', FALSE), \
-     ('feature_organizations', 'true', 'features', 'Enable multi-user organizations', FALSE), \
-     ('feature_mfa', 'true', 'features', 'Enable two-factor authentication', FALSE), \
-     ('feature_instant_link', 'true', 'features', 'Enable instant link login', FALSE) \
-     ON CONFLICT (key) DO NOTHING",
-    "INSERT INTO system_settings (key, value, category, description, is_secret) VALUES \
-     ('security_cors_origins', '', 'security', 'Allowed CORS origins (comma-separated)', FALSE), \
-     ('security_cookie_domain', '', 'security', 'Cookie domain (empty for request origin)', FALSE), \
-     ('security_cookie_secure', 'true', 'security', 'Require HTTPS for cookies', FALSE), \
-     ('security_cookie_same_site', 'lax', 'security', 'Cookie SameSite policy', FALSE), \
-     ('security_session_timeout', '604800', 'security', 'Session timeout (seconds)', FALSE), \
-     ('security_jwt_issuer', '', 'security', 'JWT issuer claim (empty for default)', FALSE), \
-     ('security_jwt_audience', '', 'security', 'JWT audience claim (empty for default)', FALSE) \
-     ON CONFLICT (key) DO NOTHING",
-    "INSERT INTO system_settings (key, value, category, description, is_secret) VALUES \
-     ('email_smtp_host', '', 'email', 'SMTP server hostname', FALSE), \
-     ('email_smtp_port', '587', 'email', 'SMTP server port', FALSE), \
-     ('email_smtp_user', '', 'email', 'SMTP username', FALSE), \
-     ('email_smtp_password', '', 'email', 'SMTP password', TRUE), \
-     ('email_smtp_tls', 'true', 'email', 'Use TLS for SMTP', FALSE), \
-     ('email_from_address', '', 'email', 'Default from email address', FALSE), \
-     ('email_from_name', '', 'email', 'Default from display name', FALSE) \
-     ON CONFLICT (key) DO NOTHING",
-    "INSERT INTO system_settings (key, value, category, description, is_secret) VALUES \
-     ('webhook_enabled', 'false', 'webhook', 'Enable webhook notifications', FALSE), \
-     ('webhook_url', '', 'webhook', 'Webhook endpoint URL', FALSE), \
-     ('webhook_secret', '', 'webhook', 'Webhook signing secret', TRUE), \
-     ('webhook_timeout', '30', 'webhook', 'Webhook request timeout (seconds)', FALSE), \
-     ('webhook_retries', '3', 'webhook', 'Maximum webhook retry attempts', FALSE) \
-     ON CONFLICT (key) DO NOTHING",
-    "INSERT INTO system_settings (key, value, category, description, is_secret) VALUES \
-     ('server_frontend_url', '', 'server', 'Frontend URL for redirects and emails', FALSE), \
-     ('server_base_path', '/auth', 'server', 'Base path for auth endpoints', FALSE), \
-     ('server_trust_proxy', 'false', 'server', 'Trust X-Forwarded-For headers', FALSE) \
-     ON CONFLICT (key) DO NOTHING",
-];
