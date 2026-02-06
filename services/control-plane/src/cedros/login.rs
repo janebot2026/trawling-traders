@@ -66,39 +66,75 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
     let jwt_service = JwtService::try_new(&config.jwt)
         .map_err(|e| anyhow::anyhow!("Failed to create JwtService: {}", e))?;
 
-    // cedros-login's embedded migrator conflicts with our app migrations because both
-    // use the same _sqlx_migrations table. Temporarily stash our entries so cedros-login
-    // sees a clean table, then merge both sets back afterwards.
-    sqlx::query("ALTER TABLE IF EXISTS _sqlx_migrations RENAME TO _sqlx_migrations_app")
+    // cedros-login's embedded migrator rejects unknown entries in _sqlx_migrations.
+    // Our app uses sequential versions (1-6), cedros-login uses timestamps (20241212...).
+    // Strategy: temporarily remove our entries so cedros-login only sees its own,
+    // then restore them afterwards. This is safe across restarts because cedros-login's
+    // entries persist and it skips already-applied migrations.
+    sqlx::query("DROP TABLE IF EXISTS _sqlx_migrations_app")
         .execute(&pool)
         .await
         .ok();
+    sqlx::query(
+        "CREATE TABLE _sqlx_migrations_app AS SELECT * FROM _sqlx_migrations WHERE version < 1000000",
+    )
+    .execute(&pool)
+    .await
+    .ok();
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version < 1000000")
+        .execute(&pool)
+        .await
+        .ok();
+
+    // If cedros-login's migration entries are missing (first run or crash-loop recovery),
+    // drop tables created without IF NOT EXISTS so they can be recreated cleanly.
+    let has_cedros_entries = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM _sqlx_migrations WHERE version >= 1000000",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(0)
+        > 0;
+
+    if !has_cedros_entries {
+        // Tables from cedros-login migrations that use CREATE TABLE (no IF NOT EXISTS)
+        for table in [
+            "outbox_events",
+            "user_credentials",
+            "webauthn_credentials",
+            "webauthn_challenges",
+            "deposit_sessions",
+            "deposit_webhook_events",
+            "privacy_notes",
+            "credit_balances",
+            "credit_transactions",
+            "deposit_config",
+            "credit_holds",
+            "pending_spl_deposits",
+            "withdrawal_history",
+            "treasury_config",
+            "pending_wallet_recovery",
+        ] {
+            sqlx::query(&format!("DROP TABLE IF EXISTS {table} CASCADE"))
+                .execute(&pool)
+                .await
+                .ok();
+        }
+    }
 
     let storage_result = cedros_login::Storage::postgres_with_pool(pool.clone()).await;
 
-    if storage_result.is_ok() {
-        // Merge: copy our migration records back alongside cedros-login's
-        sqlx::query(
-            "INSERT INTO _sqlx_migrations SELECT * FROM _sqlx_migrations_app ON CONFLICT (version) DO NOTHING",
-        )
+    // Always restore our entries regardless of success/failure
+    sqlx::query(
+        "INSERT INTO _sqlx_migrations SELECT * FROM _sqlx_migrations_app ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(&pool)
+    .await
+    .ok();
+    sqlx::query("DROP TABLE IF EXISTS _sqlx_migrations_app")
         .execute(&pool)
         .await
         .ok();
-        sqlx::query("DROP TABLE IF EXISTS _sqlx_migrations_app")
-            .execute(&pool)
-            .await
-            .ok();
-    } else {
-        // Restore original state on failure
-        sqlx::query("DROP TABLE IF EXISTS _sqlx_migrations")
-            .execute(&pool)
-            .await
-            .ok();
-        sqlx::query("ALTER TABLE IF EXISTS _sqlx_migrations_app RENAME TO _sqlx_migrations")
-            .execute(&pool)
-            .await
-            .ok();
-    }
 
     let storage = storage_result
         .map_err(|e| anyhow::anyhow!("Failed to create cedros-login storage: {:?}", e))?;

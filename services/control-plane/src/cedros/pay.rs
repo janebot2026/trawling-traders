@@ -52,10 +52,19 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<Router> {
         cedros_pay::config::SchemaMapping::default(),
     ));
 
-    // Build Cedros Pay router with shared pool
-    let pay_router = cedros_pay::router_with_pool(&cfg, store, Some(pool)).await?;
+    // Build Cedros Pay router with shared pool.
+    // Wrapped in tokio::spawn to catch panics: cedros-pay 1.1.x has :param routes
+    // that panic in axum 0.8 (should be {param}). Placeholder mode until patched.
+    let pay_result = tokio::spawn(async move {
+        cedros_pay::router_with_pool(&cfg, store, Some(pool)).await
+    })
+    .await;
 
-    Ok(pay_router)
+    match pay_result {
+        Ok(Ok(router)) => Ok(router),
+        Ok(Err(e)) => Err(anyhow::anyhow!("{}", e)),
+        Err(panic_err) => Err(anyhow::anyhow!("cedros-pay panicked: {}", panic_err)),
+    }
 }
 
 /// Simple placeholder routes (used when full integration not configured)
