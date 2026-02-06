@@ -8,6 +8,7 @@ use axum::Router;
 use cedros_login::services::JwtService;
 use sqlx::PgPool;
 use std::sync::Arc;
+use tracing::info;
 
 /// Build result containing the auth router and JWT service for token validation
 pub struct LoginIntegration {
@@ -119,6 +120,48 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
                 .execute(&pool)
                 .await
                 .ok();
+        }
+
+        // Also drop orphaned indexes on tables created WITH IF NOT EXISTS.
+        // These tables survive crash loops but their indexes (created WITHOUT
+        // IF NOT EXISTS) block re-migration. Query dynamically to handle
+        // future cedros-login updates without hardcoding 50+ index names.
+        let app_tables = [
+            "bots",
+            "config_versions",
+            "metrics",
+            "events",
+            "users",
+            "platform_config",
+            "config_audit_log",
+            "bot_openclaw_config",
+        ];
+        let exclude = app_tables
+            .iter()
+            .map(|t| format!("'{t}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let query = format!(
+            "SELECT indexname::text FROM pg_indexes \
+             WHERE schemaname = 'public' \
+             AND indexname LIKE 'idx_%' \
+             AND tablename NOT IN ({exclude})"
+        );
+        let orphaned_indexes: Vec<String> = sqlx::query_scalar(&query)
+            .fetch_all(&pool)
+            .await
+            .unwrap_or_default();
+        for idx in &orphaned_indexes {
+            sqlx::query(&format!("DROP INDEX IF EXISTS \"{idx}\""))
+                .execute(&pool)
+                .await
+                .ok();
+        }
+        if !orphaned_indexes.is_empty() {
+            info!(
+                "Dropped {} orphaned cedros-login indexes",
+                orphaned_indexes.len()
+            );
         }
     }
 
