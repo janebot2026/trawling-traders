@@ -87,17 +87,25 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         .await
         .ok();
 
-    // If cedros-login's migration entries are missing (first run or crash-loop recovery),
-    // drop tables created without IF NOT EXISTS so they can be recreated cleanly.
-    let has_cedros_entries = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM _sqlx_migrations WHERE version >= 1000000",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap_or(0)
-        > 0;
+    // Clean-slate cedros-login migrations to avoid dirty/partial state from crash loops.
+    // Safe because: IF NOT EXISTS tables keep data, non-IF-NOT-EXISTS tables are service
+    // tables that get recreated. After a successful startup, entries persist for future runs.
+    let has_dirty_state = {
+        let dirty: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM _sqlx_migrations WHERE version >= 1000000 AND success = false",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(1); // Assume dirty if query fails
+        dirty > 0
+    };
 
-    if !has_cedros_entries {
+    if has_dirty_state {
+        info!("Dirty cedros-login migration state detected, resetting");
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 1000000")
+            .execute(&pool)
+            .await
+            .ok();
         drop_orphaned_cedros_tables(&pool).await;
     }
     drop_orphaned_cedros_indexes(&pool).await;
@@ -107,22 +115,7 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
     // (without CONCURRENTLY) and insert migration entries so the migrator skips them.
     pre_apply_concurrent_migrations(&pool).await;
 
-    // Try storage init; if it fails on "already exists", clean up and retry once.
-    let storage_result = match cedros_login::Storage::postgres_with_pool(pool.clone()).await {
-        Ok(s) => Ok(s),
-        Err(e) if format!("{e:?}").contains("already exists") => {
-            info!("cedros-login migration hit orphaned object, cleaning up and retrying");
-            sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 1000000")
-                .execute(&pool)
-                .await
-                .ok();
-            drop_orphaned_cedros_tables(&pool).await;
-            drop_orphaned_cedros_indexes(&pool).await;
-            pre_apply_concurrent_migrations(&pool).await;
-            cedros_login::Storage::postgres_with_pool(pool.clone()).await
-        }
-        Err(e) => Err(e),
-    };
+    let storage_result = cedros_login::Storage::postgres_with_pool(pool.clone()).await;
 
     // Always restore our entries regardless of success/failure
     sqlx::query(
