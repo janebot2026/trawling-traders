@@ -157,11 +157,11 @@ pub async fn pre_apply_buggy_migrations(pool: &PgPool) {
         ),
         (
             // Bug: duplicate version (encrypted_settings + treasury_config share this version).
-            // sqlx picks treasury_config which references "orgs" (should be "organizations").
-            // DDL for both files applied post-migration instead.
+            // sqlx resolves to encrypted_settings (first alphabetically). treasury_config
+            // references "orgs" (should be "organizations"). Both applied post-migration.
             20260130000001,
-            "treasury config",
-            "7209ec6881e39a2df9c625dbda9eb4d7966994d62d13d9911dc343924f071030e3d1c2939f3afa46842598005e068198",
+            "encrypted settings",
+            "7a9bb622ef7252240369c89697eb3271a718ed4232c7e1b406b5e22684f60df2c092170f99be9c77862ae725c7ca5d7f",
             &[], // DDL applied in post_apply_skipped_migrations()
         ),
     ];
