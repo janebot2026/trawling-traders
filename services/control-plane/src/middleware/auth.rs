@@ -64,11 +64,19 @@ pub async fn auth_middleware(
     // Note: jsonwebtoken crate handles expiration validation internally
     let claims = validate_jwt(token).await?;
 
+    // Check if user is admin via JWT claim OR database flag
+    let is_admin = if claims.is_admin {
+        true
+    } else {
+        // Check database for admin flag
+        check_db_admin(&_state.db, &claims.sub).await
+    };
+
     // Create auth context
     let auth_context = AuthContext {
         user_id: claims.sub,
         email: claims.email,
-        is_admin: claims.is_admin,
+        is_admin,
     };
 
     // Attach auth context to request extensions
@@ -119,6 +127,22 @@ async fn validate_jwt(token: &str) -> Result<CedrosClaims, StatusCode> {
     })?;
 
     Ok(token_data.claims)
+}
+
+/// Check if user has admin flag set in database
+async fn check_db_admin(db: &sqlx::PgPool, user_id: &str) -> bool {
+    let user_uuid = match uuid::Uuid::parse_str(user_id) {
+        Ok(id) => id,
+        Err(_) => return false,
+    };
+
+    sqlx::query_scalar::<_, bool>("SELECT is_admin FROM users WHERE id = $1")
+        .bind(user_uuid)
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false)
 }
 
 /// Extract AuthContext from request extensions
