@@ -46,7 +46,13 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         apple: Default::default(),
         solana: Default::default(),
         webauthn: Default::default(),
-        cors: Default::default(),
+        cors: cedros_login::config::CorsConfig {
+            allowed_origins: vec![
+                "https://trawlingtraders.com".to_string(),
+                "https://www.trawlingtraders.com".to_string(),
+                "https://trawling-traders-web.vercel.app".to_string(),
+            ],
+        },
         cookie: Default::default(),
         webhook: Default::default(),
         rate_limit: Default::default(),
