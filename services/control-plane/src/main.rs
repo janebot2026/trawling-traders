@@ -252,6 +252,10 @@ async fn build_router(
             "/provisioning/queue",
             get(control_plane::handlers::admin::get_provisioning_queue),
         )
+        .route(
+            "/audit",
+            get(control_plane::handlers::admin::get_audit_log_entries),
+        )
         .layer(axum::middleware::from_fn(
             control_plane::middleware::admin_middleware,
         ))

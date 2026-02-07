@@ -466,14 +466,6 @@ pub async fn get_kpis(
 // Provisioning Queue
 // ============================================================================
 
-#[derive(Debug, Serialize)]
-pub struct ProvisioningQueueResponse {
-    pub queue: Vec<ProvisioningEntry>,
-    pub total: i64,
-    pub max_concurrent: usize,
-    pub available_permits: usize,
-}
-
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct ProvisioningEntry {
     #[sqlx(rename = "id")]
@@ -484,11 +476,11 @@ pub struct ProvisioningEntry {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// GET /admin/provisioning/queue - Current provisioning queue
+/// GET /admin/provisioning/queue - Current provisioning queue (returns array)
 pub async fn get_provisioning_queue(
     State(state): State<Arc<AppState>>,
     Extension(admin): Extension<AdminContext>,
-) -> Result<Json<ProvisioningQueueResponse>, (StatusCode, String)> {
+) -> Result<Json<Vec<ProvisioningEntry>>, (StatusCode, String)> {
     info!("Admin {} fetching provisioning queue", admin.admin_id);
 
     let queue: Vec<ProvisioningEntry> = sqlx::query_as(
@@ -498,12 +490,42 @@ pub async fn get_provisioning_queue(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let total = queue.len() as i64;
+    Ok(Json(queue))
+}
 
-    Ok(Json(ProvisioningQueueResponse {
-        queue,
-        total,
-        max_concurrent: 3,
-        available_permits: state.droplet_semaphore.available_permits(),
-    }))
+// ============================================================================
+// Audit Log (cedros-login audit_logs table)
+// ============================================================================
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct AuditEntry {
+    pub id: uuid::Uuid,
+    pub event_type: String,
+    pub actor_user_id: Option<uuid::Uuid>,
+    pub org_id: Option<uuid::Uuid>,
+    pub target_type: Option<String>,
+    pub target_id: Option<uuid::Uuid>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+    pub metadata: Option<serde_json::Value>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// GET /admin/audit - Auth audit log from cedros-login (returns array)
+pub async fn get_audit_log_entries(
+    State(state): State<Arc<AppState>>,
+    Extension(admin): Extension<AdminContext>,
+) -> Result<Json<Vec<AuditEntry>>, (StatusCode, String)> {
+    info!("Admin {} fetching audit log", admin.admin_id);
+
+    let entries: Vec<AuditEntry> = sqlx::query_as(
+        "SELECT id, event_type, actor_user_id, org_id, target_type, target_id, \
+         ip_address, user_agent, metadata, created_at \
+         FROM audit_logs ORDER BY created_at DESC LIMIT 200",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(entries))
 }
