@@ -247,6 +247,11 @@ async fn build_router(
             "/config/sync-env",
             post(control_plane::handlers::admin::sync_env_to_db),
         )
+        .route("/kpis", get(control_plane::handlers::admin::get_kpis))
+        .route(
+            "/provisioning/queue",
+            get(control_plane::handlers::admin::get_provisioning_queue),
+        )
         .layer(axum::middleware::from_fn(
             control_plane::middleware::admin_middleware,
         ))

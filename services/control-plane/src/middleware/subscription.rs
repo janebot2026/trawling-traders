@@ -93,29 +93,37 @@ pub async fn subscription_middleware(
     let user_id = Uuid::parse_str(&auth.user_id).map_err(|_| StatusCode::BAD_REQUEST)?;
 
     // Fetch subscription from database
-    let subscription = sqlx::query_as::<_, (String, Option<chrono::DateTime<chrono::Utc>>, i64)>(
+    // Schema: subscriptions(status subscription_status, max_bots, current_period_end)
+    let subscription = sqlx::query_as::<_, (String, i32, chrono::DateTime<chrono::Utc>, i64)>(
         r#"
-            SELECT s.tier, s.expires_at, COUNT(b.id) as bot_count
+            SELECT s.status::text, s.max_bots, s.current_period_end, COUNT(b.id) as bot_count
             FROM subscriptions s
             LEFT JOIN bots b ON b.user_id = s.user_id AND b.status != 'destroying'
             WHERE s.user_id = $1
-            AND (s.expires_at IS NULL OR s.expires_at > NOW())
+            AND s.current_period_end > NOW()
             GROUP BY s.id
             "#,
     )
     .bind(user_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        tracing::error!("Subscription query failed: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let (tier, expires_at, bot_count) = match subscription {
-        Some((tier_str, exp, count)) => {
-            let tier = match tier_str.as_str() {
-                "pro" | "Pro" => SubscriptionTier::Pro,
-                "enterprise" | "Enterprise" => SubscriptionTier::Enterprise,
-                _ => SubscriptionTier::Free,
+        Some((status, max_bots, period_end, count)) => {
+            let tier = if status == "active" {
+                if max_bots >= 20 {
+                    SubscriptionTier::Enterprise
+                } else {
+                    SubscriptionTier::Pro
+                }
+            } else {
+                SubscriptionTier::Free
             };
-            (tier, exp, count as i32)
+            (tier, Some(period_end), count as i32)
         }
         None => {
             // No subscription found - treat as free tier

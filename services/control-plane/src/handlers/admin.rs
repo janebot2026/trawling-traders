@@ -5,6 +5,8 @@ use axum::{
     http::StatusCode,
     Extension, Json,
 };
+use serde::Serialize;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -367,4 +369,152 @@ pub async fn sync_env_to_db(
     }
 
     Ok(Json(UpdateConfigResponse { updated, failed }))
+}
+
+// ============================================================================
+// Dashboard KPIs
+// ============================================================================
+
+#[derive(Debug, Serialize)]
+pub struct KpisResponse {
+    pub bots: BotKpis,
+    pub users: UserKpis,
+    pub events: EventKpis,
+    pub system: SystemKpis,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BotKpis {
+    pub total: i64,
+    pub by_status: HashMap<String, i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserKpis {
+    pub total: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EventKpis {
+    pub last_24h: i64,
+    pub last_7d: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SystemKpis {
+    pub uptime_secs: u64,
+    pub counters: HashMap<String, u64>,
+    pub gauges: HashMap<String, f64>,
+}
+
+/// GET /admin/kpis - Dashboard key performance indicators
+pub async fn get_kpis(
+    State(state): State<Arc<AppState>>,
+    Extension(admin): Extension<AdminContext>,
+) -> Result<Json<KpisResponse>, (StatusCode, String)> {
+    info!("Admin {} fetching KPIs", admin.admin_id);
+
+    let status_rows: Vec<(String, i64)> =
+        sqlx::query_as("SELECT status::text, COUNT(*) FROM bots GROUP BY status")
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let total_bots: i64 = status_rows.iter().map(|(_, c)| c).sum();
+    let by_status: HashMap<String, i64> = status_rows.into_iter().collect();
+
+    let total_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let events_24h: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM events WHERE created_at > NOW() - INTERVAL '24 hours'",
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let events_7d: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM events WHERE created_at > NOW() - INTERVAL '7 days'",
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let snapshot = state.metrics.snapshot().await;
+
+    Ok(Json(KpisResponse {
+        bots: BotKpis {
+            total: total_bots,
+            by_status,
+        },
+        users: UserKpis {
+            total: total_users,
+        },
+        events: EventKpis {
+            last_24h: events_24h,
+            last_7d: events_7d,
+        },
+        system: SystemKpis {
+            uptime_secs: snapshot.uptime_secs,
+            counters: snapshot.counters,
+            gauges: snapshot.gauges,
+        },
+    }))
+}
+
+// ============================================================================
+// Provisioning Queue
+// ============================================================================
+
+#[derive(Debug, Serialize)]
+pub struct ProvisioningQueueResponse {
+    pub queue: Vec<ProvisioningEntry>,
+    pub total: i64,
+    pub max_concurrent: usize,
+    pub available_permits: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProvisioningEntry {
+    pub bot_id: uuid::Uuid,
+    pub name: String,
+    pub user_id: uuid::Uuid,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// GET /admin/provisioning/queue - Current provisioning queue
+pub async fn get_provisioning_queue(
+    State(state): State<Arc<AppState>>,
+    Extension(admin): Extension<AdminContext>,
+) -> Result<Json<ProvisioningQueueResponse>, (StatusCode, String)> {
+    info!("Admin {} fetching provisioning queue", admin.admin_id);
+
+    let rows: Vec<(uuid::Uuid, String, uuid::Uuid, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "SELECT id, name, user_id, created_at, updated_at FROM bots WHERE status = 'provisioning' ORDER BY created_at ASC",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let total = rows.len() as i64;
+    let queue: Vec<ProvisioningEntry> = rows
+        .into_iter()
+        .map(|(bot_id, name, user_id, created_at, updated_at)| ProvisioningEntry {
+            bot_id,
+            name,
+            user_id,
+            created_at,
+            updated_at,
+        })
+        .collect();
+
+    Ok(Json(ProvisioningQueueResponse {
+        queue,
+        total,
+        max_concurrent: 3,
+        available_permits: state.droplet_semaphore.available_permits(),
+    }))
 }
