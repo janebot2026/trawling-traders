@@ -70,6 +70,9 @@ cedros-login-server = { version = "0.0.5", features = ["postgres"] }
 # RSA key generation (shared JWT signing key for cedros-login + our auth middleware)
 rsa = "0.9"
 
+# SHA256 for API key validation (matching cedros-login's hash scheme)
+sha2 = "0.10"
+
 # DigitalOcean provisioning - SQLx 0.8 compatible
 claw-spawn = "0.1.2"
 rand = "0.8"

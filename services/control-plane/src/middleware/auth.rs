@@ -1,7 +1,8 @@
-//! Authentication middleware for Cedros Login JWT validation
+//! Authentication middleware for Cedros Login JWT and API key validation
 //!
-//! Validates RS256 JWT tokens issued by the embedded cedros-login-server.
-//! Uses the shared JwtService from AppState for signature verification.
+//! Validates RS256 JWT tokens or API keys (`ck_...`) issued by cedros-login-server.
+//! JWTs are validated via the shared JwtService; API keys are validated by SHA256
+//! hash lookup against the `api_keys` table (matching cedros-login's scheme).
 
 use axum::{
     body::Body,
@@ -11,11 +12,12 @@ use axum::{
     response::Response,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 use crate::AppState;
 
-/// Authenticated user context extracted from JWT
+/// Authenticated user context extracted from JWT or API key
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthContext {
     pub user_id: String,
@@ -23,16 +25,16 @@ pub struct AuthContext {
     pub is_admin: bool,
 }
 
-/// Auth middleware that validates Cedros Login RS256 JWT tokens
+/// Auth middleware that validates Cedros Login RS256 JWTs or API keys
 ///
-/// Extracts the Authorization: Bearer <token> header, validates the JWT
-/// using the JwtService, and attaches the AuthContext to the request extensions.
+/// Extracts the Authorization: Bearer <token> header. If the token starts with
+/// `ck_`, it's validated as an API key via database lookup. Otherwise it's
+/// validated as a JWT using the shared JwtService.
 pub async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     mut request: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    // Extract Authorization header
     let auth_header = request
         .headers()
         .get(AUTHORIZATION)
@@ -40,12 +42,23 @@ pub async fn auth_middleware(
 
     let auth_str = auth_header.to_str().map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    // Extract Bearer token
     let token = auth_str
         .strip_prefix("Bearer ")
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    // Validate JWT via cedros-login's JwtService (RS256)
+    let auth_context = if token.starts_with("ck_") {
+        authenticate_api_key(&state, token).await?
+    } else {
+        authenticate_jwt(&state, token)?
+    };
+
+    request.extensions_mut().insert(auth_context);
+
+    Ok(next.run(request).await)
+}
+
+/// Validate a JWT token via cedros-login's JwtService (RS256)
+fn authenticate_jwt(state: &AppState, token: &str) -> Result<AuthContext, StatusCode> {
     let jwt_service = state.jwt_service.as_ref().ok_or_else(|| {
         tracing::error!("JwtService not initialized - cannot validate tokens");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -56,16 +69,61 @@ pub async fn auth_middleware(
         StatusCode::UNAUTHORIZED
     })?;
 
-    // Map cedros-login claims to our AuthContext
-    let auth_context = AuthContext {
+    Ok(AuthContext {
         user_id: claims.sub.to_string(),
-        email: None, // Email not in access token claims; look up from DB if needed
+        email: None,
         is_admin: claims.is_system_admin.unwrap_or(false),
-    };
+    })
+}
 
-    request.extensions_mut().insert(auth_context);
+/// Validate an API key (`ck_...`) by SHA256 hash lookup in the `api_keys` table
+///
+/// Matches cedros-login's scheme: hash the raw key with SHA256, query by prefix,
+/// then look up the user and their admin status.
+async fn authenticate_api_key(state: &AppState, api_key: &str) -> Result<AuthContext, StatusCode> {
+    let key_hash = hex::encode(Sha256::digest(api_key.as_bytes()));
+    let key_prefix: String = api_key.chars().take(16).collect();
 
-    Ok(next.run(request).await)
+    let row: Option<(uuid::Uuid,)> =
+        sqlx::query_as("SELECT user_id FROM api_keys WHERE key_prefix = $1 AND key_hash = $2")
+            .bind(&key_prefix)
+            .bind(&key_hash)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("API key lookup failed: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+    let (user_id,) = row.ok_or_else(|| {
+        tracing::debug!("Invalid API key (prefix: {})", &key_prefix);
+        StatusCode::UNAUTHORIZED
+    })?;
+
+    // Check admin status from users table
+    let is_admin: bool =
+        sqlx::query_scalar("SELECT COALESCE(is_system_admin, false) FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("User lookup for API key failed: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+            .unwrap_or(false);
+
+    let email: Option<String> = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .flatten();
+
+    Ok(AuthContext {
+        user_id: user_id.to_string(),
+        email,
+        is_admin,
+    })
 }
 
 /// Extract AuthContext from request extensions
