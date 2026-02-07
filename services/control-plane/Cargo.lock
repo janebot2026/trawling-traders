@@ -959,9 +959,9 @@ dependencies = [
 
 [[package]]
 name = "cedros-login-server"
-version = "0.0.5"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca2e4200b48c0089f1648213e2546dc76c6cdca2b2e8b25daea779033aad8368"
+checksum = "f6ecf838b48b3d583af6b526a984719257e79af4779f45abb5f49ce891c27d24"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1338,9 +1338,11 @@ dependencies = [
  "jsonwebtoken",
  "rand 0.8.5",
  "reqwest 0.11.27",
+ "rsa",
  "rust_decimal",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sqlx",
  "thiserror 1.0.69",
  "tokio",

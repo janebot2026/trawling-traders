@@ -65,7 +65,7 @@ bigdecimal = { version = "0.4", features = ["serde"] }
 cedros-pay = "1.1.4"
 
 # Cedros Login integration - embedded auth server with auto-migration
-cedros-login-server = { version = "0.0.5", features = ["postgres"] }
+cedros-login-server = { version = "0.0.7", features = ["postgres"] }
 
 # RSA key generation (shared JWT signing key for cedros-login + our auth middleware)
 rsa = "0.9"
