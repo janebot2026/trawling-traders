@@ -1,4 +1,4 @@
-import { API_URL } from '../config/api';
+import { API_URL } from './config/api';
 
 const API_BASE_URL = `${API_URL}/v1`;
 const DATA_API_URL = process.env.DATA_API_URL || 'http://localhost:8080';
@@ -40,37 +40,34 @@ export class AuthExpiredError extends ApiError {
 // Get auth token from Cedros Login (via AsyncStorage)
 async function getAuthToken(): Promise<string | null> {
   try {
-    // Cedros Login stores token in AsyncStorage
-    // We'll need to import from @cedros/login-react-native utils
-    const { TokenManager } = await import('@cedros/login-react-native');
-    return await TokenManager.getAccessToken();
+    // Cedros Login stores token in AsyncStorage using 'auth_tokens' key
+    const { getItem } = await import('@cedros/login-react-native');
+    const data = await getItem('auth_tokens');
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (parsed.expiresAt > Date.now()) {
+        return parsed.tokens.accessToken;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
 // Attempt to refresh the access token
+// Note: This is a simplified version - full refresh requires calling the auth API
 async function refreshAuthToken(): Promise<string | null> {
-  try {
-    const { TokenManager } = await import('@cedros/login-react-native');
-    // TokenManager should have a refresh method that uses the refresh token
-    // to get a new access token
-    if (typeof TokenManager.refreshAccessToken === 'function') {
-      return await TokenManager.refreshAccessToken();
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  // For now, we'll return null and let the app handle re-authentication
+  // A full implementation would call the Cedros Login refresh endpoint
+  return null;
 }
 
 // Clear auth state on permanent auth failure
 async function clearAuthState(): Promise<void> {
   try {
-    const { TokenManager } = await import('@cedros/login-react-native');
-    if (typeof TokenManager.clearTokens === 'function') {
-      await TokenManager.clearTokens();
-    }
+    const { removeItem } = await import('@cedros/login-react-native');
+    await removeItem('auth_tokens');
   } catch {
     // Best effort
   }

@@ -7,7 +7,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash-light.png",
+      "image": "./assets/icon.png",
       "resizeMode": "cover",
       "backgroundColor": "#ffffff"
     },
@@ -17,10 +17,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.trawlingtraders.app",
-      "icon": {
-        "light": "./assets/icon.png",
-        "dark": "./assets/icon.png"
-      }
+      "icon": "./assets/icon.png"
     },
     "android": {
       "adaptiveIcon": {

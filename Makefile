@@ -1,4 +1,4 @@
-.PHONY: all help setup dev db migrate check test clean stop status logs logs-data logs-control logs-mobile
+.PHONY: all help setup dev db migrate check test clean stop status logs logs-data logs-control logs-mobile mobile-liveapi
 
 # Default target - runs everything
 all: setup db migrate dev-tmux
@@ -95,10 +95,14 @@ control: ## Start control plane API (port 3000)
 	@mkdir -p logs
 	cd services/control-plane && DATABASE_URL=$${DATABASE_URL:-postgres://postgres:postgres@localhost/trawling_traders} cargo run 2>&1 | tee ../../logs/control-plane.log
 
-mobile: ## Start mobile app
+mobile: ## Start mobile app (local API)
 	@echo "$(GREEN)📱 Starting Mobile App...$(RESET)"
 	@mkdir -p logs
 	cd apps/mobile && npm run start 2>&1 | tee ../../logs/mobile.log
+
+mobile-liveapi: ## Start mobile app pointing at production API
+	@echo "$(GREEN)📱 Starting Mobile App (-> api.trawlingtraders.com)...$(RESET)"
+	cd apps/mobile && EXPO_PUBLIC_API_URL=https://api.trawlingtraders.com npx expo start --clear
 
 bot-runner: ## Run bot-runner locally for testing
 	@echo "$(GREEN)🤖 Starting Bot Runner...$(RESET)"

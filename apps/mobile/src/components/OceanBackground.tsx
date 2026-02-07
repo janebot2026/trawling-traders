@@ -7,8 +7,9 @@ import {
   ViewStyle,
 } from 'react-native';
 
-const OCEAN_LIGHT = require('../../assets/bg-ocean-light.png');
-const OCEAN_DARK = require('../../assets/bg-ocean-dark.png');
+// Ocean background images not yet added - using solid color fallback
+// const OCEAN_LIGHT = require('../../assets/bg-ocean-light.png');
+// const OCEAN_DARK = require('../../assets/bg-ocean-dark.png');
 
 interface OceanBackgroundProps {
   children: React.ReactNode;
@@ -20,15 +21,11 @@ export function OceanBackground({ children, style }: OceanBackgroundProps) {
   const isDark = colorScheme === 'dark';
 
   return (
-    <ImageBackground
-      source={isDark ? OCEAN_DARK : OCEAN_LIGHT}
-      style={[styles.background, style]}
-      resizeMode="cover"
-    >
+    <View style={[styles.background, { backgroundColor: isDark ? '#0a2540' : '#e0f2fe' }, style]}>
       <View style={styles.overlay}>
         {children}
       </View>
-    </ImageBackground>
+    </View>
   );
 }
 
