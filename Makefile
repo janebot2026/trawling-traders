@@ -102,6 +102,22 @@ mobile: ## Start mobile app (local API)
 
 mobile-liveapi: ## Start mobile app pointing at production API
 	@echo "$(GREEN)📱 Starting Mobile App (-> api.trawlingtraders.com)...$(RESET)"
+	@if command -v watchman >/dev/null 2>&1; then \
+		echo "$(YELLOW)Resetting watchman state for this repo...$(RESET)"; \
+		watchman watch-del "$$(pwd)" >/dev/null 2>&1 || true; \
+		watchman watch-project "$$(pwd)" >/dev/null 2>&1 || true; \
+	else \
+		echo "$(YELLOW)watchman not found; skipping watch reset$(RESET)"; \
+	fi
+	@if command -v lsof >/dev/null 2>&1; then \
+		PIDS="$$(lsof -ti tcp:8081 2>/dev/null | tr '\n' ' ')"; \
+		if [ -n "$$PIDS" ]; then \
+			echo "$(YELLOW)Port 8081 is busy; stopping existing process(es): $$PIDS$(RESET)"; \
+			kill $$PIDS >/dev/null 2>&1 || true; \
+			sleep 1; \
+		fi; \
+	fi
+	@echo "$(YELLOW)Clearing Expo cache and starting Metro from apps/mobile...$(RESET)"
 	cd apps/mobile && EXPO_PUBLIC_API_URL=https://api.trawlingtraders.com npx expo start --clear
 
 bot-runner: ## Run bot-runner locally for testing

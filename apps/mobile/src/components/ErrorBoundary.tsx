@@ -1,6 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { theme } from '../theme';
+import { lightTheme } from '../theme';
 
 interface Props {
   children: ReactNode;
@@ -67,29 +67,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
-    backgroundColor: theme.colors.background,
+    backgroundColor: lightTheme.colors.background,
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: theme.colors.text,
+    color: lightTheme.colors.text,
     marginBottom: 12,
   },
   message: {
     fontSize: 16,
-    color: theme.colors.textSecondary,
+    color: lightTheme.colors.textSecondary,
     textAlign: 'center',
     marginBottom: 16,
   },
   errorDetail: {
     fontSize: 12,
-    color: theme.colors.error,
+    color: lightTheme.colors.error,
     textAlign: 'center',
     marginBottom: 16,
     fontFamily: 'monospace',
   },
   button: {
-    backgroundColor: theme.colors.primary,
+    backgroundColor: lightTheme.colors.primary,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
