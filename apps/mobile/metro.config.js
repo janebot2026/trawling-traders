@@ -20,11 +20,27 @@ config.resolver.nodeModulesPaths = [
 // 3. Force Metro to resolve local packages
 config.resolver.disableHierarchicalLookup = false;
 
-// 4. Explicit mappings for packages Metro can't resolve through hoisting
-//    - Node stdlib polyfills (crypto, stream)
-//    - @solana sub-packages that web3.js needs but Metro can't find
+// 4. Enable package.json "exports" resolution with React Native conditions
+//    This fixes warnings from @solana/*, rpc-websockets, @noble/hashes, etc.
+config.resolver.unstable_enablePackageExports = true;
+config.resolver.unstable_conditionNames = [
+  'react-native',
+  'browser',
+  'import',
+  'require',
+  'default',
+];
+
+// 5. Support .mjs/.cjs extensions used by Solana v2 packages
+config.resolver.sourceExts = Array.from(
+  new Set([...(config.resolver.sourceExts || []), 'mjs', 'cjs'])
+);
+
+// 6. Explicit module mappings
 const extraNodeModules = {
-  crypto: path.resolve(rootModules, 'crypto-browserify'),
+  buffer: path.resolve(rootModules, 'buffer'),
+  // Lightweight crypto shim (secrets.js-grempe needs randomBytes)
+  crypto: path.resolve(__dirname, 'stubs/crypto-shim.js'),
   stream: path.resolve(rootModules, 'stream-browserify'),
   '@ledgerhq/devices/hid-framing': path.resolve(rootModules, '@ledgerhq/devices/lib/hid-framing.js'),
 };
@@ -37,13 +53,14 @@ if (fs.existsSync(solanaDir)) {
   }
 }
 
-config.resolver.extraNodeModules = extraNodeModules;
-config.resolver.unstable_enablePackageExports = true;
+// Auto-map @solana-mobile/* packages
+const solanaMobileDir = path.resolve(rootModules, '@solana-mobile');
+if (fs.existsSync(solanaMobileDir)) {
+  for (const pkg of fs.readdirSync(solanaMobileDir)) {
+    extraNodeModules[`@solana-mobile/${pkg}`] = path.resolve(solanaMobileDir, pkg);
+  }
+}
 
-// Solana packages ship native ESM entrypoints (e.g. index.native.mjs).
-// Expo SDK 49/Metro in this repo does not always resolve these by default.
-config.resolver.sourceExts = Array.from(
-  new Set([...(config.resolver.sourceExts || []), 'mjs', 'cjs'])
-);
+config.resolver.extraNodeModules = extraNodeModules;
 
 module.exports = config;

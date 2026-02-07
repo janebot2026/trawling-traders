@@ -1,7 +1,7 @@
 {
   "name": "@trawling-traders/mobile",
   "version": "0.1.0",
-  "main": "App.tsx",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -44,7 +44,8 @@
     "crypto-browserify": "^3.12.1",
     "events": "^3.3.0",
     "react-native-get-random-values": "^2.0.0",
-    "stream-browserify": "^3.0.0"
+    "stream-browserify": "^3.0.0",
+    "expo-crypto": "~12.4.1"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

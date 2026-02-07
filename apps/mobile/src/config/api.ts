@@ -56,16 +56,25 @@ function extractStripePublishableKey(payload: unknown): string | null {
   return null;
 }
 
+// Fallback config used when dynamic fetch fails (e.g. server unreachable)
+export const CEDROS_PAY_FALLBACK_CONFIG: CedrosPayConfig = {
+  stripePublicKey: '', // Stripe buttons will be disabled until config is fetched
+  serverUrl: CEDROS_PAY_SERVER_URL,
+  solanaCluster: 'mainnet-beta',
+};
+
 export async function fetchCedrosPayConfig(): Promise<CedrosPayConfig> {
+  // cedros-pay /paywall/v1/shop returns shop config including Stripe publishable key
   const response = await fetch(`${CEDROS_PAY_SERVER_URL}/paywall/v1/shop`);
   if (!response.ok) {
-    throw new Error(`Failed to fetch Cedros pay shop config (HTTP ${response.status})`);
+    throw new Error(`Failed to fetch Cedros pay config (HTTP ${response.status})`);
   }
 
   const payload = await response.json();
   const stripePublicKey = extractStripePublishableKey(payload);
   if (!stripePublicKey) {
-    throw new Error('Stripe publishable key not found in /v1/pay/paywall/v1/shop response');
+    console.warn('Stripe publishable key not found in /paywall/v1/shop response');
+    return CEDROS_PAY_FALLBACK_CONFIG;
   }
 
   return {
