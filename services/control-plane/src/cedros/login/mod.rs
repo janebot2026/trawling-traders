@@ -26,7 +26,20 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
     let jwt_secret = std::env::var("JWT_SECRET")
         .map_err(|_| anyhow::anyhow!("JWT_SECRET is required for cedros-login integration"))?;
 
-    let rsa_private_key_pem = std::env::var("JWT_RSA_PRIVATE_KEY").ok();
+    // Generate a shared RSA key for JWT signing. Both our JwtService (for auth middleware)
+    // and cedros-login's internal JwtService must use the same key, otherwise tokens signed
+    // by cedros-login can't be validated by our middleware. If JWT_RSA_PRIVATE_KEY is set,
+    // use that; otherwise generate an ephemeral key (tokens invalid after restart).
+    let rsa_private_key_pem = std::env::var("JWT_RSA_PRIVATE_KEY").ok().or_else(|| {
+        use rsa::pkcs1::EncodeRsaPrivateKey;
+        tracing::warn!(
+            "JWT_RSA_PRIVATE_KEY not set - generating ephemeral RSA key. \
+            JWTs will be invalid after restart. Set JWT_RSA_PRIVATE_KEY for production."
+        );
+        let private_key = rsa::RsaPrivateKey::new(&mut rand::rngs::OsRng, 2048).ok()?;
+        let pem = private_key.to_pkcs1_pem(rsa::pkcs1::LineEnding::LF).ok()?;
+        Some(pem.to_string())
+    });
 
     // Build config - database config not needed since we pass the pool directly
     let config = cedros_login::Config {
