@@ -449,9 +449,7 @@ pub async fn get_kpis(
             total: total_bots,
             by_status,
         },
-        users: UserKpis {
-            total: total_users,
-        },
+        users: UserKpis { total: total_users },
         events: EventKpis {
             last_24h: events_24h,
             last_7d: events_7d,
@@ -502,13 +500,15 @@ pub async fn get_provisioning_queue(
     let total = rows.len() as i64;
     let queue: Vec<ProvisioningEntry> = rows
         .into_iter()
-        .map(|(bot_id, name, user_id, created_at, updated_at)| ProvisioningEntry {
-            bot_id,
-            name,
-            user_id,
-            created_at,
-            updated_at,
-        })
+        .map(
+            |(bot_id, name, user_id, created_at, updated_at)| ProvisioningEntry {
+                bot_id,
+                name,
+                user_id,
+                created_at,
+                updated_at,
+            },
+        )
         .collect();
 
     Ok(Json(ProvisioningQueueResponse {
