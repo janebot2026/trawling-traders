@@ -474,8 +474,9 @@ pub struct ProvisioningQueueResponse {
     pub available_permits: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct ProvisioningEntry {
+    #[sqlx(rename = "id")]
     pub bot_id: uuid::Uuid,
     pub name: String,
     pub user_id: uuid::Uuid,
@@ -490,26 +491,14 @@ pub async fn get_provisioning_queue(
 ) -> Result<Json<ProvisioningQueueResponse>, (StatusCode, String)> {
     info!("Admin {} fetching provisioning queue", admin.admin_id);
 
-    let rows: Vec<(uuid::Uuid, String, uuid::Uuid, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+    let queue: Vec<ProvisioningEntry> = sqlx::query_as(
         "SELECT id, name, user_id, created_at, updated_at FROM bots WHERE status = 'provisioning' ORDER BY created_at ASC",
     )
     .fetch_all(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let total = rows.len() as i64;
-    let queue: Vec<ProvisioningEntry> = rows
-        .into_iter()
-        .map(
-            |(bot_id, name, user_id, created_at, updated_at)| ProvisioningEntry {
-                bot_id,
-                name,
-                user_id,
-                created_at,
-                updated_at,
-            },
-        )
-        .collect();
+    let total = queue.len() as i64;
 
     Ok(Json(ProvisioningQueueResponse {
         queue,
