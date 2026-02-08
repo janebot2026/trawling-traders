@@ -7,6 +7,7 @@ import { AppNavigator } from './src/navigation/AppNavigator';
 import { CEDROS_CONFIG, fetchCedrosPayConfig, type CedrosPayConfig } from './src/config/api';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { NetworkProvider } from './src/context/NetworkContext';
+import { ApiProvider } from './src/api';
 
 export default function App() {
   const [payConfig, setPayConfig] = useState<CedrosPayConfig | null>(null);
@@ -20,12 +21,14 @@ export default function App() {
   }, []);
 
   const content = (
-    <SafeAreaProvider>
-      <NetworkProvider>
-        <AppNavigator />
-        <StatusBar style="auto" />
-      </NetworkProvider>
-    </SafeAreaProvider>
+    <ApiProvider>
+      <SafeAreaProvider>
+        <NetworkProvider>
+          <AppNavigator />
+          <StatusBar style="auto" />
+        </NetworkProvider>
+      </SafeAreaProvider>
+    </ApiProvider>
   );
 
   return (
