@@ -24,6 +24,7 @@ mod openclaw;
 mod portfolio;
 mod reconciler;
 mod runner;
+mod tokens;
 mod types;
 
 pub use client::ControlPlaneClient;

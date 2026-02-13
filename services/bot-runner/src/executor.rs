@@ -10,6 +10,7 @@ use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
 use crate::config::{ExecutionConfig, TradingMode};
+use crate::tokens::{symbol_to_mint, get_token_decimals};
 
 // ==================== QUOTE CACHE ====================
 
@@ -928,32 +929,6 @@ impl From<NormalizedTradeResult> for TradeResult {
 // NOTE: Signal generation functions (generate_trend_signal, generate_reversion_signal,
 // generate_breakout_signal) have been removed. Trading decisions now come from OpenClaw gateway.
 // See runner.rs decision_tick() for the new flow.
-
-/// Convert symbol to mint address
-pub fn symbol_to_mint(symbol: &str) -> Option<&'static str> {
-    match symbol.to_uppercase().as_str() {
-        "SOL" | "SOL-USD" => Some("So11111111111111111111111111111111111111112"),
-        "USDC" | "USDC-USD" => Some("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
-        "BTC" | "BTC-USD" => Some("qfnqNLS3x2K5R3oCmS1NjwiKOK8Tq77pCH6zTX8mR2F"), // Wrapped BTC
-        "ETH" | "ETH-USD" => Some("7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs"), // Wrapped ETH
-        "BONK" => Some("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"),
-        "WIF" => Some("EKpQGSJtjMFqKZ9KQbSqL2zPQCpA5xZKN2CjeJRdQpump"),
-        _ => None,
-    }
-}
-
-/// Get decimals for a token
-pub fn get_token_decimals(mint: &str) -> u8 {
-    match mint {
-        "So11111111111111111111111111111111111111112" => 9, // SOL
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" => 6, // USDC
-        "qfnqNLS3x2K5R3oCmS1NjwiKOK8Tq77pCH6zTX8mR2F" => 8, // WBTC
-        "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs" => 8, // WETH
-        "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263" => 5, // BONK
-        "EKpQGSJtjMFqKZ9KQbSqL2zPQCpA5xZKN2CjeJRdQpump" => 6, // WIF
-        _ => 6,                                             // Default to 6
-    }
-}
 
 /// Convert human-readable amount to raw amount
 pub fn to_raw_amount(amount: Decimal, decimals: u8) -> u64 {

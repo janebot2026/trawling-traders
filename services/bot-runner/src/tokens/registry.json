@@ -1,0 +1,181 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-02-12",
+  "description": "Token registry mapping symbols to Pyth price feeds and Solana mint addresses",
+  "tokens": {
+    "SOL": {
+      "symbol": "SOL",
+      "name": "Solana",
+      "category": "crypto",
+      "pyth_feed_id": "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
+      "solana_mint": "So11111111111111111111111111111111111111112",
+      "decimals": 9,
+      "active": true
+    },
+    "USDC": {
+      "symbol": "USDC",
+      "name": "USD Coin",
+      "category": "stablecoin",
+      "pyth_feed_id": "eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a",
+      "solana_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "decimals": 6,
+      "active": true
+    },
+    "BTC": {
+      "symbol": "BTC",
+      "name": "Bitcoin",
+      "category": "crypto",
+      "pyth_feed_id": "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+      "solana_mint": "qfnqNLS3x2K5R3oCmS1NjwiKOK8Tq77pCH6zTX8mR2F",
+      "decimals": 8,
+      "active": true
+    },
+    "ETH": {
+      "symbol": "ETH",
+      "name": "Ethereum",
+      "category": "crypto",
+      "pyth_feed_id": "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+      "solana_mint": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+      "decimals": 8,
+      "active": true
+    },
+    "BONK": {
+      "symbol": "BONK",
+      "name": "Bonk",
+      "category": "crypto",
+      "pyth_feed_id": "72b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419",
+      "solana_mint": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+      "decimals": 5,
+      "active": true
+    },
+    "WIF": {
+      "symbol": "WIF",
+      "name": "dogwifhat",
+      "category": "crypto",
+      "pyth_feed_id": "4ca4beeca86f0d164160323817b4e4fa26e12ddea3a792eedc1cb8e0eaf2daee",
+      "solana_mint": "EKpQGSJtjMFqKZ9KQbSqL2zPQCpA5xZKN2CjeJRdQpump",
+      "decimals": 6,
+      "active": true
+    },
+    "AAPL": {
+      "symbol": "AAPL",
+      "name": "Apple Inc.",
+      "category": "xstock",
+      "pyth_feed_id": "49f6b65cb1de6b10eaf75e7c03ca029c306d0357e91b5311b175084a5ad55688",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "xStock token mint address needs verification"
+    },
+    "TSLA": {
+      "symbol": "TSLA",
+      "name": "Tesla Inc.",
+      "category": "xstock",
+      "pyth_feed_id": "16dad506d7db8da01c87581c87ca897a012a153557d4d578c3b9c9e1bc0632f1",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "xStock token mint address needs verification"
+    },
+    "GOOGL": {
+      "symbol": "GOOGL",
+      "name": "Alphabet Inc.",
+      "category": "xstock",
+      "pyth_feed_id": "5a48c03e9b9cb337801073ed9d166817473697efff0d138874e0f6a33d6d5aa6",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "xStock token mint address needs verification"
+    },
+    "AMZN": {
+      "symbol": "AMZN",
+      "name": "Amazon.com Inc.",
+      "category": "xstock",
+      "pyth_feed_id": "b5d0e0fa58a1f8b81498ae670ce93c872d14434b72c364885d4fa1b257cbb07a",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "xStock token mint address needs verification"
+    },
+    "MSFT": {
+      "symbol": "MSFT",
+      "name": "Microsoft Corp.",
+      "category": "xstock",
+      "pyth_feed_id": "d0ca23c1cc005e004ccf1db5bf76aeb6a49218f43dac3d4b275e92de12ded4d1",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "xStock token mint address needs verification"
+    },
+    "NVDA": {
+      "symbol": "NVDA",
+      "name": "NVIDIA Corp.",
+      "category": "xstock",
+      "pyth_feed_id": "b1073854ed24cbc755dc527418f52b7d271f6cc967bbf8d8129112b18860a593",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "xStock token mint address needs verification"
+    },
+    "META": {
+      "symbol": "META",
+      "name": "Meta Platforms Inc.",
+      "category": "xstock",
+      "pyth_feed_id": "78a3e3b8e676a8f73c439f5d749737034b139bbbe899ba5775216fba596607fe",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "xStock token mint address needs verification"
+    },
+    "NFLX": {
+      "symbol": "NFLX",
+      "name": "Netflix Inc.",
+      "category": "xstock",
+      "pyth_feed_id": "8376cfd7ca8bcdf372ced05307b24dced1f15b1afafdeff715664598f15a3dd2",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "xStock token mint address needs verification"
+    },
+    "SPY": {
+      "symbol": "SPY",
+      "name": "SPDR S&P 500 ETF",
+      "category": "xstock",
+      "pyth_feed_id": "19e09bb805456ada3979a7d1cbb4b6d63babc3a0f8e8a9509f68afa5c4c11cd5",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "xStock token mint address needs verification"
+    },
+    "QQQ": {
+      "symbol": "QQQ",
+      "name": "Invesco QQQ ETF",
+      "category": "xstock",
+      "pyth_feed_id": "9695e2b96ea7b3859da9ed25b7a46a920a776e2fdae19a7bcfdf2b219230452d",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "xStock token mint address needs verification"
+    },
+    "XAU": {
+      "symbol": "XAU",
+      "name": "Gold",
+      "category": "metal",
+      "pyth_feed_id": "765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "PAXG or ORO token mint address needs verification"
+    },
+    "XAG": {
+      "symbol": "XAG",
+      "name": "Silver",
+      "category": "metal",
+      "pyth_feed_id": "f2fb02c32b055c805e7238d628e5e9dadef274376114eb1f012337cabe93871e",
+      "solana_mint": null,
+      "decimals": 6,
+      "active": false,
+      "notes": "SLVR or similar token mint address needs verification"
+    }
+  }
+}
