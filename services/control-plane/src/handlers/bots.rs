@@ -394,12 +394,16 @@ pub async fn create_bot(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    if bot_count >= 4 {
-        // Rollback not strictly needed since we're returning, but explicit
+    if bot_count >= sub.tier.max_bots() as i64 {
         let _ = tx.rollback().await;
         return Err((
             StatusCode::FORBIDDEN,
-            "Maximum bot limit reached".to_string(),
+            format!(
+                "Bot limit reached ({}/{} for {:?} tier)",
+                bot_count,
+                sub.tier.max_bots(),
+                sub.tier
+            ),
         ));
     }
 

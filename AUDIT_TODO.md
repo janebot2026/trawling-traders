@@ -407,11 +407,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean, 21 tests pass
   - Completion note: Added `STOP_LOSS_95`, `TAKE_PROFIT_108`, `TAKE_PROFIT_110` as compile-time Decimal consts via `from_parts`. Replaced 6 runtime `from_str().unwrap()` calls. Changed bare `.unwrap()` to `.expect()` with safety comments where value is guaranteed by prior checks. Replaced `from_str` with `try_from` for f64→Decimal conversion.
 
-- [ ] **F-005** — Hardcoded bot limit ignores subscription tier
+- [x] **F-005** — Hardcoded bot limit ignores subscription tier
   - Files: `services/control-plane/src/handlers/bots.rs`
   - Fix: Replace `>= 4` with subscription tier's `max_bots()`
   - Test: `cargo check` on control-plane
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Replaced `>= 4` with `>= sub.tier.max_bots() as i64`. Error message now includes tier-specific limit info.
 
 - [ ] **F-006** — Silent decryption failure for LLM API key
   - Files: `services/control-plane/src/handlers/sync.rs`
