@@ -393,11 +393,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean, 41 tests pass (13+13+2+13)
   - Completion note: Added `accumulate_realized_pnl()` (computes PnL from portfolio entry price vs execution price), `maybe_reset_daily_pnl()` (UTC midnight reset), `pnl_reset_date` field. Called on every confirmed sell and at start of each decision tick.
 
-- [ ] **F-003** — Config version increment race condition
+- [x] **F-003** — Config version increment race condition
   - Files: `services/control-plane/src/handlers/bots.rs`
   - Fix: Use atomic `INSERT ... SELECT COALESCE(MAX(version),0)+1` in a transaction
   - Test: `cargo check` on control-plane
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Replaced separate read+write with single `INSERT ... (SELECT COALESCE(MAX(version),0)+1) ... RETURNING version`. Concurrent requests now get serialized by Postgres row-level locking on the subquery.
 
 - [ ] **F-004** — Panicking `unwrap()` in trading engine
   - Files: `services/control-plane/src/brain/engine.rs`

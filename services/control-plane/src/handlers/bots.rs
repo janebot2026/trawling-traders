@@ -896,17 +896,6 @@ pub async fn update_bot_config(
     // Verify bot exists and user is authorized
     let _bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
 
-    let current_version: i32 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(version), 0) FROM config_versions WHERE bot_id = $1",
-    )
-    .bind(bot_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let new_version = current_version + 1;
-    let config_id = Uuid::new_v4();
-
     // Validate risk caps are within safe ranges
     req.config
         .risk_caps
@@ -931,19 +920,27 @@ pub async fn update_bot_config(
         .as_ref()
         .map(|factors| serde_json::to_value(factors).unwrap_or(serde_json::Value::Null));
 
-    sqlx::query(
+    let config_id = Uuid::new_v4();
+
+    // Atomic version increment: INSERT with inline SELECT prevents race between
+    // concurrent config updates producing duplicate version numbers.
+    let new_version: i32 = sqlx::query_scalar(
         r#"
         INSERT INTO config_versions (
             id, bot_id, version, name, persona, asset_focus, custom_assets,
             algorithm_mode, algorithm_factors, strictness, max_position_size_percent, max_daily_loss_usd,
             max_drawdown_percent, max_trades_per_day, trading_mode, llm_provider,
             encrypted_llm_api_key
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        ) VALUES (
+            $1, $2,
+            (SELECT COALESCE(MAX(version), 0) + 1 FROM config_versions WHERE bot_id = $2),
+            $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+        )
+        RETURNING version
         "#,
     )
     .bind(config_id)
     .bind(bot_id)
-    .bind(new_version)
     .bind(&req.config.name)
     .bind(req.config.assistant_style)
     .bind(req.config.asset_focus)
@@ -965,7 +962,7 @@ pub async fn update_bot_config(
             .transpose()?
             .unwrap_or_default(),
     )
-    .execute(&state.db)
+    .fetch_one(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
