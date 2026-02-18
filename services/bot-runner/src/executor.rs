@@ -834,18 +834,6 @@ impl TradeExecutor {
         }
     }
 
-    /// Get wallet holdings
-    ///
-    /// Note: Currently returns empty vec. Wallet integration not yet implemented.
-    #[deprecated(
-        since = "0.1.0",
-        note = "Wallet integration not yet implemented; always returns empty"
-    )]
-    #[allow(dead_code)]
-    pub async fn get_holdings(&self) -> anyhow::Result<Vec<TokenHolding>> {
-        Ok(vec![])
-    }
-
     /// Get execution config
     #[allow(dead_code)] // WIP
     pub fn execution_config(&self) -> &ExecutionConfig {
@@ -890,19 +878,6 @@ pub enum ShieldVerdict {
     Allow,
     Warn,
     Deny,
-}
-
-#[allow(dead_code)] // WIP: token holding data
-#[derive(Debug, Clone)]
-pub struct TokenHolding {
-    #[allow(dead_code)]
-    pub mint: String,
-    #[allow(dead_code)]
-    pub symbol: String,
-    #[allow(dead_code)]
-    pub amount: u64,
-    #[allow(dead_code)]
-    pub usd_value: Option<Decimal>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

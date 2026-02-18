@@ -523,11 +523,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Removed unused `use tempfile::tempdir` import and `tempfile` dev-dependency (no other usage in crate).
 
-- [ ] **F-020** — Dead `get_holdings()` returns empty vec
+- [x] **F-020** — Dead `get_holdings()` returns empty vec
   - Files: `services/bot-runner/src/executor.rs`
-  - Fix: Remove deprecated function (no callers)
+  - Fix: Remove deprecated function and unused `TokenHolding` struct (no callers)
   - Test: `cargo check` on bot-runner
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Removed `get_holdings()` (deprecated, always returned empty vec) and `TokenHolding` struct (only referenced by get_holdings).
 
 - [ ] **F-021** — `QuoteCache` dead code with `#[allow(dead_code)]`
   - Files: `services/bot-runner/src/executor.rs`
