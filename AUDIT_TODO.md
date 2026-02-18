@@ -537,8 +537,9 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Wired `spawn_cleanup_task()` at QuoteCache init so expired entries get periodically evicted (every 60s). Removed unused `with_max_size()` and `size()`. Removed `#[allow(dead_code)]` from `cleanup()` since it's now called.
 
-- [ ] **F-022** — Docker Compose default Postgres credentials
+- [x] **F-022** — Docker Compose default Postgres credentials
   - Files: `docker-compose.yml`
   - Fix: Already documented with "DEVELOPMENT ONLY" comments. No code change needed.
   - Test: N/A
   - Verified: Acknowledged — dev-only, properly documented
+  - Completion note: No change. Docker Compose credentials are for local dev only and already documented as such.

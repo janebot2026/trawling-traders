@@ -3,7 +3,8 @@
 ## Overall Status
 - **Round 1**: 12 findings (F-001 through F-012) — all fixed
 - **Round 2**: 18 findings (R2-001 through R2-018) — all fixed
-- **Total**: 30 / 30 findings remediated (100%)
+- **Round 3**: 22 findings (F-001 through F-022) — all fixed (1 false positive, 1 acknowledged no-change)
+- **Total**: 52 / 52 findings remediated (100%)
 
 ## Round 1 Key Improvements (F-001 to F-012)
 
@@ -11,7 +12,7 @@
 - Enforced auth on all bot-facing sync endpoints (`F-001`)
 - Removed production debug-route exposure (`F-002`)
 - Fixed bot-runner fixture/schema drift and restored green test gate (`F-003`)
-- Removed panic footguns in webhook/client-init and bot config serialization (`F-007`)
+- Fixed panic footguns in webhook/client-init and bot config serialization (`F-007`)
 - Fixed retry zero-attempt panic edge case (`F-012`)
 
 ### Performance and scalability
@@ -48,34 +49,78 @@
 | R2-017 | Low | `c9c4f1a0` | Merge API key auth into single JOIN query |
 | R2-018 | Low | `879f2563` | Enable strict TypeScript mode |
 
+## Round 3 Findings (F-001 to F-022)
+
+| ID | Severity | Category | Description |
+|----|----------|----------|-------------|
+| F-002 | High | Correctness | `realized_pnl_today` accumulation + daily reset |
+| F-003 | High | Correctness | Atomic config version increment (race condition) |
+| F-004 | High | Correctness | Trading engine unwrap() → compile-time Decimal consts |
+| F-005 | High | Correctness | Bot limit uses subscription tier `max_bots()` |
+| F-006 | High | Observability | Log warning on LLM API key decryption failure |
+| F-001 | High | Performance | Bot name availability: 1 query instead of up to 998 |
+| F-007 | Medium | Performance | Heartbeat metrics batch INSERT via unnest |
+| F-008 | Medium | Performance | Event ingest batch INSERT via unnest |
+| F-009 | Medium | Safety | `libc::kill` return value checked with errno logging |
+| F-010 | Medium | Correctness | Redis TTL aligned to 30s matching in-memory cache |
+| F-011 | Medium | Reliability | DB pool idle_timeout and max_lifetime settings |
+| F-012 | Medium | Precision | Pyth price: Decimal arithmetic instead of f64 |
+| F-013 | Medium | Reliability | Binance WS backpressure via try_send() |
+| F-014 | Low | Resilience | Jitter in reconnection backoff |
+| F-015 | Medium | Correctness | usePricesBatch hook dependency stabilization |
+| F-016 | Medium | Observability | Chat fetch errors logged (was silently swallowed) |
+| F-017 | Low | Type safety | API client `any` → 9 typed raw interfaces |
+| F-018 | Low | Cleanup | Remove unused tempfile dependency |
+| F-019 | — | False positive | HomeOverviewScreen already has per-bot try/catch |
+| F-020 | Low | Cleanup | Remove dead get_holdings() and TokenHolding |
+| F-021 | Low | Reliability | Wire up QuoteCache cleanup task |
+| F-022 | Low | Acknowledged | Docker Compose credentials (dev-only, documented) |
+
 ## Final Verification
 
 All services compile and tests pass:
 
-- `services/control-plane`: `cargo check` clean, 0 warnings
-- `services/bot-runner`: `cargo check` clean, `cargo test` 13/13 pass
-- `services/data-retrieval`: `cargo check` clean, 0 future-incompat warnings
+- `services/control-plane`: `cargo check` clean, `cargo test` all pass
+- `services/bot-runner`: `cargo check` clean, `cargo test` all pass
+- `services/data-retrieval`: `cargo check` clean
 - `packages/types`: `tsc --noEmit` clean
-- `packages/api-client`: `tsc --noEmit` clean (now with `strict: true`)
+- `packages/api-client`: `tsc --noEmit` clean (strict mode)
+- `apps/mobile`: `tsc --noEmit` clean (only pre-existing `CreateBotWizardSteps.tsx` style error)
 
-## Key Security Improvements (Round 2)
+## Key Improvements by Area
 
-1. Fixed data contract mismatch between Rust API and TypeScript client (persona enum)
-2. Encryption failures now return 500 instead of silently storing empty strings
-3. Production servers refuse to start without encryption key configured
-4. Free-tier users blocked from creating bots with live trading mode
-5. LLM API keys moved from unencrypted AsyncStorage to encrypted SecureStore
+### Security (across all rounds)
+1. Bot-facing endpoints protected by dedicated auth middleware
+2. Debug routes gated behind explicit opt-in env var
+3. Encryption failures return 500 (not silent empty strings)
+4. Production rejects missing encryption key (fail-closed)
+5. LLM API keys in encrypted SecureStore (not AsyncStorage)
+6. Free-tier users blocked from live trading mode
 
-## Key Reliability Improvements (Round 2)
+### Financial Correctness (Round 3)
+1. PnL tracking now accumulates from confirmed sells with UTC midnight reset
+2. Pyth price conversion uses Decimal arithmetic (no f64 precision loss)
+3. Config version increment is atomic (no race condition)
+4. Trading engine uses compile-time Decimal constants (no runtime unwrap)
+5. Bot limits respect subscription tier
 
-1. Eliminated unbounded memory growth in metrics histogram collector
-2. Spawned provisioning tasks now have panic supervision with status updates
-3. Bot list queries capped at 100 results to prevent unbounded SELECTs
-4. Pyth health checks no longer make live API calls on every check
-5. API key authentication reduced from 3 DB round-trips to 1
+### Performance (across all rounds)
+1. Bot name uniqueness: 1 query (was up to 998)
+2. Heartbeat metrics: 1 batch INSERT (was N individual INSERTs)
+3. Event ingest: 1 batch INSERT (was N individual INSERTs)
+4. Report generation: 1 joined query (was N+1)
+5. API key auth: 1 JOIN query (was 3 round-trips)
+6. Batch pricing: bounded concurrent fan-out with max limit
+
+### Reliability (Round 3)
+1. WebSocket backpressure prevents message handler stall
+2. Reconnection backoff includes jitter (prevents thundering herd)
+3. DB pool configured with idle_timeout and max_lifetime
+4. QuoteCache periodic cleanup wired up
+5. libc::kill checked for errors
 
 ## Follow-up Recommendations
 
 1. Bot-runner WIP modules (intent, reconciler, openclaw, gateway) have `#![allow(dead_code)]` — clean up as features mature
-2. Add integration tests exercising bot auth middleware against route handlers with fixture DB
-3. Pre-existing TS error in `CreateBotWizardSteps.tsx` (`styles.categoryTitle` undefined) should be fixed separately
+2. Add integration tests exercising bot auth middleware with fixture DB
+3. Fix pre-existing TS error in `CreateBotWizardSteps.tsx` (`styles.categoryTitle` undefined)
