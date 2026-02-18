@@ -53,6 +53,8 @@ pub struct BotRunner {
     last_trade_outcome: Option<LastTradeOutcome>,
     /// Daily realized PnL tracking
     realized_pnl_today: Decimal,
+    /// Date of last PnL reset (for daily reset)
+    pnl_reset_date: chrono::NaiveDate,
 }
 
 impl BotRunner {
@@ -94,6 +96,7 @@ impl BotRunner {
             last_plan_id: None,
             last_trade_outcome: None,
             realized_pnl_today: Decimal::ZERO,
+            pnl_reset_date: chrono::Utc::now().date_naive(),
         }
     }
 
@@ -377,6 +380,9 @@ impl BotRunner {
 
     /// Run one decision tick - request decision from OpenClaw and execute
     async fn decision_tick(&mut self) -> anyhow::Result<()> {
+        // Reset daily tracking counters if UTC date has changed
+        self.maybe_reset_daily_pnl();
+
         // Check if we have config and executor
         let config = match &self.current_config {
             Some(c) => c.clone(),
@@ -492,6 +498,11 @@ impl BotRunner {
                     amount_usd: intent.amount_usd,
                     timestamp: chrono::Utc::now(),
                 });
+
+                // Accumulate realized PnL for sell trades (daily loss tracking)
+                if result.side == crate::executor::TradeSide::Sell {
+                    self.accumulate_realized_pnl(intent, &result);
+                }
             }
 
             // Emit trade events
@@ -557,6 +568,51 @@ impl BotRunner {
             recent_events,
             config_version: config.version_id.to_string(),
         })
+    }
+
+    /// Reset daily PnL if the UTC date has changed
+    fn maybe_reset_daily_pnl(&mut self) {
+        let today = chrono::Utc::now().date_naive();
+        if today != self.pnl_reset_date {
+            info!(
+                "Daily PnL reset: {} -> {} (was {})",
+                self.pnl_reset_date, today, self.realized_pnl_today
+            );
+            self.realized_pnl_today = Decimal::ZERO;
+            self.pnl_reset_date = today;
+        }
+    }
+
+    /// Accumulate realized PnL from a confirmed sell trade
+    fn accumulate_realized_pnl(
+        &mut self,
+        intent: &OpenClawIntent,
+        result: &NormalizedTradeResult,
+    ) {
+        let exec_price = result.execution.realized_price;
+        if exec_price <= Decimal::ZERO {
+            return;
+        }
+
+        // Look up average entry price from portfolio
+        let avg_entry = match self.portfolio.positions.get(&intent.input_mint) {
+            Some(pos) if pos.avg_entry_price_usdc > Decimal::ZERO => pos.avg_entry_price_usdc,
+            _ => return, // No position or unknown entry price — can't compute PnL
+        };
+
+        // USDC received from the sell (raw amount / 10^6)
+        let usdc_received = Decimal::from(result.execution.out_amount_raw)
+            / Decimal::from(1_000_000u64);
+
+        // Cost basis = tokens_sold × avg_entry = (usdc_received / exec_price) × avg_entry
+        let cost_basis = usdc_received * avg_entry / exec_price;
+        let pnl = usdc_received - cost_basis;
+
+        self.realized_pnl_today += pnl;
+        info!(
+            "Realized PnL: {} (received: {}, cost_basis: {}, total today: {})",
+            pnl, usdc_received, cost_basis, self.realized_pnl_today
+        );
     }
 
     /// Validate intent against hard risk rails

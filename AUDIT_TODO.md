@@ -386,11 +386,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
 
 ## High Severity
 
-- [ ] **F-002** — `realized_pnl_today` never updated (daily loss risk rail broken)
+- [x] **F-002** — `realized_pnl_today` never updated (daily loss risk rail broken)
   - Files: `services/bot-runner/src/runner.rs`
   - Fix: After confirmed sell, compute realized PnL from avg_entry vs execution price; accumulate into `self.realized_pnl_today`; add daily reset check
   - Test: `cargo test` + `cargo check` on bot-runner
-  - Verified:
+  - Verified: `cargo check` clean, 41 tests pass (13+13+2+13)
+  - Completion note: Added `accumulate_realized_pnl()` (computes PnL from portfolio entry price vs execution price), `maybe_reset_daily_pnl()` (UTC midnight reset), `pnl_reset_date` field. Called on every confirmed sell and at start of each decision tick.
 
 - [ ] **F-003** — Config version increment race condition
   - Files: `services/control-plane/src/handlers/bots.rs`
