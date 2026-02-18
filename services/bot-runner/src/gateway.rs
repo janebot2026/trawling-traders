@@ -509,7 +509,6 @@ struct ExecutionRiskConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
 
     #[test]
     fn test_gateway_manager_creation() {

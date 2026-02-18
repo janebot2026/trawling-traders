@@ -516,11 +516,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `tsc --noEmit` clean for api-client, types, and mobile (only pre-existing CreateBotWizardSteps error)
   - Completion note: Added 8 raw API interfaces (RawTradeableAsset, RawAssistantOption, RawMetricPoint, RawBotEvent, RawDocsArticle, RawDocsCategory + existing RawBot, RawBotConfig, RawChatMessage). Replaced all inline `any` map params with typed interfaces. Added union-literal type imports and `as` casts for API string → enum coercions. Updated GetBotResponse.config to accept null.
 
-- [ ] **F-018** — Unused `tempfile::tempdir` import
-  - Files: `services/bot-runner/src/gateway.rs`
-  - Fix: Remove unused import
+- [x] **F-018** — Unused `tempfile::tempdir` import
+  - Files: `services/bot-runner/src/gateway.rs`, `services/bot-runner/Cargo.toml`
+  - Fix: Remove unused import and dev-dependency
   - Test: `cargo check` on bot-runner — no warnings
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Removed unused `use tempfile::tempdir` import and `tempfile` dev-dependency (no other usage in crate).
 
 - [ ] **F-020** — Dead `get_holdings()` returns empty vec
   - Files: `services/bot-runner/src/executor.rs`
