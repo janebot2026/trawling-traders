@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { dataApi } from '@trawling-traders/api-client';
 
 interface Price {
@@ -59,9 +59,13 @@ export function usePricesBatch(options: UsePricesBatchOptions) {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
 
+  // Stabilize the symbols array identity so the effect only re-runs when
+  // the actual symbol list changes, not on every render with a new array ref.
+  const symbolsKey = useMemo(() => symbols.join(','), [symbols]);
+
   const fetchPrices = useCallback(async () => {
     if (!symbols.length) return;
-    
+
     try {
       setLoading(true);
       const response = await dataApi.getPricesBatch(symbols);
@@ -72,11 +76,12 @@ export function usePricesBatch(options: UsePricesBatchOptions) {
     } finally {
       setLoading(false);
     }
-  }, [symbols.join(',')]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbolsKey]);
 
   useEffect(() => {
     fetchPrices();
-    
+
     if (refreshInterval > 0) {
       const interval = setInterval(fetchPrices, refreshInterval);
       return () => clearInterval(interval);

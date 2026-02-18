@@ -479,11 +479,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Replaced blocking `send().await` with `try_send()`. On channel full, drops update with warning log instead of stalling the message handler.
 
-- [ ] **F-015** — Mobile: `usePrices` hook dependency fragility
+- [x] **F-015** — Mobile: `usePrices` hook dependency fragility
   - Files: `apps/mobile/src/hooks/usePrices.ts`
   - Fix: Add `useMemo` for symbol key stabilization; add explanatory comment
-  - Test: Manual review; TypeScript typecheck
-  - Verified:
+  - Test: TypeScript typecheck
+  - Verified: `tsc --noEmit` clean
+  - Completion note: Added `useMemo` for `symbolsKey`, replaced raw `symbols.join(',')` in deps array. Added comment explaining the stabilization pattern.
 
 - [ ] **F-016** — Mobile: Silent error swallowing in BotDetailScreen
   - Files: `apps/mobile/src/screens/BotDetailScreen.tsx`
