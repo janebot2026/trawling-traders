@@ -6,7 +6,12 @@ use crate::brain::{
 };
 use crate::models::Strictness;
 use rust_decimal::Decimal;
-use std::str::FromStr;
+
+/// Pre-computed Decimal constants for stop-loss/take-profit multipliers.
+/// Using `from_parts` avoids runtime `from_str().unwrap()`.
+const STOP_LOSS_95: Decimal = Decimal::from_parts(95, 0, 0, false, 2); // 0.95
+const TAKE_PROFIT_108: Decimal = Decimal::from_parts(108, 0, 0, false, 2); // 1.08
+const TAKE_PROFIT_110: Decimal = Decimal::from_parts(110, 0, 0, false, 2); // 1.10
 
 /// Price candle data (local to brain module)
 #[derive(Debug, Clone)]
@@ -77,8 +82,9 @@ impl BrainEngine {
             );
         }
 
-        let fast = sma_fast.unwrap();
-        let slow = sma_slow.unwrap();
+        // SAFETY: checked is_none above — these are guaranteed Some
+        let fast = sma_fast.expect("checked above");
+        let slow = sma_slow.expect("checked above");
         let price = ctx.current_price;
 
         // Volume check
@@ -106,9 +112,6 @@ impl BrainEngine {
 
         // Generate signal
         if fast > slow && confidence >= min_conf {
-            let stop_loss = price * Decimal::from_str("0.95").unwrap();
-            let take_profit = price * Decimal::from_str("1.10").unwrap();
-
             Signal::buy(
                 ctx.symbol.clone(),
                 price,
@@ -117,8 +120,8 @@ impl BrainEngine {
                 format!("SMA crossover: fast({:.2}) > slow({:.2})", fast, slow),
             )
             .with_position_size(self.position_size())
-            .with_stop_loss(stop_loss)
-            .with_take_profit(take_profit)
+            .with_stop_loss(price * STOP_LOSS_95)
+            .with_take_profit(price * TAKE_PROFIT_110)
         } else if fast < slow && confidence >= min_conf {
             Signal::sell(
                 ctx.symbol.clone(),
@@ -153,7 +156,8 @@ impl BrainEngine {
             );
         }
 
-        let rsi_val = rsi.unwrap();
+        // SAFETY: checked is_none above
+        let rsi_val = rsi.expect("checked above");
         let oversold: f64 = 30.0;
         let overbought: f64 = 70.0;
 
@@ -172,9 +176,6 @@ impl BrainEngine {
 
         // Generate signal
         if rsi_val < oversold && confidence >= min_conf {
-            let stop_loss = price * Decimal::from_str("0.95").unwrap();
-            let take_profit = price * Decimal::from_str("1.08").unwrap();
-
             Signal::buy(
                 ctx.symbol.clone(),
                 price,
@@ -183,8 +184,8 @@ impl BrainEngine {
                 format!("RSI oversold: {:.1}", rsi_val),
             )
             .with_position_size(self.position_size())
-            .with_stop_loss(stop_loss)
-            .with_take_profit(take_profit)
+            .with_stop_loss(price * STOP_LOSS_95)
+            .with_take_profit(price * TAKE_PROFIT_108)
         } else if rsi_val > overbought && confidence >= min_conf {
             Signal::sell(
                 ctx.symbol.clone(),
@@ -219,8 +220,9 @@ impl BrainEngine {
             );
         }
 
-        let support = support.unwrap();
-        let resistance = resistance.unwrap();
+        // SAFETY: checked is_none above
+        let support = support.expect("checked above");
+        let resistance = resistance.expect("checked above");
         let range = resistance - support;
 
         if range == Decimal::ZERO {
@@ -364,7 +366,8 @@ impl BrainEngine {
             return false;
         }
 
-        let current = candles.last().unwrap().volume;
+        // SAFETY: candles.len() >= 2 guaranteed by early return above
+        let current = candles.last().expect("non-empty after len check").volume;
         let count = 20.min(candles.len() - 1);
         let sum: Decimal = candles
             .iter()
@@ -410,8 +413,7 @@ impl BrainEngine {
         let max_from_risk = self.config.trade.risk_caps.max_position_size_percent as f64 / 100.0;
 
         let size = base * strictness_factor * max_from_risk;
-        // Convert f64 to Decimal via string parsing
-        Decimal::from_str(&size.to_string()).unwrap_or(Decimal::ZERO)
+        Decimal::try_from(size).unwrap_or(Decimal::ZERO)
     }
 }
 
