@@ -249,24 +249,34 @@ pub async fn heartbeat(
 
     if let Some(metrics_batch) = req.metrics {
         let batch_len = metrics_batch.len();
-        for metric in metrics_batch {
-            // Convert Decimal to BigDecimal for database storage with proper error handling
-            let equity_bd = bigdecimal_from_decimal(&metric.equity).map_err(|e| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    format!("Invalid equity value: {}", e),
-                )
-            })?;
-            let pnl_bd = bigdecimal_from_decimal(&metric.pnl)
-                .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid pnl value: {}", e)))?;
 
+        if !metrics_batch.is_empty() {
+            // Pre-convert all values so we can bail on bad input before touching the DB
+            let mut timestamps = Vec::with_capacity(batch_len);
+            let mut equities = Vec::with_capacity(batch_len);
+            let mut pnls = Vec::with_capacity(batch_len);
+
+            for metric in &metrics_batch {
+                timestamps.push(metric.timestamp);
+                equities.push(bigdecimal_from_decimal(&metric.equity).map_err(|e| {
+                    (StatusCode::BAD_REQUEST, format!("Invalid equity value: {}", e))
+                })?);
+                pnls.push(bigdecimal_from_decimal(&metric.pnl).map_err(|e| {
+                    (StatusCode::BAD_REQUEST, format!("Invalid pnl value: {}", e))
+                })?);
+            }
+
+            let bot_ids: Vec<Uuid> = vec![bot_id; batch_len];
+
+            // Single batch INSERT via unnest — 1 round-trip instead of N
             sqlx::query(
-                "INSERT INTO metrics (bot_id, timestamp, equity, pnl) VALUES ($1, $2, $3, $4)",
+                "INSERT INTO metrics (bot_id, timestamp, equity, pnl)
+                 SELECT * FROM unnest($1::uuid[], $2::timestamptz[], $3::numeric[], $4::numeric[])",
             )
-            .bind(bot_id)
-            .bind(metric.timestamp)
-            .bind(equity_bd)
-            .bind(pnl_bd)
+            .bind(&bot_ids)
+            .bind(&timestamps)
+            .bind(&equities)
+            .bind(&pnls)
             .execute(&state.db)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
