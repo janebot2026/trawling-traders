@@ -472,11 +472,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Replaced `(price_int as f64) * 10f64.powi(expo)` → `Decimal::from(price_int) / Decimal::from(10^|expo|)`. Eliminates f64 precision loss for BTC-class prices. Confidence also computed via Decimal.
 
-- [ ] **F-013** — No backpressure on Binance WebSocket channel
+- [x] **F-013** — No backpressure on Binance WebSocket channel
   - Files: `services/data-retrieval/src/sources/binance_ws.rs`
   - Fix: Replace `send()` with `try_send()` + warning log on channel full
   - Test: `cargo check` on data-retrieval
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Replaced blocking `send().await` with `try_send()`. On channel full, drops update with warning log instead of stalling the message handler.
 
 - [ ] **F-015** — Mobile: `usePrices` hook dependency fragility
   - Files: `apps/mobile/src/hooks/usePrices.ts`

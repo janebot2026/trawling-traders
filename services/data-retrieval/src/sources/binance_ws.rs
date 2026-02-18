@@ -237,9 +237,15 @@ impl BinanceWebSocketClient {
             confidence: Some(0.95), // Binance is real-time exchange data
         };
 
-        // Send to channel
-        if let Err(e) = self.price_tx.send(price_point).await {
-            warn!("Failed to send price update: {}", e);
+        // Non-blocking send — drop update rather than stalling the message handler
+        match self.price_tx.try_send(price_point) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                warn!("Price channel full (10k entries). Dropping update — consumer may be behind.");
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                warn!("Price channel closed. Consumer disconnected.");
+            }
         }
 
         Ok(())
