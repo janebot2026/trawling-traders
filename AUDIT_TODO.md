@@ -437,11 +437,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Replaced per-metric INSERT loop with single `INSERT INTO metrics SELECT * FROM unnest(...)` batch. Pre-validates all values before touching DB.
 
-- [ ] **F-008** — Event ingest N+1 INSERT
+- [x] **F-008** — Event ingest N+1 INSERT
   - Files: `services/control-plane/src/handlers/sync.rs`
   - Fix: Batch INSERT using unnest arrays
   - Test: `cargo check` on control-plane
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Replaced per-event INSERT loop with single `INSERT INTO events SELECT * FROM unnest(...)` batch. Metrics counting loop remains in-memory (no DB overhead).
 
 - [ ] **F-009** — Unsafe `libc::kill()` without error handling
   - Files: `services/bot-runner/src/executor.rs`

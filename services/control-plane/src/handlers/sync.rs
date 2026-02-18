@@ -348,20 +348,31 @@ pub async fn ingest_events(
     let mut trade_count = 0u64;
     let mut error_count = 0u64;
 
-    for event in &req.events {
+    if !req.events.is_empty() {
+        // Batch INSERT via unnest — 1 round-trip instead of N
+        let bot_ids: Vec<Uuid> = vec![bot_id; req.events.len()];
+        let event_types: Vec<&str> = req.events.iter().map(|e| e.event_type.as_str()).collect();
+        let messages: Vec<&str> = req.events.iter().map(|e| e.message.as_str()).collect();
+        let metadatas: Vec<Option<&serde_json::Value>> =
+            req.events.iter().map(|e| e.metadata.as_ref()).collect();
+        let timestamps: Vec<_> = req.events.iter().map(|e| e.timestamp).collect();
+
         sqlx::query(
-            "INSERT INTO events (bot_id, event_type, message, metadata, created_at) VALUES ($1, $2, $3, $4, $5)"
+            "INSERT INTO events (bot_id, event_type, message, metadata, created_at)
+             SELECT * FROM unnest($1::uuid[], $2::text[], $3::text[], $4::jsonb[], $5::timestamptz[])",
         )
-        .bind(bot_id)
-        .bind(&event.event_type)
-        .bind(&event.message)
-        .bind(&event.metadata)
-        .bind(event.timestamp)
+        .bind(&bot_ids)
+        .bind(&event_types)
+        .bind(&messages)
+        .bind(&metadatas)
+        .bind(&timestamps)
         .execute(&state.db)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
 
-        // Count trade events
+    // Count trade events for metrics (in-memory, no DB)
+    for event in &req.events {
         if event.event_type.starts_with("trade_") {
             trade_count += 1;
             if event.event_type == "trade_executed" {
@@ -373,8 +384,6 @@ pub async fn ingest_events(
                 error_count += 1;
             }
         }
-
-        // Check for error events
         if event.event_type.contains("error") || event.event_type.contains("failed") {
             error_count += 1;
         }
