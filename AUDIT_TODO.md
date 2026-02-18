@@ -414,11 +414,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Replaced `>= 4` with `>= sub.tier.max_bots() as i64`. Error message now includes tier-specific limit info.
 
-- [ ] **F-006** — Silent decryption failure for LLM API key
+- [x] **F-006** — Silent decryption failure for LLM API key
   - Files: `services/control-plane/src/handlers/sync.rs`
   - Fix: Add `tracing::warn!` on decryption failure instead of silent `unwrap_or_default()`
   - Test: `cargo check` on control-plane
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Replaced `.unwrap_or_default()` with explicit match that logs `warn!` with bot_id on failure. Still returns empty string (graceful degradation) but now observable.
 
 - [ ] **F-001** — N+1 query loop in bot name availability (up to 998 queries)
   - Files: `services/control-plane/src/handlers/bots.rs`

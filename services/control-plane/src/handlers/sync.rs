@@ -50,10 +50,17 @@ pub async fn get_bot_config(
     // Decrypt LLM API key and Telegram token
     let (llm_provider, llm_model, decrypted_key, telegram_bot_token) = match &openclaw_config {
         Some(cfg) => {
-            let key = state
-                .secrets
-                .decrypt(&cfg.encrypted_llm_api_key)
-                .unwrap_or_default();
+            let key = match state.secrets.decrypt(&cfg.encrypted_llm_api_key) {
+                Ok(k) => k,
+                Err(e) => {
+                    tracing::warn!(
+                        bot_id = %bot_id,
+                        "Failed to decrypt LLM API key: {}. Bot will receive empty key.",
+                        e
+                    );
+                    String::new()
+                }
+            };
             let telegram = if cfg.telegram_enabled {
                 cfg.encrypted_telegram_bot_token
                     .as_ref()
