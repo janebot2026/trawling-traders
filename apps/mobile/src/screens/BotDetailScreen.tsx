@@ -49,7 +49,10 @@ export function BotDetailScreen() {
         api.bot.getBot(botId),
         api.bot.getEvents(botId),
         api.bot.getMetrics(botId),
-        api.bot.getChatMessages(botId).catch(() => ({ messages: [] })),
+        api.bot.getChatMessages(botId).catch((err: Error) => {
+          console.warn('Chat messages fetch failed:', err.message);
+          return { messages: [] };
+        }),
       ]);
 
       setBot(botResponse.bot);

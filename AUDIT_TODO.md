@@ -486,11 +486,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `tsc --noEmit` clean
   - Completion note: Added `useMemo` for `symbolsKey`, replaced raw `symbols.join(',')` in deps array. Added comment explaining the stabilization pattern.
 
-- [ ] **F-016** — Mobile: Silent error swallowing in BotDetailScreen
+- [x] **F-016** — Mobile: Silent error swallowing in BotDetailScreen
   - Files: `apps/mobile/src/screens/BotDetailScreen.tsx`
   - Fix: Add `console.warn` in `.catch()` handler
   - Test: TypeScript typecheck
-  - Verified:
+  - Verified: Manual code review
+  - Completion note: Added `console.warn` with error message in catch handler. Still returns empty messages for graceful UI degradation.
 
 - [x] **F-019** — `HomeOverviewScreen`: `Promise.all` fails atomically
   - Files: `apps/mobile/src/screens/HomeOverviewScreen.tsx`
