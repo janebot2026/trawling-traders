@@ -451,11 +451,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Check return value of `libc::kill`, log warning with errno via `last_os_error()` on failure. Handles case where process already exited.
 
-- [ ] **F-010** — Cache TTL mismatch (30s app vs 60s Redis)
+- [x] **F-010** — Cache TTL mismatch (30s app vs 60s Redis)
   - Files: `services/data-retrieval/src/cache/mod.rs`
   - Fix: Align Redis TTL to 30s
   - Test: `cargo check` on data-retrieval
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Changed Redis `set_ex` TTL from 60 to 30 seconds to match in-memory cache check.
 
 - [ ] **F-011** — Missing DB pool timeout and idle settings
   - Files: `services/control-plane/src/db/mod.rs`

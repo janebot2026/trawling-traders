@@ -43,8 +43,8 @@ impl RedisCache {
         let key = format!("price:{}:{}", asset.to_uppercase(), quote.to_uppercase());
         let json = serde_json::to_string(price)?;
 
-        // Cache for 60 seconds - explicit type annotation to avoid never type fallback
-        let _: () = self.client.clone().set_ex(key, json, 60).await?;
+        // Cache for 30 seconds — aligned with in-memory TTL check in lib.rs
+        let _: () = self.client.clone().set_ex(key, json, 30).await?;
 
         Ok(())
     }
