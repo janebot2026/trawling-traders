@@ -283,7 +283,7 @@ export interface ListBotsResponse {
 
 export interface GetBotResponse {
   bot: Bot;
-  config: BotConfig;
+  config: BotConfig | null;
 }
 
 export interface GetMetricsResponse {

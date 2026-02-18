@@ -509,11 +509,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Added time-based jitter (0 to base*250ms) to exponential backoff. Prevents thundering herd without adding a `rand` dependency.
 
-- [ ] **F-017** — API client: `any` types in map functions
-  - Files: `packages/api-client/src/index.ts`
+- [x] **F-017** — API client: `any` types in map functions
+  - Files: `packages/api-client/src/index.ts`, `packages/types/src/index.ts`
   - Fix: Add typed raw response interfaces; replace `any` with typed params
   - Test: `npx tsc --noEmit`
-  - Verified:
+  - Verified: `tsc --noEmit` clean for api-client, types, and mobile (only pre-existing CreateBotWizardSteps error)
+  - Completion note: Added 8 raw API interfaces (RawTradeableAsset, RawAssistantOption, RawMetricPoint, RawBotEvent, RawDocsArticle, RawDocsCategory + existing RawBot, RawBotConfig, RawChatMessage). Replaced all inline `any` map params with typed interfaces. Added union-literal type imports and `as` casts for API string → enum coercions. Updated GetBotResponse.config to accept null.
 
 - [ ] **F-018** — Unused `tempfile::tempdir` import
   - Files: `services/bot-runner/src/gateway.rs`

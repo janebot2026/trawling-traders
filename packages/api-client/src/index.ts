@@ -31,6 +31,15 @@ import type {
   UserSettings,
   AIAssistantOption,
   TradeableAsset,
+  BotStatus,
+  BotChatRole,
+  Persona,
+  AssetFocus,
+  AlgorithmMode,
+  Strictness,
+  TradingMode,
+  LlmProvider,
+  BotEventType,
 } from '@trawling-traders/types';
 
 // Generic API error
@@ -255,7 +264,7 @@ export const botApi = {
 
   async listTradeableAssets(): Promise<TradeableAsset[]> {
     const response = await fetchApi('/bots/tradeable-assets');
-    return (response.assets || []).map((asset: any) => ({
+    return (response.assets || []).map((asset: RawTradeableAsset) => ({
       id: asset.id,
       assetFocus: asset.assetFocus ?? asset.asset_focus,
       symbol: asset.symbol,
@@ -271,7 +280,7 @@ export const botApi = {
 
   async listAssistantOptions(): Promise<AIAssistantOption[]> {
     const response = await fetchApi('/bots/assistant-options');
-    return (response.options || []).map((option: any) => ({
+    return (response.options || []).map((option: RawAssistantOption) => ({
       id: option.id,
       assistantStyle: option.assistantStyle ?? option.assistant_style,
       captainName: option.captainName ?? option.captain_name,
@@ -350,7 +359,7 @@ export const botApi = {
     const response = await fetchApi(`/bots/${botId}/metrics`);
     return {
       range: response.range || '7d',
-      metrics: (response.metrics || []).map((metric: any) => ({
+      metrics: (response.metrics || []).map((metric: RawMetricPoint) => ({
         timestamp: metric.timestamp,
         value: Number(metric.value ?? metric.pnl ?? 0),
       })),
@@ -362,12 +371,12 @@ export const botApi = {
     const response = await fetchApi(`/bots/${botId}/events`);
     return {
       nextCursor: response.nextCursor ?? response.next_cursor,
-      events: (response.events || []).map((event: any) => ({
+      events: (response.events || []).map((event: RawBotEvent) => ({
         id: event.id,
-        botId: event.botId ?? event.bot_id,
-        type: event.type ?? event.event_type,
-        timestamp: event.timestamp ?? event.created_at,
-        message: event.message,
+        botId: event.botId ?? event.bot_id ?? '',
+        type: (event.type ?? event.event_type ?? 'status_change') as BotEventType,
+        timestamp: event.timestamp ?? event.created_at ?? '',
+        message: event.message ?? '',
         metadata: event.metadata,
       })),
     };
@@ -395,59 +404,161 @@ export const botApi = {
   },
 };
 
-function mapChatMessage(raw: any): BotChatMessage {
+// Raw API response types — accept both camelCase and snake_case from backend
+interface RawChatMessage {
+  id: string;
+  botId?: string; bot_id?: string;
+  role: string;
+  content: string;
+  timestamp?: string; created_at?: string;
+}
+
+interface RawBot {
+  id: string;
+  userId?: string; user_id?: string;
+  name: string;
+  status: string;
+  assistantStyle?: string; assistant_style?: string;
+  dropletId?: string; droplet_id?: string;
+  region?: string;
+  ipAddress?: string; ip_address?: string;
+  agentWallet?: string; agent_wallet?: string;
+  desiredVersionId?: string; desired_version_id?: string;
+  appliedVersionId?: string; applied_version_id?: string;
+  configStatus?: string; config_status?: string;
+  createdAt?: string; created_at?: string;
+  updatedAt?: string; updated_at?: string;
+  lastHeartbeatAt?: string; last_heartbeat_at?: string;
+  todayPnl?: number; today_pnl?: number;
+  totalPnl?: number; total_pnl?: number;
+}
+
+interface RawBotConfig {
+  id: string;
+  botId?: string; bot_id?: string;
+  version: number;
+  createdAt?: string; created_at?: string;
+  name?: string;
+  assistantStyle?: string; assistant_style?: string;
+  iconColor?: string; icon_color?: string;
+  assetFocus?: string; asset_focus?: string;
+  customAssets?: string[]; custom_assets?: string[];
+  algorithmMode?: string; algorithm_mode?: string;
+  strictness?: string;
+  signalKnobs?: Record<string, unknown>; signal_knobs?: Record<string, unknown>;
+  riskCaps?: Record<string, unknown>; risk_caps?: Record<string, unknown>;
+  tradingMode?: string; trading_mode?: string;
+  llmProvider?: string; llm_provider?: string;
+  llmModel?: string; llm_model?: string;
+  llmApiKey?: string; llm_api_key?: string;
+}
+
+interface RawTradeableAsset {
+  id: string;
+  assetFocus?: string; asset_focus?: string;
+  symbol: string;
+  name: string;
+  tokenAddress?: string; token_address?: string;
+  decimals: number;
+  custodian?: string;
+  isActive?: boolean; is_active?: boolean;
+  createdAt?: string; created_at?: string;
+  updatedAt?: string; updated_at?: string;
+}
+
+interface RawAssistantOption {
+  id: string;
+  assistantStyle?: string; assistant_style?: string;
+  captainName?: string; captain_name?: string;
+  personalityDescription?: string; personality_description?: string;
+  imageKey?: string; image_key?: string;
+  imagePath?: string; image_path?: string;
+  sortOrder?: number; sort_order?: number;
+  isActive?: boolean; is_active?: boolean;
+}
+
+interface RawMetricPoint {
+  timestamp: string;
+  value?: number;
+  pnl?: number;
+}
+
+interface RawBotEvent {
+  id: string;
+  botId?: string; bot_id?: string;
+  type?: string; event_type?: string;
+  timestamp?: string; created_at?: string;
+  message?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface RawDocsArticle {
+  id: string;
+  title: string;
+  summary?: string;
+  content?: unknown[];
+}
+
+interface RawDocsCategory {
+  id: string;
+  title: string;
+  description?: string;
+  articles?: RawDocsArticle[];
+}
+
+function mapChatMessage(raw: RawChatMessage): BotChatMessage {
   return {
     id: raw.id,
-    botId: raw.botId ?? raw.bot_id,
-    role: raw.role,
+    botId: raw.botId ?? raw.bot_id ?? '',
+    role: raw.role as BotChatRole,
     content: raw.content,
-    timestamp: raw.timestamp ?? raw.created_at,
+    timestamp: raw.timestamp ?? raw.created_at ?? '',
   };
 }
 
-function mapBot(raw: any): Bot {
+function mapBot(raw: RawBot): Bot {
   return {
     id: raw.id,
-    userId: raw.userId ?? raw.user_id,
+    userId: raw.userId ?? raw.user_id ?? '',
     name: raw.name,
-    status: raw.status,
-    assistantStyle: raw.assistantStyle ?? raw.assistant_style,
+    status: raw.status as BotStatus,
+    assistantStyle: (raw.assistantStyle ?? raw.assistant_style ?? 'beginner') as Persona,
     dropletId: raw.dropletId ?? raw.droplet_id,
-    region: raw.region,
+    region: raw.region ?? '',
     ipAddress: raw.ipAddress ?? raw.ip_address,
     agentWallet: raw.agentWallet ?? raw.agent_wallet,
-    desiredVersionId: raw.desiredVersionId ?? raw.desired_version_id,
+    desiredVersionId: raw.desiredVersionId ?? raw.desired_version_id ?? '',
     appliedVersionId: raw.appliedVersionId ?? raw.applied_version_id,
-    configStatus: raw.configStatus ?? raw.config_status,
-    createdAt: raw.createdAt ?? raw.created_at,
-    updatedAt: raw.updatedAt ?? raw.updated_at,
+    configStatus: (raw.configStatus ?? raw.config_status ?? 'pending') as Bot['configStatus'],
+    createdAt: raw.createdAt ?? raw.created_at ?? '',
+    updatedAt: raw.updatedAt ?? raw.updated_at ?? '',
     lastHeartbeatAt: raw.lastHeartbeatAt ?? raw.last_heartbeat_at,
     todayPnl: Number(raw.todayPnl ?? raw.today_pnl ?? 0),
     totalPnl: Number(raw.totalPnl ?? raw.total_pnl ?? 0),
   };
 }
 
-function mapBotConfig(raw: any): BotConfig {
-  if (!raw) return raw;
+function mapBotConfig(raw: RawBotConfig | null | undefined): BotConfig | null {
+  if (!raw) return null;
   return {
     id: raw.id,
-    botId: raw.botId ?? raw.bot_id,
+    botId: raw.botId ?? raw.bot_id ?? '',
     version: raw.version,
-    createdAt: raw.createdAt ?? raw.created_at,
-    name: raw.name,
-    assistantStyle: raw.assistantStyle ?? raw.assistant_style,
+    createdAt: raw.createdAt ?? raw.created_at ?? '',
+    name: raw.name ?? '',
+    assistantStyle: (raw.assistantStyle ?? raw.assistant_style ?? 'beginner') as Persona,
     iconColor: raw.iconColor ?? raw.icon_color,
-    assetFocus: raw.assetFocus ?? raw.asset_focus,
+    assetFocus: (raw.assetFocus ?? raw.asset_focus ?? 'majors') as AssetFocus,
     customAssets: raw.customAssets ?? raw.custom_assets,
-    algorithmMode: raw.algorithmMode ?? raw.algorithm_mode,
-    strictness: raw.strictness,
-    signalKnobs: raw.signalKnobs ?? raw.signal_knobs,
-    riskCaps: raw.riskCaps ?? raw.risk_caps,
-    tradingMode: raw.tradingMode ?? raw.trading_mode,
-    llmProvider: raw.llmProvider ?? raw.llm_provider,
+    algorithmMode: (raw.algorithmMode ?? raw.algorithm_mode ?? 'trend') as AlgorithmMode,
+    strictness: (raw.strictness ?? 'medium') as Strictness,
+    signalKnobs: (raw.signalKnobs ?? raw.signal_knobs) as BotConfig['signalKnobs'],
+    riskCaps: (raw.riskCaps ?? raw.risk_caps) as BotConfig['riskCaps'],
+    tradingMode: (raw.tradingMode ?? raw.trading_mode ?? 'paper') as TradingMode,
+    llmProvider: (raw.llmProvider ?? raw.llm_provider ?? 'openai') as LlmProvider,
     llmModel: raw.llmModel ?? raw.llm_model,
     llmApiKey: raw.llmApiKey ?? raw.llm_api_key ?? '',
-  };
+  } as BotConfig;
 }
 
 // User API
@@ -529,15 +640,15 @@ export const docsApi = {
   async getDocs(): Promise<GetDocsResponse> {
     const response = await fetchApi('/docs');
 
-    const categories = (response.categories || []).map((category: any): DocsCategory => ({
+    const categories = (response.categories || []).map((category: RawDocsCategory): DocsCategory => ({
       id: category.id,
       title: category.title,
-      description: category.description,
-      articles: (category.articles || []).map((article: any) => ({
+      description: category.description ?? '',
+      articles: (category.articles || []).map((article: RawDocsArticle) => ({
         id: article.id,
         title: article.title,
-        summary: article.summary,
-        content: Array.isArray(article.content) ? article.content.map((line: any) => String(line)) : [],
+        summary: article.summary ?? '',
+        content: Array.isArray(article.content) ? article.content.map((line: unknown) => String(line)) : [],
       })),
     }));
 
