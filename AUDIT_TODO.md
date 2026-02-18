@@ -502,11 +502,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
 
 ## Low Severity
 
-- [ ] **F-014** — No jitter in reconnection backoff
+- [x] **F-014** — No jitter in reconnection backoff
   - Files: `services/data-retrieval/src/lib.rs`
   - Fix: Add random jitter to exponential backoff delay
   - Test: `cargo check` on data-retrieval
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Added time-based jitter (0 to base*250ms) to exponential backoff. Prevents thundering herd without adding a `rand` dependency.
 
 - [ ] **F-017** — API client: `any` types in map functions
   - Files: `packages/api-client/src/index.ts`

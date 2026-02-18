@@ -161,9 +161,16 @@ impl PriceAggregator {
                             }
                             Err(e) => {
                                 warn!("WebSocket reconnection failed: {}", e);
-                                // Exponential backoff, capped at MAX_RECONNECT_DELAY
-                                reconnect_delay_secs =
-                                    (reconnect_delay_secs * 2).min(MAX_RECONNECT_DELAY);
+                                // Exponential backoff with jitter, capped at MAX_RECONNECT_DELAY.
+                                // Jitter prevents thundering herd when multiple instances reconnect.
+                                let base = (reconnect_delay_secs * 2).min(MAX_RECONNECT_DELAY);
+                                let jitter = (std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .subsec_millis()
+                                    % (base.max(1) as u32 * 250)) as u64
+                                    / 1000;
+                                reconnect_delay_secs = base + jitter;
                                 continue; // Try again after delay
                             }
                         }
