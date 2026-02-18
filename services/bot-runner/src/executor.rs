@@ -50,15 +50,6 @@ impl QuoteCache {
         }
     }
 
-    #[allow(dead_code)] // WIP
-    pub fn with_max_size(ttl_secs: u64, max_size: usize) -> Self {
-        Self {
-            entries: Arc::new(RwLock::new(HashMap::new())),
-            ttl_secs,
-            max_size,
-        }
-    }
-
     pub async fn get(
         &self,
         input_mint: &str,
@@ -126,7 +117,6 @@ impl QuoteCache {
     }
 
     /// Clean up expired entries
-    #[allow(dead_code)] // WIP
     pub async fn cleanup(&self) {
         let mut entries = self.entries.write().await;
         let before = entries.len();
@@ -141,13 +131,6 @@ impl QuoteCache {
         }
     }
 
-    #[allow(dead_code)] // WIP
-    pub async fn size(&self) -> usize {
-        let entries = self.entries.read().await;
-        entries.len()
-    }
-
-    #[allow(dead_code)] // WIP
     pub fn spawn_cleanup_task(self) {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
@@ -272,7 +255,11 @@ impl TradeExecutor {
             keypair_path,
             jupiter_api_key: std::env::var("JUPITER_API_KEY").ok(),
             execution_config,
-            quote_cache: QuoteCache::new(execution_config.quote_cache_secs),
+            quote_cache: {
+                let cache = QuoteCache::new(execution_config.quote_cache_secs);
+                cache.clone().spawn_cleanup_task();
+                cache
+            },
         })
     }
 

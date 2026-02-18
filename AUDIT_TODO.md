@@ -530,11 +530,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Removed `get_holdings()` (deprecated, always returned empty vec) and `TokenHolding` struct (only referenced by get_holdings).
 
-- [ ] **F-021** — `QuoteCache` dead code with `#[allow(dead_code)]`
+- [x] **F-021** — `QuoteCache` dead code with `#[allow(dead_code)]`
   - Files: `services/bot-runner/src/executor.rs`
-  - Fix: Wire up `spawn_cleanup_task()` in executor init so expired entries get cleaned; remove unused `with_max_size` and `size` methods
+  - Fix: Wire up `spawn_cleanup_task()` in executor init; remove unused `with_max_size` and `size` methods
   - Test: `cargo check` on bot-runner
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Wired `spawn_cleanup_task()` at QuoteCache init so expired entries get periodically evicted (every 60s). Removed unused `with_max_size()` and `size()`. Removed `#[allow(dead_code)]` from `cleanup()` since it's now called.
 
 - [ ] **F-022** — Docker Compose default Postgres credentials
   - Files: `docker-compose.yml`
