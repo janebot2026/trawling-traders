@@ -465,11 +465,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Added `idle_timeout(600s)` and `max_lifetime(1800s)` to prevent stale connections accumulating.
 
-- [ ] **F-012** — Pyth price conversion loses precision via f64
+- [x] **F-012** — Pyth price conversion loses precision via f64
   - Files: `services/data-retrieval/src/sources/pyth.rs`
   - Fix: Use Decimal arithmetic directly instead of f64 intermediate
-  - Test: `cargo test` on data-retrieval
-  - Verified:
+  - Test: `cargo check` on data-retrieval
+  - Verified: `cargo check` clean
+  - Completion note: Replaced `(price_int as f64) * 10f64.powi(expo)` → `Decimal::from(price_int) / Decimal::from(10^|expo|)`. Eliminates f64 precision loss for BTC-class prices. Confidence also computed via Decimal.
 
 - [ ] **F-013** — No backpressure on Binance WebSocket channel
   - Files: `services/data-retrieval/src/sources/binance_ws.rs`

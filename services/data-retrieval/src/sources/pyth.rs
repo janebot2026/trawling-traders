@@ -185,41 +185,58 @@ impl PythClient {
 
         let price_data = parsed.price;
 
-        // Pyth returns price as integer with exponent
+        // Pyth returns price as integer with exponent.
+        // Use Decimal arithmetic directly to avoid f64 precision loss on high-value assets.
         let price_int: i64 = price_data
             .price
             .parse()
             .context("Failed to parse Pyth price")?;
-        let price_f64 = (price_int as f64) * 10f64.powi(price_data.expo);
-
-        let confidence: u64 = price_data
+        let confidence_int: u64 = price_data
             .conf
             .parse()
             .context("Failed to parse Pyth confidence")?;
-        let confidence_usd = (confidence as f64) * 10f64.powi(price_data.expo);
+
+        let expo = price_data.expo;
+        let price_decimal = if expo >= 0 {
+            Decimal::from(price_int) * Decimal::from(10i64.pow(expo as u32))
+        } else {
+            Decimal::from(price_int) / Decimal::from(10i64.pow((-expo) as u32))
+        };
+
+        let confidence_decimal = if expo >= 0 {
+            Decimal::from(confidence_int) * Decimal::from(10i64.pow(expo as u32))
+        } else {
+            Decimal::from(confidence_int) / Decimal::from(10i64.pow((-expo) as u32))
+        };
 
         let timestamp =
             DateTime::from_timestamp(price_data.publish_time, 0).unwrap_or_else(Utc::now);
 
         info!(
-            "Pyth price for {}: ${:.4} (confidence: ${:.4})",
-            symbol, price_f64, confidence_usd
+            "Pyth price for {}: ${} (confidence: ${})",
+            symbol, price_decimal, confidence_decimal
         );
 
         self.health_tracker
             .record_success(start.elapsed().as_millis() as u64);
 
+        let confidence_ratio = if price_decimal > Decimal::ZERO {
+            confidence_decimal / price_decimal
+        } else {
+            Decimal::ZERO
+        };
+
         Ok(PricePoint {
             symbol: symbol.to_string(),
-            price: Decimal::try_from(price_f64)
-                .map_err(|e| anyhow::anyhow!("Failed to convert price: {}", e))?,
+            price: price_decimal,
             source: "pyth".to_string(),
             timestamp,
-            confidence: Some(if price_f64 > 0.0 {
-                confidence_usd / price_f64
-            } else {
-                0.0
-            }),
+            confidence: Some(
+                confidence_ratio
+                    .to_string()
+                    .parse::<f64>()
+                    .unwrap_or(0.0),
+            ),
         })
     }
 
