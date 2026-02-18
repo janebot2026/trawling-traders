@@ -377,3 +377,148 @@ Based on comprehensive full-codebase audit (2026-02-18). IDs prefixed R2- to dis
     - Enabled `strict: true` and removed redundant `noImplicitAny: false`
     - Code was already strict-compatible, zero errors
     - Verified: `tsc --noEmit` clean
+
+---
+
+# Round 3 Audit Findings
+
+Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
+
+## High Severity
+
+- [ ] **F-002** — `realized_pnl_today` never updated (daily loss risk rail broken)
+  - Files: `services/bot-runner/src/runner.rs`
+  - Fix: After confirmed sell, compute realized PnL from avg_entry vs execution price; accumulate into `self.realized_pnl_today`; add daily reset check
+  - Test: `cargo test` + `cargo check` on bot-runner
+  - Verified:
+
+- [ ] **F-003** — Config version increment race condition
+  - Files: `services/control-plane/src/handlers/bots.rs`
+  - Fix: Use atomic `INSERT ... SELECT COALESCE(MAX(version),0)+1` in a transaction
+  - Test: `cargo check` on control-plane
+  - Verified:
+
+- [ ] **F-004** — Panicking `unwrap()` in trading engine
+  - Files: `services/control-plane/src/brain/engine.rs`
+  - Fix: Replace `Decimal::from_str(...).unwrap()` with consts; replace `candles.last().unwrap()` with `.ok_or()`
+  - Test: `cargo test` + `cargo clippy` on control-plane
+  - Verified:
+
+- [ ] **F-005** — Hardcoded bot limit ignores subscription tier
+  - Files: `services/control-plane/src/handlers/bots.rs`
+  - Fix: Replace `>= 4` with subscription tier's `max_bots()`
+  - Test: `cargo check` on control-plane
+  - Verified:
+
+- [ ] **F-006** — Silent decryption failure for LLM API key
+  - Files: `services/control-plane/src/handlers/sync.rs`
+  - Fix: Add `tracing::warn!` on decryption failure instead of silent `unwrap_or_default()`
+  - Test: `cargo check` on control-plane
+  - Verified:
+
+- [ ] **F-001** — N+1 query loop in bot name availability (up to 998 queries)
+  - Files: `services/control-plane/src/handlers/bots.rs`
+  - Fix: Single query to fetch all existing names matching prefix; compute next available in Rust
+  - Test: `cargo check` on control-plane
+  - Verified:
+
+## Medium Severity
+
+- [ ] **F-007** — Heartbeat metrics N+1 INSERT
+  - Files: `services/control-plane/src/handlers/sync.rs`
+  - Fix: Batch INSERT using unnest arrays
+  - Test: `cargo check` on control-plane
+  - Verified:
+
+- [ ] **F-008** — Event ingest N+1 INSERT
+  - Files: `services/control-plane/src/handlers/sync.rs`
+  - Fix: Batch INSERT using unnest arrays
+  - Test: `cargo check` on control-plane
+  - Verified:
+
+- [ ] **F-009** — Unsafe `libc::kill()` without error handling
+  - Files: `services/bot-runner/src/executor.rs`
+  - Fix: Check return value of `libc::kill`; log on failure
+  - Test: `cargo check` on bot-runner
+  - Verified:
+
+- [ ] **F-010** — Cache TTL mismatch (30s app vs 60s Redis)
+  - Files: `services/data-retrieval/src/cache/mod.rs`
+  - Fix: Align Redis TTL to 30s
+  - Test: `cargo check` on data-retrieval
+  - Verified:
+
+- [ ] **F-011** — Missing DB pool timeout and idle settings
+  - Files: `services/control-plane/src/db/mod.rs`
+  - Fix: Add `idle_timeout(600s)` and `max_lifetime` to pool
+  - Test: `cargo check` on control-plane
+  - Verified:
+
+- [ ] **F-012** — Pyth price conversion loses precision via f64
+  - Files: `services/data-retrieval/src/sources/pyth.rs`
+  - Fix: Use Decimal arithmetic directly instead of f64 intermediate
+  - Test: `cargo test` on data-retrieval
+  - Verified:
+
+- [ ] **F-013** — No backpressure on Binance WebSocket channel
+  - Files: `services/data-retrieval/src/sources/binance_ws.rs`
+  - Fix: Replace `send()` with `try_send()` + warning log on channel full
+  - Test: `cargo check` on data-retrieval
+  - Verified:
+
+- [ ] **F-015** — Mobile: `usePrices` hook dependency fragility
+  - Files: `apps/mobile/src/hooks/usePrices.ts`
+  - Fix: Add `useMemo` for symbol key stabilization; add explanatory comment
+  - Test: Manual review; TypeScript typecheck
+  - Verified:
+
+- [ ] **F-016** — Mobile: Silent error swallowing in BotDetailScreen
+  - Files: `apps/mobile/src/screens/BotDetailScreen.tsx`
+  - Fix: Add `console.warn` in `.catch()` handler
+  - Test: TypeScript typecheck
+  - Verified:
+
+- [x] **F-019** — `HomeOverviewScreen`: `Promise.all` fails atomically
+  - Files: `apps/mobile/src/screens/HomeOverviewScreen.tsx`
+  - Fix: N/A — already has individual try/catch per bot (lines 67-73, 77-82)
+  - Test: N/A
+  - Verified: Code review confirms each inner promise catches individually
+  - Completion note: False positive — already addressed in current code
+
+## Low Severity
+
+- [ ] **F-014** — No jitter in reconnection backoff
+  - Files: `services/data-retrieval/src/lib.rs`
+  - Fix: Add random jitter to exponential backoff delay
+  - Test: `cargo check` on data-retrieval
+  - Verified:
+
+- [ ] **F-017** — API client: `any` types in map functions
+  - Files: `packages/api-client/src/index.ts`
+  - Fix: Add typed raw response interfaces; replace `any` with typed params
+  - Test: `npx tsc --noEmit`
+  - Verified:
+
+- [ ] **F-018** — Unused `tempfile::tempdir` import
+  - Files: `services/bot-runner/src/gateway.rs`
+  - Fix: Remove unused import
+  - Test: `cargo check` on bot-runner — no warnings
+  - Verified:
+
+- [ ] **F-020** — Dead `get_holdings()` returns empty vec
+  - Files: `services/bot-runner/src/executor.rs`
+  - Fix: Remove deprecated function (no callers)
+  - Test: `cargo check` on bot-runner
+  - Verified:
+
+- [ ] **F-021** — `QuoteCache` dead code with `#[allow(dead_code)]`
+  - Files: `services/bot-runner/src/executor.rs`
+  - Fix: Wire up `spawn_cleanup_task()` in executor init so expired entries get cleaned; remove unused `with_max_size` and `size` methods
+  - Test: `cargo check` on bot-runner
+  - Verified:
+
+- [ ] **F-022** — Docker Compose default Postgres credentials
+  - Files: `docker-compose.yml`
+  - Fix: Already documented with "DEVELOPMENT ONLY" comments. No code change needed.
+  - Test: N/A
+  - Verified: Acknowledged — dev-only, properly documented
