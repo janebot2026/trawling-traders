@@ -7,6 +7,8 @@ pub async fn init_db(database_url: &str) -> anyhow::Result<Db> {
     let pool = PgPoolOptions::new()
         .max_connections(20)
         .acquire_timeout(Duration::from_secs(3))
+        .idle_timeout(Duration::from_secs(600))
+        .max_lifetime(Duration::from_secs(1800))
         .connect(database_url)
         .await?;
 

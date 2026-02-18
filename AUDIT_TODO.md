@@ -458,11 +458,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Changed Redis `set_ex` TTL from 60 to 30 seconds to match in-memory cache check.
 
-- [ ] **F-011** — Missing DB pool timeout and idle settings
+- [x] **F-011** — Missing DB pool timeout and idle settings
   - Files: `services/control-plane/src/db/mod.rs`
   - Fix: Add `idle_timeout(600s)` and `max_lifetime` to pool
   - Test: `cargo check` on control-plane
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Added `idle_timeout(600s)` and `max_lifetime(1800s)` to prevent stale connections accumulating.
 
 - [ ] **F-012** — Pyth price conversion loses precision via f64
   - Files: `services/data-retrieval/src/sources/pyth.rs`
