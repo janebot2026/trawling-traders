@@ -352,9 +352,13 @@ impl TradeExecutor {
                     debug!("Killing timed-out claw-trader process with PID {}", pid);
                     #[cfg(unix)]
                     {
-                        // Send SIGKILL to the specific PID
-                        unsafe {
-                            libc::kill(pid as i32, libc::SIGKILL);
+                        let ret = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+                        if ret != 0 {
+                            let errno = std::io::Error::last_os_error();
+                            warn!(
+                                "Failed to kill PID {} (errno: {}). Process may have already exited.",
+                                pid, errno
+                            );
                         }
                     }
                     #[cfg(not(unix))]

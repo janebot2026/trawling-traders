@@ -444,11 +444,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Replaced per-event INSERT loop with single `INSERT INTO events SELECT * FROM unnest(...)` batch. Metrics counting loop remains in-memory (no DB overhead).
 
-- [ ] **F-009** — Unsafe `libc::kill()` without error handling
+- [x] **F-009** — Unsafe `libc::kill()` without error handling
   - Files: `services/bot-runner/src/executor.rs`
   - Fix: Check return value of `libc::kill`; log on failure
   - Test: `cargo check` on bot-runner
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Check return value of `libc::kill`, log warning with errno via `last_os_error()` on failure. Handles case where process already exited.
 
 - [ ] **F-010** — Cache TTL mismatch (30s app vs 60s Redis)
   - Files: `services/data-retrieval/src/cache/mod.rs`
