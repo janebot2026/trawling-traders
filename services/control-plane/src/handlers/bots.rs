@@ -136,35 +136,32 @@ pub async fn check_bot_name_availability(
         }));
     }
 
-    for idx in 2..=999 {
-        let candidate = format!("{}-{}", normalized_name, idx);
-        let candidate_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(
-                SELECT 1 FROM bots
-                WHERE user_id = $1
-                  AND name = $2
-                  AND status != 'destroying'
-            )",
-        )
-        .bind(user_id)
-        .bind(&candidate)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // Single query to find all taken names with the same prefix,
+    // then compute the next available suffix in Rust.
+    let taken_names: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM bots
+         WHERE user_id = $1
+           AND (name = $2 OR name LIKE $3)
+           AND status != 'destroying'",
+    )
+    .bind(user_id)
+    .bind(&normalized_name)
+    .bind(format!("{}-%", normalized_name))
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-        if !candidate_exists {
-            return Ok(Json(NameAvailabilityResponse {
-                available: false,
-                normalized_name,
-                suggested_name: Some(candidate),
-            }));
-        }
-    }
+    let taken_set: std::collections::HashSet<&str> =
+        taken_names.iter().map(|s| s.as_str()).collect();
+
+    let suggested = (2..=999)
+        .map(|idx| format!("{}-{}", normalized_name, idx))
+        .find(|candidate| !taken_set.contains(candidate.as_str()));
 
     Ok(Json(NameAvailabilityResponse {
         available: false,
         normalized_name,
-        suggested_name: None,
+        suggested_name: suggested,
     }))
 }
 

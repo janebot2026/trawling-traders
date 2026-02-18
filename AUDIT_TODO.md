@@ -421,11 +421,12 @@ Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
   - Verified: `cargo check` clean
   - Completion note: Replaced `.unwrap_or_default()` with explicit match that logs `warn!` with bot_id on failure. Still returns empty string (graceful degradation) but now observable.
 
-- [ ] **F-001** — N+1 query loop in bot name availability (up to 998 queries)
+- [x] **F-001** — N+1 query loop in bot name availability (up to 998 queries)
   - Files: `services/control-plane/src/handlers/bots.rs`
   - Fix: Single query to fetch all existing names matching prefix; compute next available in Rust
   - Test: `cargo check` on control-plane
-  - Verified:
+  - Verified: `cargo check` clean
+  - Completion note: Replaced 2..=999 loop (up to 998 DB queries) with single `SELECT name FROM bots WHERE name LIKE $prefix-%` + HashSet lookup in Rust. O(1) DB round-trip regardless of how many names are taken.
 
 ## Medium Severity
 
