@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 12 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 13 | **Deferred:** 5
 
 ---
 
@@ -62,10 +62,11 @@
   - Test: `cargo check`; reasoned check
   - **Done:** Removed `status = 'online'` from droplet creation update. Bot stays 'provisioning' until heartbeat.
 
-- [ ] **CP-004** — config_versions INSERT uses Uuid::nil() as bot_id
+- [x] **CP-004** — config_versions INSERT uses Uuid::nil() as bot_id
   - Files: `services/control-plane/src/handlers/bots.rs`
-  - Fix: Generate `bot_id` before transaction and use real ID
+  - Fix: Generate `bot_id` before config_versions INSERT; removed nil + backfill UPDATE
   - Test: `cargo check`; reasoned check
+  - **Done:** Moved bot_id generation before INSERT; removed the UPDATE backfill that was needed to fix nil FK.
 
 - [x] **CP-005** — Bootstrap token compared with `==` (timing side-channel)
   - Files: `services/control-plane/src/handlers/sync.rs`

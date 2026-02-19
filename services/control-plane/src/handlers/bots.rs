@@ -405,6 +405,7 @@ pub async fn create_bot(
     }
 
     let config_id = Uuid::new_v4();
+    let bot_id = Uuid::new_v4();
     let custom_assets_json = req
         .custom_assets
         .map(serde_json::to_value)
@@ -426,7 +427,7 @@ pub async fn create_bot(
         "#,
     )
     .bind(config_id)
-    .bind(Uuid::nil())
+    .bind(bot_id)
     .bind(1)
     .bind(&normalized_name)
     .bind(resolved_persona)
@@ -452,8 +453,6 @@ pub async fn create_bot(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let bot_id = Uuid::new_v4();
-
     // Generate secure bootstrap token for one-time secrets retrieval
     let bootstrap_token = generate_bootstrap_token();
 
@@ -474,13 +473,6 @@ pub async fn create_bot(
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    sqlx::query("UPDATE config_versions SET bot_id = $1 WHERE id = $2")
-        .bind(bot_id)
-        .bind(config_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Initialize OpenClaw config at bot creation so LLM/Telegram settings are persisted immediately.
     let encrypted_llm_api_key = req
