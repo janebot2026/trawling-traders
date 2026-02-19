@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 130 | **Deferred:** 5 (included in fixed count)
+**Total findings:** 136 | **Fixed:** 134 | **Deferred:** 2 (CP-018, MB-032)
 
 ---
 
@@ -188,10 +188,11 @@
   - Test: `npx tsc --noEmit`; reasoned check
   - **Done:** Replaced ScrollView+map with FlatList, ListHeaderComponent, ListFooterComponent.
 
-- [ ] **MB-024** — CreateBotWizardSteps.tsx is 1193 lines
+- [x] **MB-024** — CreateBotWizardSteps.tsx is 1193 lines
   - Files: `apps/mobile/src/screens/create-bot/CreateBotWizardSteps.tsx`
   - Fix: Split into per-step components
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** Split into 10 per-step components + wizardShared.ts. Main file 215 lines.
 
 - [x] **BR-001** — Hold intents emit false trade_blocked events
   - Files: `services/bot-runner/src/runner.rs`
@@ -387,15 +388,17 @@
   - Test: `cargo check`; reasoned check
   - **Done:** Unified CRYPTO_SYMBOLS constant as single source of truth.
 
-- [ ] **INFRA-003** — dataApi methods lack timeout/retry/typed errors
+- [x] **INFRA-003** — dataApi methods lack timeout/retry/typed errors
   - Files: `packages/api-client/src/index.ts`
   - Fix: Add timeout and basic retry
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** 30s timeout + single retry with 1s delay on network errors in base HTTP helper.
 
-- [ ] **INFRA-005** — api-client 777 lines, 5+ responsibilities
+- [x] **INFRA-005** — api-client 777 lines, 5+ responsibilities
   - Files: `packages/api-client/src/index.ts`
   - Fix: Split into modules
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** Split into http.ts, bots.ts, auth.ts, docs.ts, data.ts, errors.ts, raw-types.ts. All under 210 lines.
 
 - [x] **INFRA-006** — response.json() on 204 No Content
   - Files: `packages/api-client/src/index.ts`
@@ -535,10 +538,11 @@
   - Test: `npx tsc --noEmit`; reasoned check
   - **Done:** Merged two useMemo into single pass.
 
-- [ ] **MB-025** — BotSettingsScreen 676 lines; LLM_MODELS duplicated
+- [x] **MB-025** — BotSettingsScreen 676 lines; LLM_MODELS duplicated
   - Files: `apps/mobile/src/screens/BotSettingsScreen.tsx`
   - Fix: Extract shared constant; split file
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** Extracted shared LLM_MODELS to config/llmModels.ts; removed duplicates from 2 screens.
 
 - [x] **MB-026** — Screen title "Create Boat" not "Create Bot"
   - Files: `apps/mobile/src/navigation/AppNavigator.tsx`
