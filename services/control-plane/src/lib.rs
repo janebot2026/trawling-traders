@@ -14,7 +14,6 @@ pub mod handlers {
     pub mod presets;
     pub mod reports;
     pub mod settings;
-    pub mod simulate;
     pub mod sync;
 }
 pub mod alerting;

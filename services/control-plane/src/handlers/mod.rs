@@ -6,5 +6,4 @@ pub mod docs;
 pub mod openclaw_config;
 pub mod presets;
 pub mod settings;
-pub mod simulate;
 pub mod sync;
