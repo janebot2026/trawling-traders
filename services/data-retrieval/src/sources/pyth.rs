@@ -251,10 +251,8 @@ impl PythClient {
             return Ok(HashMap::new());
         }
 
-        let mut url = format!("{}/updates/price/latest?", self.base_url);
-        for id in &feed_ids {
-            url.push_str(&format!("ids[]={}&", id));
-        }
+        let params: Vec<String> = feed_ids.iter().map(|id| format!("ids[]={}", id)).collect();
+        let url = format!("{}/updates/price/latest?{}", self.base_url, params.join("&"));
 
         let response = self
             .client
@@ -279,7 +277,12 @@ impl PythClient {
         for parsed in update.parsed {
             if let Some(symbol) = id_to_symbol.get(parsed.id.as_str()) {
                 let price_int: i64 = parsed.price.price.parse()?;
-                let price_f64 = (price_int as f64) * 10f64.powi(parsed.price.expo);
+                let expo = parsed.price.expo;
+                let price_decimal = if expo >= 0 {
+                    Decimal::from(price_int) * Decimal::from(10i64.pow(expo as u32))
+                } else {
+                    Decimal::from(price_int) / Decimal::from(10i64.pow((-expo) as u32))
+                };
 
                 let timestamp =
                     DateTime::from_timestamp(parsed.price.publish_time, 0).unwrap_or_else(Utc::now);
@@ -288,8 +291,7 @@ impl PythClient {
                     symbol.to_string(),
                     PricePoint {
                         symbol: symbol.to_string(),
-                        price: Decimal::try_from(price_f64)
-                            .map_err(|e| anyhow::anyhow!("Failed to convert price: {}", e))?,
+                        price: price_decimal,
                         source: "pyth".to_string(),
                         timestamp,
                         confidence: None,
@@ -381,9 +383,9 @@ mod tests {
     #[test]
     fn test_exponent_calculation() {
         // Pyth example: price="122500000", expo=-8 means $1.225
-        let price_int: i64 = 122500000;
-        let expo = -8;
-        let price = (price_int as f64) * 10f64.powi(expo);
-        assert!((price - 1.225).abs() < 0.0001);
+        let price_int: i64 = 122_500_000;
+        let expo: i32 = -8;
+        let price = Decimal::from(price_int) / Decimal::from(10i64.pow((-expo) as u32));
+        assert_eq!(price, Decimal::new(1225, 3)); // $1.225 exactly
     }
 }
