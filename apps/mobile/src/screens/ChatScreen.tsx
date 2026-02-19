@@ -37,18 +37,23 @@ export function ChatScreen() {
     try {
       const response = await api.bot.listBots();
       setBots(response.bots);
-      if (!selectedBotId && response.bots.length > 0) {
-        setSelectedBotId(response.bots[0].id);
-      }
-      if (response.bots.length === 0) {
-        setSelectedBotId(null);
-      }
+      // Use functional update to read current selectedBotId without adding it
+      // to the dependency array, which would cause a refetch on every selection.
+      setSelectedBotId((current) => {
+        if (!current && response.bots.length > 0) {
+          return response.bots[0].id;
+        }
+        if (response.bots.length === 0) {
+          return null;
+        }
+        return current;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load bots');
     } finally {
       setIsLoadingBots(false);
     }
-  }, [selectedBotId]);
+  }, []);
 
   const loadMessages = useCallback(async (botId: string) => {
     setIsLoadingMessages(true);
