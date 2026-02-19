@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -21,20 +21,22 @@ export default function App() {
   });
   const [payConfig, setPayConfig] = useState<CedrosPayConfig | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
+  const payConfigSeqRef = useRef(0);
 
   const loadPayConfig = React.useCallback(() => {
-    let cancelled = false;
+    const seq = ++payConfigSeqRef.current;
     setConfigError(null);
     fetchCedrosPayConfig()
       .then((config) => {
-        if (!cancelled) setPayConfig(config);
+        if (seq === payConfigSeqRef.current) setPayConfig(config);
       })
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
-        if (!cancelled) setConfigError(message);
+        if (seq === payConfigSeqRef.current) setConfigError(message);
       });
     return () => {
-      cancelled = true;
+      // Invalidate this attempt so its result is ignored if a newer one is in-flight
+      payConfigSeqRef.current = seq + 1;
     };
   }, []);
 
