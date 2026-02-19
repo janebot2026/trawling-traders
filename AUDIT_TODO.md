@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 1 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 2 | **Deferred:** 5
 
 ---
 
@@ -12,10 +12,11 @@
   - Test: Reasoned check — ownership guard prevents cross-user access; `cargo check`
   - **Done:** Added `Extension(auth): Extension<AuthContext>` + ownership check to both get/update handlers. `cargo check` clean.
 
-- [ ] **CP-002** — Infinite cleanup loop (status set back to 'destroying')
+- [x] **CP-002** — Infinite cleanup loop (status set back to 'destroying')
   - Files: `services/control-plane/src/provisioning.rs:403-409`
   - Fix: Change `status = 'destroying'` to `status = 'error'` in cleanup query
   - Test: `cargo check`; reasoned check — terminal state breaks loop
+  - **Done:** Changed status to 'error' — a terminal state that won't be re-picked by the cleanup scanner.
 
 - [ ] **DR-001** — Route shadowing (`/prices/supported` unreachable)
   - Files: `services/data-retrieval/src/main.rs:73-79`

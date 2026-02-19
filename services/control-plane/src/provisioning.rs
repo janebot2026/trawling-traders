@@ -400,9 +400,9 @@ pub async fn cleanup_orphaned_bot(
                 }
             }
 
-            // Mark bot as fully destroyed (or delete it)
+            // Mark bot as terminal error state (not 'destroying' which would re-trigger cleanup)
             sqlx::query(
-                "UPDATE bots SET status = 'destroying', droplet_id = NULL, updated_at = NOW() WHERE id = $1"
+                "UPDATE bots SET status = 'error', droplet_id = NULL, updated_at = NOW() WHERE id = $1"
             )
             .bind(bot_id)
             .execute(&mut *tx)
