@@ -1,6 +1,8 @@
 .PHONY: all help setup dev db migrate check test clean stop status logs logs-data logs-control logs-mobile mobile-liveapi
 
 # Default target - runs everything
+# NOTE: This target requires interactive input (tmux attach). It is not
+# suitable for CI or non-interactive shells.
 all: setup db migrate dev-tmux
 
 # Colors for output
@@ -58,7 +60,7 @@ db: ## Start PostgreSQL database (Docker)
 
 migrate: ## Run database migrations
 	@echo "$(BLUE)🔄 Running migrations...$(RESET)"
-	cd services/control-plane && cargo sqlx migrate run --database-url postgres://postgres:postgres@localhost:5432/trawling_traders
+	cd services/control-plane && cargo sqlx migrate run --database-url $${DATABASE_URL:-postgres://postgres:postgres@localhost/trawling_traders}
 	@echo "$(GREEN)✓ Migrations complete$(RESET)"
 
 dev: ## Show service startup commands
