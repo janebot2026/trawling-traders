@@ -772,5 +772,4 @@ export const api = {
   data: dataApi,
 };
 
-export { configureApi } from './config';
 export default api;

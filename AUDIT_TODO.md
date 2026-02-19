@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 15 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 16 | **Deferred:** 5
 
 ---
 
@@ -107,10 +107,11 @@
   - Fix: Drop `price_tx` on disconnect so `rx.recv()` returns `None`
   - Test: `cargo check`; reasoned check
 
-- [ ] **INFRA-001** — configureApi() writes to unused global
-  - Files: `packages/api-client/src/index.ts`, `packages/api-client/src/config.ts`
-  - Fix: Remove dead `configureApi` or wire into actual API calls
+- [x] **INFRA-001** — configureApi() writes to unused global
+  - Files: `packages/api-client/src/index.ts`, `packages/api-client/src/config.ts`, `apps/mobile/src/api/ApiProvider.tsx`
+  - Fix: Removed dead configureApi function, global state, export, and call site
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** Removed configureApi, getConfig, and globalConfig from config.ts; removed export and call site in ApiProvider.tsx.
 
 - [ ] **INFRA-002** — TS enum kebab-case vs Postgres snake_case mismatch
   - Files: `packages/types/src/index.ts`
