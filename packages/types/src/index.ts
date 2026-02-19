@@ -54,8 +54,7 @@ export type LlmModel =
   | 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4-turbo'  // OpenAI
   | 'claude-3-5-sonnet' | 'claude-3-opus' | 'claude-3-haiku'  // Anthropic
   | 'llama-3.1-405b'  // Venice
-  | 'auto'  // OpenRouter auto-select
-  | string; // Custom model string
+  | 'auto';  // OpenRouter auto-select
 
 // Bot configuration (what user sets)
 export interface BotConfig {
@@ -99,6 +98,12 @@ export interface BotConfig {
   // Secrets (encrypted server-side)
   llmProvider: LlmProvider;
   llmModel?: LlmModel;
+  /**
+   * LLM API key for the selected provider.
+   * Format varies by provider: OpenAI keys start with "sk-", Anthropic with "sk-ant-",
+   * Venice/OpenRouter use opaque bearer tokens.
+   * Encrypted at rest (AES-256-GCM) on the server; transmitted only over TLS.
+   */
   llmApiKey: string;
 }
 
