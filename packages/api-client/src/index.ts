@@ -239,6 +239,11 @@ async function fetchApi(
     }
   }
 
+  // 204 No Content and 205 Reset Content carry no body — skip JSON parsing
+  if (response.status === 204 || response.status === 205) {
+    return undefined;
+  }
+
   return response.json();
 }
 

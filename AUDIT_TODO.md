@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 16 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 17 | **Deferred:** 5
 
 ---
 
@@ -351,10 +351,11 @@
   - Fix: Split into modules
   - Test: `npx tsc --noEmit`; reasoned check
 
-- [ ] **INFRA-006** — response.json() on 204 No Content
+- [x] **INFRA-006** — response.json() on 204 No Content
   - Files: `packages/api-client/src/index.ts`
-  - Fix: Check status code before parsing JSON
+  - Fix: Return undefined for 204/205 status before calling response.json()
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** Added early return for 204/205 status codes.
 
 - [ ] **INFRA-007** — Secrets could leak via error messages
   - Files: `packages/api-client/src/index.ts`
