@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 2 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 3 | **Deferred:** 5
 
 ---
 
@@ -18,10 +18,11 @@
   - Test: `cargo check`; reasoned check — terminal state breaks loop
   - **Done:** Changed status to 'error' — a terminal state that won't be re-picked by the cleanup scanner.
 
-- [ ] **DR-001** — Route shadowing (`/prices/supported` unreachable)
+- [x] **DR-001** — Route shadowing (`/prices/supported` unreachable)
   - Files: `services/data-retrieval/src/main.rs:73-79`
   - Fix: Move static routes (`/prices/batch`, `/prices/supported`) before `/:symbol` param route
   - Test: `cargo check`; reasoned check — Axum matches first route
+  - **Done:** Reordered routes — `/prices/batch` and `/prices/supported` now precede `/prices/{symbol}`.
 
 - [ ] **INFRA-011** — Docker password via CLI flag; SSH action unpinned
   - Files: `.github/workflows/deploy.yml`

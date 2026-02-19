@@ -68,15 +68,15 @@ async fn main() -> anyhow::Result<()> {
         pyth_client,
     });
 
-    // Build router
+    // Build router — static routes must come before parameterized `{symbol}` to avoid shadowing
     let app = Router::new()
-        .route("/prices/{symbol}", get(handlers::get_price))
-        .route("/prices", get(handlers::get_price))
         .route(
             "/prices/batch",
             axum::routing::post(handlers::get_prices_batch),
         )
         .route("/prices/supported", get(handlers::get_supported_symbols))
+        .route("/prices/{symbol}", get(handlers::get_price))
+        .route("/prices", get(handlers::get_price))
         .route("/health", get(handlers::health_check))
         .layer(CorsLayer::new().allow_origin(Any))
         .layer(TraceLayer::new_for_http())
