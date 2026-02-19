@@ -78,7 +78,10 @@ export function AccountSettings({ settings, onSave }: AccountSettingsProps) {
       await requestPasswordReset(email);
       Alert.alert('Password Reset Sent', `We sent reset instructions to ${email}.`);
     } catch (err) {
-      Alert.alert('Reset Failed', err instanceof Error ? err.message : 'Could not send reset email');
+      if (__DEV__) {
+        console.warn('Password reset failed:', err instanceof Error ? err.message : err);
+      }
+      Alert.alert('Reset Failed', 'Could not send the reset email. Please try again later.');
     } finally {
       setIsResettingPassword(false);
     }
