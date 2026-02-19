@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 34 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 35 | **Deferred:** 5
 
 ---
 
@@ -447,10 +447,11 @@
   - Fix: Consolidate into single effect
   - Test: `npx tsc --noEmit`; reasoned check
 
-- [ ] **MB-013** — Payment errors logged to console in production
+- [x] **MB-013** — Payment errors logged to console in production
   - Files: `apps/mobile/src/screens/SubscribeScreen.tsx`
-  - Fix: Guard with `__DEV__` check
+  - Fix: Wrapped console.error in __DEV__ guard
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** Production builds no longer log payment errors to console.
 
 - [ ] **MB-014** — Raw server error shown to user
   - Files: `apps/mobile/src/screens/settings/AccountSettings.tsx`

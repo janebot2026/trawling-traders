@@ -28,7 +28,9 @@ export function SubscribeScreen() {
   };
 
   const handleSubscribeError = (error: string) => {
-    console.error('Subscription error:', error);
+    if (__DEV__) {
+      console.error('Subscription error:', error);
+    }
   };
 
   return (
