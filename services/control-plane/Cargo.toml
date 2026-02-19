@@ -70,6 +70,7 @@ sha2 = "0.10"
 # DigitalOcean provisioning - SQLx 0.8 compatible
 claw-spawn = "0.1.2"
 rand = "0.8"
+futures = "0.3"
 
 # Shared types
 data-retrieval = { path = "../data-retrieval" }

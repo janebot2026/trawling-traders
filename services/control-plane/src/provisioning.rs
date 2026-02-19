@@ -2,6 +2,7 @@
 //!
 //! Provides retry logic with exponential backoff, circuit breaker, and orphan cleanup.
 
+use futures::FutureExt as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -98,12 +99,16 @@ pub enum CircuitState {
 }
 
 /// Circuit breaker for DO API calls
-/// Prevents cascade failures by stopping requests after threshold
+/// Prevents cascade failures by stopping requests after threshold.
+/// Failures are counted within a sliding time window; the counter resets
+/// when the window elapses without reaching the threshold.
 #[derive(Clone)]
 pub struct CircuitBreaker {
     state: Arc<RwLock<CircuitState>>,
     failure_count: Arc<RwLock<u32>>,
     last_failure_time: Arc<RwLock<Option<Instant>>>,
+    /// Start of the current failure counting window
+    window_start: Arc<RwLock<Option<Instant>>>,
     config: CircuitConfig,
 }
 
@@ -133,6 +138,7 @@ impl CircuitBreaker {
             state: Arc::new(RwLock::new(CircuitState::Closed)),
             failure_count: Arc::new(RwLock::new(0)),
             last_failure_time: Arc::new(RwLock::new(None)),
+            window_start: Arc::new(RwLock::new(None)),
             config,
         }
     }
@@ -176,19 +182,40 @@ impl CircuitBreaker {
             let mut count = self.failure_count.write().await;
             *count = 0;
 
+            let mut window = self.window_start.write().await;
+            *window = None;
+
             info!("Circuit breaker closed - service recovered");
         }
     }
 
     /// Record a failure
+    ///
+    /// Failures are counted within a time window. If the window has elapsed
+    /// since the first failure in the current batch, the counter resets.
     pub async fn record_failure(&self) {
-        let mut count = self.failure_count.write().await;
-        *count += 1;
+        let now = Instant::now();
+        let window_duration = Duration::from_secs(self.config.failure_window_secs);
 
+        let mut count = self.failure_count.write().await;
+        let mut window = self.window_start.write().await;
+
+        // Reset counter if the failure window has elapsed
+        if let Some(start) = *window {
+            if now.duration_since(start) > window_duration {
+                *count = 0;
+                *window = Some(now);
+                debug!("Circuit breaker failure window elapsed, resetting counter");
+            }
+        } else {
+            *window = Some(now);
+        }
+
+        *count += 1;
         let current_count = *count;
 
         let mut last = self.last_failure_time.write().await;
-        *last = Some(Instant::now());
+        *last = Some(now);
 
         // Check if we should open the circuit
         if current_count >= self.config.failure_threshold {
@@ -217,6 +244,9 @@ impl CircuitBreaker {
 
         let mut count = self.failure_count.write().await;
         *count = 0;
+
+        let mut window = self.window_start.write().await;
+        *window = None;
 
         info!("Circuit breaker manually reset to closed");
     }
@@ -360,16 +390,16 @@ pub async fn cleanup_orphaned_bot(
 
             // If we have a droplet_id, try to destroy it
             if let Some(did) = current_droplet_id {
-                if let Some(do_token) =
-                    config::get_config_decrypted(pool, secrets, keys::DIGITALOCEAN_TOKEN).await
-                {
-                    if !do_token.is_empty() {
+                match config::get_config_decrypted(pool, secrets, keys::DIGITALOCEAN_TOKEN).await {
+                    Ok(Some(do_token)) if !do_token.is_empty() => {
                         if let Ok(client) =
                             claw_spawn::infrastructure::DigitalOceanClient::new(do_token)
                         {
                             let _ = client.destroy_droplet(did).await;
                         }
                     }
+                    Err(e) => warn!("Failed to read DO token for orphan cleanup: {}", e),
+                    _ => {}
                 }
             }
 
@@ -387,16 +417,16 @@ pub async fn cleanup_orphaned_bot(
 
             // Try to destroy droplet if exists
             if let Some(did) = current_droplet_id {
-                if let Some(do_token) =
-                    config::get_config_decrypted(pool, secrets, keys::DIGITALOCEAN_TOKEN).await
-                {
-                    if !do_token.is_empty() {
+                match config::get_config_decrypted(pool, secrets, keys::DIGITALOCEAN_TOKEN).await {
+                    Ok(Some(do_token)) if !do_token.is_empty() => {
                         if let Ok(client) =
                             claw_spawn::infrastructure::DigitalOceanClient::new(do_token)
                         {
                             let _ = client.destroy_droplet(did).await;
                         }
                     }
+                    Err(e) => warn!("Failed to read DO token for destroy cleanup: {}", e),
+                    _ => {}
                 }
             }
 
@@ -417,7 +447,10 @@ pub async fn cleanup_orphaned_bot(
     Ok(())
 }
 
-/// Spawn a background task to periodically clean up orphaned bots
+/// Spawn a background task to periodically clean up orphaned bots.
+///
+/// Wraps the inner loop body in `catch_unwind` so that a panic restarts the task
+/// after a brief back-off rather than silently killing the background worker.
 pub fn spawn_cleanup_task(pool: sqlx::PgPool, secrets: crate::SecretsManager) {
     tokio::spawn(async move {
         let config = CleanupConfig::default();
@@ -426,19 +459,46 @@ pub fn spawn_cleanup_task(pool: sqlx::PgPool, secrets: crate::SecretsManager) {
         loop {
             interval.tick().await;
 
-            match find_orphaned_bots(&pool, &config).await {
-                Ok(orphans) => {
-                    for (bot_id, status, droplet_id) in orphans {
-                        if let Err(e) =
-                            cleanup_orphaned_bot(bot_id, &status, droplet_id, &pool, &secrets).await
-                        {
-                            error!("Failed to cleanup orphaned bot {}: {}", bot_id, e);
+            let pool_ref = &pool;
+            let secrets_ref = &secrets;
+            let config_ref = &config;
+
+            let tick_result = std::panic::AssertUnwindSafe(async move {
+                match find_orphaned_bots(pool_ref, config_ref).await {
+                    Ok(orphans) => {
+                        for (bot_id, status, droplet_id) in orphans {
+                            if let Err(e) = cleanup_orphaned_bot(
+                                bot_id,
+                                &status,
+                                droplet_id,
+                                pool_ref,
+                                secrets_ref,
+                            )
+                            .await
+                            {
+                                error!("Failed to cleanup orphaned bot {}: {}", bot_id, e);
+                            }
                         }
                     }
+                    Err(e) => {
+                        error!("Failed to find orphaned bots: {}", e);
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to find orphaned bots: {}", e);
-                }
+            })
+            .catch_unwind()
+            .await;
+
+            if let Err(panic_payload) = tick_result {
+                let msg = panic_payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("<non-string panic>");
+                error!(
+                    "cleanup_task panicked: {}. Sleeping 5s before next tick.",
+                    msg
+                );
+                sleep(Duration::from_secs(5)).await;
             }
         }
     });
@@ -500,7 +560,9 @@ async fn cleanup_old_data(
     Ok((events_deleted, metrics_deleted))
 }
 
-/// Spawn a background task to periodically clean up old events and metrics
+/// Spawn a background task to periodically clean up old events and metrics.
+///
+/// Wraps each tick in `catch_unwind` to survive panics and restart automatically.
 pub fn spawn_data_retention_task(pool: sqlx::PgPool) {
     tokio::spawn(async move {
         let config = DataRetentionConfig::default();
@@ -510,8 +572,31 @@ pub fn spawn_data_retention_task(pool: sqlx::PgPool) {
         loop {
             interval.tick().await;
 
-            if let Err(e) = cleanup_old_data(&pool, &config).await {
-                error!("Data retention cleanup failed: {}", e);
+            let pool_ref = &pool;
+            let config_ref = &config;
+
+            let tick_result =
+                std::panic::AssertUnwindSafe(async move { cleanup_old_data(pool_ref, config_ref).await })
+                    .catch_unwind()
+                    .await;
+
+            match tick_result {
+                Ok(Err(e)) => {
+                    error!("Data retention cleanup failed: {}", e);
+                }
+                Err(panic_payload) => {
+                    let msg = panic_payload
+                        .downcast_ref::<&str>()
+                        .copied()
+                        .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
+                        .unwrap_or("<non-string panic>");
+                    error!(
+                        "data_retention_task panicked: {}. Sleeping 5s before next tick.",
+                        msg
+                    );
+                    sleep(Duration::from_secs(5)).await;
+                }
+                Ok(Ok(_)) => {}
             }
         }
     });

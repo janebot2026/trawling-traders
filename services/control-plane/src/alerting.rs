@@ -420,55 +420,78 @@ impl AlertManager {
     }
 }
 
-/// Spawn a background task to periodically check for offline bots
+/// Spawn a background task to periodically check for offline bots.
+///
+/// Wraps each tick in `catch_unwind` so a panic in bot-checking logic restarts
+/// the task rather than silently terminating the offline-alert system.
 pub fn spawn_offline_checker(pool: sqlx::PgPool, alert_manager: AlertManager) {
+    use futures::FutureExt as _;
+
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
 
         loop {
             interval.tick().await;
 
-            // Find bots that haven't heartbeated recently
-            let bots =
-                sqlx::query_as::<_, (uuid::Uuid, Option<chrono::DateTime<chrono::Utc>>, String)>(
+            let pool_ref = &pool;
+            let am_ref = &alert_manager;
+
+            let tick_result = std::panic::AssertUnwindSafe(async move {
+                // Find bots that haven't heartbeated recently
+                let bots = sqlx::query_as::<
+                    _,
+                    (uuid::Uuid, Option<chrono::DateTime<chrono::Utc>>, String),
+                >(
                     "SELECT id, last_heartbeat_at, status FROM bots WHERE status = 'online'",
                 )
-                .fetch_all(&pool)
+                .fetch_all(pool_ref)
                 .await;
 
-            match bots {
-                Ok(bots) => {
-                    for (bot_id, last_hb, _status) in bots {
-                        // Bots that have never heartbeated (NULL) are also offline.
-                        // check_bot_offline only fires when last_hb is Some, so we
-                        // synthesise an alert directly for the never-heartbeated case.
-                        let alert = if last_hb.is_none() {
-                            let key = format!("offline:{}", bot_id);
-                            if alert_manager.should_fire(&key, 900).await {
-                                alert_manager.record_fired(key).await;
-                                Some(AlertType::BotOffline {
-                                    bot_id: bot_id.to_string(),
-                                    last_heartbeat: None,
-                                })
+                match bots {
+                    Ok(bots) => {
+                        for (bot_id, last_hb, _status) in bots {
+                            // Bots that have never heartbeated (NULL) are also offline.
+                            // check_bot_offline only fires when last_hb is Some, so we
+                            // synthesise an alert directly for the never-heartbeated case.
+                            let alert = if last_hb.is_none() {
+                                let key = format!("offline:{}", bot_id);
+                                if am_ref.should_fire(&key, 900).await {
+                                    am_ref.record_fired(key).await;
+                                    Some(AlertType::BotOffline {
+                                        bot_id: bot_id.to_string(),
+                                        last_heartbeat: None,
+                                    })
+                                } else {
+                                    None
+                                }
                             } else {
-                                None
-                            }
-                        } else {
-                            alert_manager
-                                .check_bot_offline(&bot_id.to_string(), last_hb)
-                                .await
-                        };
+                                am_ref.check_bot_offline(&bot_id.to_string(), last_hb).await
+                            };
 
-                        if let Some(alert) = alert {
-                            alert_manager
-                                .fire_alert(&alert, AlertSeverity::Warning)
-                                .await;
+                            if let Some(alert) = alert {
+                                am_ref.fire_alert(&alert, AlertSeverity::Warning).await;
+                            }
                         }
                     }
+                    Err(e) => {
+                        error!("Failed to check offline bots: {}", e);
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to check offline bots: {}", e);
-                }
+            })
+            .catch_unwind()
+            .await;
+
+            if let Err(panic_payload) = tick_result {
+                let msg = panic_payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("<non-string panic>");
+                error!(
+                    "offline_checker panicked: {}. Sleeping 5s before next tick.",
+                    msg
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         }
     });
