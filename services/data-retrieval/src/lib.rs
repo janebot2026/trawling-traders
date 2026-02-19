@@ -4,9 +4,7 @@ pub mod sources {
     pub mod coingecko;
     pub mod pyth;
 }
-pub mod aggregators;
 pub mod cache;
-pub mod normalizers;
 
 pub use sources::binance_ws::BinanceWebSocketClient;
 pub use sources::coingecko::CoinGeckoClient;
@@ -18,14 +16,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
-
-/// Helper to reconnect WebSocket client
-///
-/// Delegates to client.reconnect() which uses interior mutability
-/// to replace the connection and resubscribe to streams.
-async fn reconnect_ws(client: &Arc<BinanceWebSocketClient>) -> Result<()> {
-    client.reconnect().await
-}
 
 /// Maximum number of symbols in the price cache (prevent unbounded growth)
 const MAX_CACHE_SIZE: usize = 10000;
@@ -67,7 +57,7 @@ impl AssetClass {
         }
 
         // Metals
-        if ["ORO", "XAU", "XAG"].contains(&sym.as_str()) {
+        if ["XAU", "XAG"].contains(&sym.as_str()) {
             return AssetClass::Metal;
         }
 
@@ -153,8 +143,7 @@ impl PriceAggregator {
                         // Clone the source for reconnection (need mutable access)
                         // Note: reconnect() requires &mut self, so we work around via interior mutability
                         // The reconnect method already handles this internally via Arc<Mutex>
-                        let source_clone = Arc::clone(&source);
-                        match reconnect_ws(&source_clone).await {
+                        match source.reconnect().await {
                             Ok(()) => {
                                 info!("WebSocket reconnected successfully");
                                 reconnect_delay_secs = 1; // Reset backoff on success
