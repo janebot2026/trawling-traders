@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 7 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 8 | **Deferred:** 5
 
 ---
 
@@ -50,10 +50,11 @@
   - Test: `cargo check`; reasoned check
   - **Done:** Added match guard — returns default (no trade) with warning on zero/overflow.
 
-- [ ] **BR-007** — SIGTERM not handled (no graceful shutdown)
+- [x] **BR-007** — SIGTERM not handled (no graceful shutdown)
   - Files: `services/bot-runner/src/runner.rs`
-  - Fix: Add `tokio::signal::ctrl_c()` and SIGTERM handler in main loop
+  - Fix: Add SIGTERM handler in main select! loop
   - Test: `cargo check`; reasoned check
+  - **Done:** Added cross-platform SigtermReceiver struct + SIGTERM branch in select! loop.
 
 - [ ] **CP-003** — Bot marked 'online' when droplet created (not running)
   - Files: `services/control-plane/src/handlers/bots.rs`

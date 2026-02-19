@@ -26,6 +26,33 @@ use crate::types::{
     RiskRails, RunnerState, RunnerStatus, TradeAction, TradeEvent,
 };
 
+/// SIGTERM signal receiver for cross-platform graceful shutdown
+struct SigtermReceiver {
+    #[cfg(unix)]
+    inner: signal::unix::Signal,
+}
+
+impl SigtermReceiver {
+    async fn recv(&mut self) {
+        #[cfg(unix)]
+        {
+            self.inner.recv().await;
+        }
+        #[cfg(not(unix))]
+        {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+fn create_sigterm_future() -> SigtermReceiver {
+    SigtermReceiver {
+        #[cfg(unix)]
+        inner: signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to register SIGTERM handler"),
+    }
+}
+
 /// State directory for runner files
 const DEFAULT_STATE_DIR: &str = "/opt/bot-runner/state";
 
@@ -152,12 +179,19 @@ impl BotRunner {
         reconcile_interval: &mut tokio::time::Interval,
         cleanup_interval: &mut tokio::time::Interval,
     ) -> String {
+        let mut sigterm = create_sigterm_future();
+
         loop {
             tokio::select! {
                 // Handle SIGINT (Ctrl+C)
                 _ = signal::ctrl_c() => {
                     info!("Received SIGINT, initiating graceful shutdown...");
                     return "SIGINT".to_string();
+                }
+                // Handle SIGTERM (Docker/K8s stop)
+                _ = sigterm.recv() => {
+                    info!("Received SIGTERM, initiating graceful shutdown...");
+                    return "SIGTERM".to_string();
                 }
                 _ = config_interval.tick() => {
                     if let Err(e) = self.poll_config().await {
