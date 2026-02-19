@@ -67,7 +67,7 @@ impl BinanceWebSocketClient {
         };
 
         // Spawn message handler and store the handle
-        let client_clone = client.clone();
+        let client_clone = client.clone_state();
         let handle = tokio::spawn(async move {
             client_clone.message_handler().await;
         });
@@ -76,8 +76,13 @@ impl BinanceWebSocketClient {
         Ok(client)
     }
 
-    /// Clone for spawning tasks
-    fn clone(&self) -> Self {
+    /// Clone all Arc fields for spawning tasks.
+    ///
+    /// DR-019: Renamed from `clone` to `clone_state` to avoid shadowing the `Clone`
+    /// trait method.  `BinanceWebSocketClient` intentionally does not implement `Clone`
+    /// because the type holds interior-mutable WebSocket streams; this helper is an
+    /// explicit, in-module-only operation.
+    fn clone_state(&self) -> Self {
         Self {
             ws_sink: Arc::clone(&self.ws_sink),
             ws_reader: Arc::clone(&self.ws_reader),
@@ -359,7 +364,7 @@ impl BinanceWebSocketClient {
         }
 
         // Restart message handler and store the new handle
-        let client_clone = self.clone();
+        let client_clone = self.clone_state();
         let handle = tokio::spawn(async move {
             client_clone.message_handler().await;
         });
