@@ -231,11 +231,10 @@ impl BotRunner {
                         config.version, config.version_id
                     );
 
-                    // Acknowledge config
-                    self.client.ack_config(config.version_id).await?;
-
-                    // Apply new config
+                    // Apply first, then ack — avoids silent mismatch if apply fails
+                    let version_id = config.version_id;
                     self.apply_config(config).await?;
+                    self.client.ack_config(version_id).await?;
                 }
             }
             None => {

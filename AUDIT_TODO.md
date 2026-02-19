@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 5 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 6 | **Deferred:** 5
 
 ---
 
@@ -38,10 +38,11 @@
   - Test: `cargo check`; reasoned check
   - **Done:** Added `self.trade_count = 0` alongside PnL reset. Also added trade_count to the log message.
 
-- [ ] **BR-003** — Config acked before apply_config succeeds
+- [x] **BR-003** — Config acked before apply_config succeeds
   - Files: `services/bot-runner/src/runner.rs`
   - Fix: Swap order — call `apply_config` first, then `ack_config` on success
   - Test: `cargo check`; reasoned check
+  - **Done:** Saved version_id before move, then apply first, ack on success only.
 
 - [ ] **BR-004** — USD-to-raw overflow silently produces zero-value trade
   - Files: `services/bot-runner/src/runner.rs`
