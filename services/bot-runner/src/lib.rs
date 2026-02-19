@@ -41,7 +41,6 @@ pub use intent::{IntentRegistry, TradeIntent, TradeIntentState};
 pub use openclaw::OpenClawClient;
 pub use portfolio::{Portfolio, PortfolioSnapshot, Position};
 pub use runner::BotRunner;
-pub mod state;
 pub use types::{
     DecisionContext, DecisionJournalEntry, DecisionPlan, GatewayHealth, Holding,
     IntentValidation, LastTradeOutcome, OpenClawIntent, PriceQuote, RiskRails, RunnerState,
