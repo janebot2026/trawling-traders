@@ -439,10 +439,27 @@ pub fn spawn_offline_checker(pool: sqlx::PgPool, alert_manager: AlertManager) {
             match bots {
                 Ok(bots) => {
                     for (bot_id, last_hb, _status) in bots {
-                        if let Some(alert) = alert_manager
-                            .check_bot_offline(&bot_id.to_string(), last_hb)
-                            .await
-                        {
+                        // Bots that have never heartbeated (NULL) are also offline.
+                        // check_bot_offline only fires when last_hb is Some, so we
+                        // synthesise an alert directly for the never-heartbeated case.
+                        let alert = if last_hb.is_none() {
+                            let key = format!("offline:{}", bot_id);
+                            if alert_manager.should_fire(&key, 900).await {
+                                alert_manager.record_fired(key).await;
+                                Some(AlertType::BotOffline {
+                                    bot_id: bot_id.to_string(),
+                                    last_heartbeat: None,
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            alert_manager
+                                .check_bot_offline(&bot_id.to_string(), last_hb)
+                                .await
+                        };
+
+                        if let Some(alert) = alert {
                             alert_manager
                                 .fire_alert(&alert, AlertSeverity::Warning)
                                 .await;

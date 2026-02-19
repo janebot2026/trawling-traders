@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 25 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 26 | **Deferred:** 5
 
 ---
 
@@ -228,10 +228,11 @@
   - Fix: Wrap spawned tasks with panic supervision loop
   - Test: `cargo check`; reasoned check
 
-- [ ] **CP-014** — Offline checker skips bots with NULL last_heartbeat_at
+- [x] **CP-014** — Offline checker skips bots with NULL last_heartbeat_at
   - Files: `services/control-plane/src/alerting.rs`
-  - Fix: Include bots with NULL heartbeat in 'online' status
+  - Fix: Handle NULL heartbeat case for bots in 'online' status
   - Test: `cargo check`; reasoned check
+  - **Done:** Added branch for NULL heartbeat — fires alert immediately for online bots that never sent one.
 
 - [ ] **CP-015** — csv_escape doesn't handle `\r` (CSV injection)
   - Files: `services/control-plane/src/handlers/reports.rs`
