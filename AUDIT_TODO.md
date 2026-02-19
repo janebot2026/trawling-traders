@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 8 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 9 | **Deferred:** 5
 
 ---
 
@@ -56,10 +56,11 @@
   - Test: `cargo check`; reasoned check
   - **Done:** Added cross-platform SigtermReceiver struct + SIGTERM branch in select! loop.
 
-- [ ] **CP-003** — Bot marked 'online' when droplet created (not running)
+- [x] **CP-003** — Bot marked 'online' when droplet created (not running)
   - Files: `services/control-plane/src/handlers/bots.rs`
   - Fix: Remove premature status update; bot goes online on first heartbeat
   - Test: `cargo check`; reasoned check
+  - **Done:** Removed `status = 'online'` from droplet creation update. Bot stays 'provisioning' until heartbeat.
 
 - [ ] **CP-004** — config_versions INSERT uses Uuid::nil() as bot_id
   - Files: `services/control-plane/src/handlers/bots.rs`

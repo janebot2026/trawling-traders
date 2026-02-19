@@ -716,9 +716,9 @@ async fn spawn_bot_droplet(
                 bot_id, droplet.name, droplet.id
             );
 
-            // Update bot with droplet_id
+            // Update bot with droplet_id (status stays 'provisioning' — goes 'online' on first heartbeat)
             if let Err(e) = sqlx::query(
-                "UPDATE bots SET droplet_id = $1, status = 'online', updated_at = NOW() WHERE id = $2"
+                "UPDATE bots SET droplet_id = $1, updated_at = NOW() WHERE id = $2"
             )
             .bind(droplet.id)
             .bind(bot_id)
