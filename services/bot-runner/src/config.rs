@@ -74,6 +74,7 @@ pub struct BotConfig {
     pub execution: ExecutionConfig,
     pub llm_provider: String,
     pub llm_model: String,
+    #[serde(skip_serializing)]
     pub llm_api_key: String,
     /// Telegram bot token (if enabled)
     pub telegram_bot_token: Option<String>,
