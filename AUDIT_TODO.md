@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 29 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 30 | **Deferred:** 5
 
 ---
 
@@ -142,10 +142,11 @@
   - Fix: Add cleanup/cancel on unmount
   - Test: `npx tsc --noEmit`; reasoned check
 
-- [ ] **MB-003** — onRefresh doesn't await loadData
+- [x] **MB-003** — onRefresh doesn't await loadData
   - Files: `apps/mobile/src/screens/HomeOverviewScreen.tsx`
-  - Fix: Add `await` to `loadData()` call in `onRefresh`
+  - Fix: Made onRefresh async and added await
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** onRefresh now async with await loadData().
 
 - [ ] **MB-007** — BotSettings route declared but Screen not registered
   - Files: `apps/mobile/src/navigation/AppNavigator.tsx`
@@ -162,10 +163,11 @@
   - Fix: Don't send key back to client; use placeholder for display
   - Test: `npx tsc --noEmit`; reasoned check
 
-- [ ] **MB-015** — No cancellation on per-bot metric fetches (memory leak)
+- [x] **MB-015** — No cancellation on per-bot metric fetches (memory leak)
   - Files: `apps/mobile/src/screens/HomeOverviewScreen.tsx`
-  - Fix: Add AbortController cleanup in useEffect
+  - Fix: Added cancelled flag with cleanup function in useFocusEffect
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** Added cancelled flag guarding all setState calls after unmount.
 
 - [ ] **MB-016** — CHART_WIDTH computed once at module load
   - Files: `apps/mobile/src/components/PnlHistoryChart.tsx`

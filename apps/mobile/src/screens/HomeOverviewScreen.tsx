@@ -118,13 +118,89 @@ export function HomeOverviewScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadData();
-    }, [loadData])
+      let cancelled = false;
+
+      const run = async () => {
+        setError(null);
+        try {
+          const botsResponse = await api.bot.listBots();
+          if (cancelled) return;
+          setBots(botsResponse.bots);
+          setBotsLoaded(true);
+
+          if (botsResponse.bots.length === 0) return;
+
+          const [metricsByBot, eventsByBot] = await Promise.all([
+            Promise.all(
+              botsResponse.bots.map(async (bot) => {
+                try {
+                  const response = await api.bot.getMetrics(bot.id);
+                  return response.metrics.slice(-30);
+                } catch {
+                  return [];
+                }
+              })
+            ),
+            Promise.all(
+              botsResponse.bots.map(async (bot) => {
+                try {
+                  const response = await api.bot.getEvents(bot.id);
+                  return response.events;
+                } catch {
+                  return [];
+                }
+              })
+            ),
+          ]);
+
+          if (cancelled) return;
+
+          setAllMetrics(metricsByBot.flat());
+          setAllEvents(eventsByBot.flat());
+
+          const flatEvents = eventsByBot.flat();
+          const openedTrades = flatEvents.filter((e) => e.type === 'trade_opened').length;
+          const closedTrades = flatEvents.filter((e) => e.type === 'trade_closed').length;
+
+          setStats({
+            totalTrades: flatEvents.filter(
+              (e) => e.type === 'trade_opened' || e.type === 'trade_closed'
+            ).length,
+            openTrades: Math.max(openedTrades - closedTrades, 0),
+          });
+        } catch (loadErr) {
+          if (cancelled) return;
+          if (__DEV__) {
+            console.error('Overview load failed:', loadErr);
+          }
+          setBotsLoaded(true);
+          if (loadErr instanceof AuthExpiredError) {
+            setError('Session expired. Please log in again.');
+          } else if (loadErr instanceof NetworkError) {
+            setError('You appear offline. Pull to refresh.');
+          } else if (loadErr instanceof ServerError) {
+            setError(null);
+          } else {
+            setError('Unable to refresh overview right now.');
+          }
+        } finally {
+          if (!cancelled) {
+            setRefreshing(false);
+          }
+        }
+      };
+
+      run();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [])
   );
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    loadData();
+    await loadData();
   }, [loadData]);
 
   const handlePauseResume = useCallback(
