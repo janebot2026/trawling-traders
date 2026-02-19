@@ -165,12 +165,7 @@ pub async fn check_bot_name_availability(
     }))
 }
 
-/// Helper: Get bot with authorization check
-///
-/// Validates that:
-/// 1. The user_id from auth context is valid
-/// 2. The bot exists
-/// 3. The authenticated user owns the bot
+/// Parse `user_id` from auth context and delegate to the shared [`helpers::get_authorized_bot`].
 async fn get_authorized_bot(
     db: &sqlx::PgPool,
     auth: &AuthContext,
@@ -178,21 +173,7 @@ async fn get_authorized_bot(
 ) -> Result<Bot, (StatusCode, String)> {
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
-
-    let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
-        .bind(bot_id)
-        .fetch_one(db)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        })?;
-
-    if bot.user_id != user_id {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
-    }
-
-    Ok(bot)
+    super::helpers::get_authorized_bot(db, bot_id, user_id).await
 }
 
 /// GET /bots - List all bots for authenticated user
@@ -455,8 +436,10 @@ pub async fn create_bot(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // Generate secure bootstrap token for one-time secrets retrieval
-    let bootstrap_token = generate_bootstrap_token();
+    // Generate secure bootstrap token for one-time secrets retrieval.
+    // Store only the SHA-256 hash in the DB; the plaintext is embedded in user-data
+    // and sent once to the droplet at provision time.
+    let (bootstrap_token_plain, bootstrap_token_hash) = generate_bootstrap_token();
 
     let bot = sqlx::query_as::<_, Bot>(
         r#"
@@ -471,7 +454,7 @@ pub async fn create_bot(
     .bind(&normalized_name)
     .bind(resolved_persona)
     .bind(config_id)
-    .bind(&bootstrap_token)
+    .bind(&bootstrap_token_hash)
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -541,6 +524,7 @@ pub async fn create_bot(
         spawn_bot_droplet(
             bot_id,
             normalized_name.clone(),
+            bootstrap_token_plain,
             pool,
             secrets,
             metrics,
@@ -561,11 +545,15 @@ pub async fn create_bot(
 /// Spawn bot droplet on DigitalOcean using claw-spawn
 ///
 /// Uses semaphore for concurrency control (max 3 concurrent provisions)
-/// and retry with exponential backoff for DO API calls
+/// and retry with exponential backoff for DO API calls.
+///
+/// `bootstrap_token_plain` is the raw (pre-hash) token that is embedded in
+/// cloud-init user-data. The DB already holds the hash; we never re-read it here.
 #[allow(clippy::too_many_arguments)]
 async fn spawn_bot_droplet(
     bot_id: Uuid,
     bot_name: String,
+    bootstrap_token_plain: String,
     pool: Db,
     secrets: crate::SecretsManager,
     metrics: crate::MetricsCollector,
@@ -603,13 +591,18 @@ async fn spawn_bot_droplet(
     // Get DO token from platform_config (encrypted)
     let do_token =
         match config::get_config_decrypted(&pool, &secrets, keys::DIGITALOCEAN_TOKEN).await {
-            Some(token) if !token.is_empty() => token,
-            _ => {
+            Ok(Some(token)) if !token.is_empty() => token,
+            Ok(_) => {
                 warn!(
                     "digitalocean_token not configured, skipping droplet provisioning for bot {}",
                     bot_id
                 );
                 update_bot_status(&pool, bot_id, BotStatus::Error, "No DO token configured").await;
+                return;
+            }
+            Err(e) => {
+                warn!("Failed to read DO token for bot {}: {}", bot_id, e);
+                update_bot_status(&pool, bot_id, BotStatus::Error, "DO token read error").await;
                 return;
             }
         };
@@ -634,31 +627,9 @@ async fn spawn_bot_droplet(
     )
     .await;
 
-    // Fetch bot's bootstrap token from database
-    let bootstrap_token = match sqlx::query_scalar::<_, Option<String>>(
-        "SELECT bootstrap_token FROM bots WHERE id = $1",
-    )
-    .bind(bot_id)
-    .fetch_one(&pool)
-    .await
-    {
-        Ok(Some(token)) => token,
-        Ok(None) => {
-            error!(
-                "Bot {} has no bootstrap token - cannot provision securely",
-                bot_id
-            );
-            update_bot_status(&pool, bot_id, BotStatus::Error, "Missing bootstrap token").await;
-            return;
-        }
-        Err(e) => {
-            error!("Failed to fetch bootstrap token for bot {}: {}", bot_id, e);
-            update_bot_status(&pool, bot_id, BotStatus::Error, "Database error").await;
-            return;
-        }
-    };
-
-    // Generate user_data script with bootstrap token (secrets fetched at runtime)
+    // Generate user_data script with bootstrap token (secrets fetched at runtime).
+    // The plaintext token was already generated at bot creation; only its SHA-256
+    // hash is stored in the DB. We use the plaintext here for cloud-init only.
     // Uses modern Node.js 20 LTS + pnpm via corepack
     let user_data_config = crate::user_data::UserDataConfig {
         control_plane_url: control_plane_url.clone(),
@@ -667,7 +638,7 @@ async fn spawn_bot_droplet(
     let user_data = crate::user_data::generate_user_data(
         bot_id,
         &bot_name,
-        &bootstrap_token,
+        &bootstrap_token_plain,
         &user_data_config,
     );
 
@@ -742,12 +713,16 @@ async fn destroy_bot_droplet(
 
     let do_token =
         match config::get_config_decrypted(&pool, &secrets, keys::DIGITALOCEAN_TOKEN).await {
-            Some(token) if !token.is_empty() => token,
-            _ => {
+            Ok(Some(token)) if !token.is_empty() => token,
+            Ok(_) => {
                 warn!(
                     "digitalocean_token not configured, cannot destroy droplet for bot {}",
                     bot_id
                 );
+                return;
+            }
+            Err(e) => {
+                warn!("Failed to read DO token for destroy of bot {}: {}", bot_id, e);
                 return;
             }
         };
@@ -807,13 +782,18 @@ async fn redeploy_bot_droplet(
     if let Some(droplet_id) = old_droplet_id {
         let do_token =
             match config::get_config_decrypted(&pool, &secrets, keys::DIGITALOCEAN_TOKEN).await {
-                Some(token) if !token.is_empty() => token,
-                _ => {
+                Ok(Some(token)) if !token.is_empty() => token,
+                Ok(_) => {
                     warn!(
                         "digitalocean_token not configured, skipping redeploy for bot {}",
                         bot_id
                     );
                     update_bot_status(&pool, bot_id, BotStatus::Error, "No DO token").await;
+                    return;
+                }
+                Err(e) => {
+                    warn!("Failed to read DO token for redeploy of bot {}: {}", bot_id, e);
+                    update_bot_status(&pool, bot_id, BotStatus::Error, "DO token read error").await;
                     return;
                 }
             };
@@ -827,16 +807,22 @@ async fn redeploy_bot_droplet(
         }
     }
 
-    // Clear droplet_id and spawn new
-    let _ = sqlx::query("UPDATE bots SET droplet_id = NULL WHERE id = $1")
-        .bind(bot_id)
-        .execute(&pool)
-        .await;
+    // Rotate bootstrap token on redeploy so the new droplet gets a fresh plaintext.
+    // The old hash is no longer usable after redeploy.
+    let (new_token_plain, new_token_hash) = generate_bootstrap_token();
+    let _ = sqlx::query(
+        "UPDATE bots SET droplet_id = NULL, bootstrap_token = $1, bootstrap_token_used_at = NULL WHERE id = $2",
+    )
+    .bind(&new_token_hash)
+    .bind(bot_id)
+    .execute(&pool)
+    .await;
 
     // Spawn new droplet with retry logic
     spawn_bot_droplet(
         bot_id,
         bot_name,
+        new_token_plain,
         pool,
         secrets,
         metrics,
@@ -1084,11 +1070,13 @@ pub async fn bot_action(
             info!("Bot {} live trading disabled (switched to paper)", bot_id);
         }
         BotAction::RotateSecrets => {
-            let new_token = generate_bootstrap_token();
+            // Generate fresh token; store only the hash in the DB.
+            // The plaintext is returned to the caller (or re-provisioned via user-data).
+            let (_new_token_plain, new_token_hash) = generate_bootstrap_token();
             sqlx::query(
                 "UPDATE bots SET bootstrap_token = $1, bootstrap_token_used_at = NULL, updated_at = NOW() WHERE id = $2",
             )
-            .bind(&new_token)
+            .bind(&new_token_hash)
             .bind(bot_id)
             .execute(&state.db)
             .await
@@ -1175,10 +1163,17 @@ pub async fn get_current_user(
     Ok(Json(user))
 }
 
-/// Generate a cryptographically secure bootstrap token
-fn generate_bootstrap_token() -> String {
+/// Generate a cryptographically secure bootstrap token.
+///
+/// Returns `(plaintext, hash)` where `plaintext` is sent to the bot via user-data and
+/// `hash` (hex-encoded SHA-256) is stored in the database so the raw secret never
+/// appears in persistent storage.
+fn generate_bootstrap_token() -> (String, String) {
     use rand::Rng;
+    use sha2::{Digest, Sha256};
     let mut rng = rand::thread_rng();
     let bytes: [u8; 32] = rng.gen();
-    hex::encode(bytes)
+    let plaintext = hex::encode(bytes);
+    let hash = hex::encode(Sha256::digest(plaintext.as_bytes()));
+    (plaintext, hash)
 }

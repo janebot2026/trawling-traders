@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use hex;
 use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -475,10 +476,17 @@ pub async fn register_bot(
         "Bot successfully registered",
     );
 
+    let control_plane_url = crate::config::get_config_or(
+        &state.db,
+        crate::config::keys::CONTROL_PLANE_URL,
+        "https://api.trawlingtraders.com",
+    )
+    .await;
+
     Ok(Json(RegistrationResponse {
         bot_id: bot.id.to_string(),
         status: "online".to_string(),
-        config_url: format!("https://api.trawling-traders.com/bot/{}/config", bot_id),
+        config_url: format!("{}/bot/{}/config", control_plane_url, bot_id),
     }))
 }
 
@@ -584,11 +592,11 @@ pub async fn get_bot_secrets(
         )
     })?;
 
-    // Constant-time comparison to prevent timing side-channel attacks
+    // The DB stores hex(sha256(token)); hash the incoming request the same way and
+    // compare in constant time to prevent timing side-channel attacks.
     use sha2::{Digest, Sha256};
-    let stored_hash = Sha256::digest(stored_token.as_bytes());
-    let request_hash = Sha256::digest(request.bootstrap_token.as_bytes());
-    if stored_hash.as_slice() != request_hash.as_slice() {
+    let request_hash = hex::encode(Sha256::digest(request.bootstrap_token.as_bytes()));
+    if stored_token.as_str() != request_hash.as_str() {
         warn!("Invalid bootstrap token attempt for bot {}", bot_id);
         return Err((
             StatusCode::UNAUTHORIZED,
