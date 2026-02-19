@@ -871,7 +871,7 @@ export function CreateBotWizardSteps(props: CreateBotWizardStepsProps) {
             (entry) => entry.value === factor.factor
           );
           return (
-            <View key={`${factor.factor}-${rowIndex}`} style={styles.factorBlock}>
+            <View key={factor.factor} style={styles.factorBlock}>
               <View style={styles.factorRow}>
                 <TouchableOpacity
                   style={styles.factorSelectButton}
