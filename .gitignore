@@ -1,6 +1,8 @@
 # Rust
 target/
-Cargo.lock
+# Cargo.lock is committed for binary crates (control-plane, data-retrieval,
+# bot-runner) to ensure reproducible builds. Only library crates should
+# gitignore Cargo.lock.
 **/*.rs.bk
 
 # Node
