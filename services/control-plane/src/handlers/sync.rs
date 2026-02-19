@@ -250,6 +250,16 @@ pub async fn heartbeat(
     if let Some(metrics_batch) = req.metrics {
         let batch_len = metrics_batch.len();
 
+        if batch_len > MAX_BATCH_SIZE {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Metrics batch too large: {} entries exceeds maximum of {}",
+                    batch_len, MAX_BATCH_SIZE
+                ),
+            ));
+        }
+
         if !metrics_batch.is_empty() {
             // Pre-convert all values so we can bail on bad input before touching the DB
             let mut timestamps = Vec::with_capacity(batch_len);
@@ -338,12 +348,25 @@ pub async fn heartbeat(
     }))
 }
 
+const MAX_BATCH_SIZE: usize = 500;
+
 /// POST /bot/:id/events - Bot pushes events
 pub async fn ingest_events(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
     Json(req): Json<EventsBatchRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    if req.events.len() > MAX_BATCH_SIZE {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Batch too large: {} events exceeds maximum of {}",
+                req.events.len(),
+                MAX_BATCH_SIZE
+            ),
+        ));
+    }
+
     let event_count = req.events.len() as u64;
     let mut trade_count = 0u64;
     let mut error_count = 0u64;
