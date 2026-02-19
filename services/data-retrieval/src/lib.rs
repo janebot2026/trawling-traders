@@ -2,6 +2,7 @@ pub mod types;
 pub mod sources {
     pub mod binance_ws;
     pub mod coingecko;
+    pub mod health;
     pub mod pyth;
 }
 pub mod cache;
@@ -21,6 +22,11 @@ use tracing::{info, warn};
 const MAX_CACHE_SIZE: usize = 10000;
 /// Price TTL in seconds (prices older than this are evicted)
 const PRICE_TTL_SECONDS: i64 = 300; // 5 minutes
+/// Canonical list of supported crypto major symbols (single source of truth).
+///
+/// Used both for asset-class detection in `AssetClass::from_symbol` and for
+/// the `SupportedSymbols` public API. Add new symbols here only.
+pub const CRYPTO_SYMBOLS: &[&str] = &["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOT", "AVAX"];
 
 /// Asset class for routing to appropriate data sources
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -37,7 +43,7 @@ impl AssetClass {
         let sym = symbol.to_uppercase();
 
         // Crypto majors
-        if ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOT", "AVAX"].contains(&sym.as_str()) {
+        if CRYPTO_SYMBOLS.contains(&sym.as_str()) {
             return AssetClass::Crypto;
         }
 
@@ -129,6 +135,10 @@ impl PriceAggregator {
                 let mut eviction_counter = 0u32;
                 let mut reconnect_delay_secs = 1u64;
                 const MAX_RECONNECT_DELAY: u64 = 60;
+                // DR-006: Only reset backoff if the connection has been stable for at least
+                // this many seconds, preventing a brief success from zeroing the backoff.
+                const STABLE_CONNECTION_SECS: u64 = 30;
+                let mut last_successful_connect_time: Option<std::time::Instant> = None;
 
                 loop {
                     // Check connection status and attempt reconnect if needed
@@ -146,10 +156,12 @@ impl PriceAggregator {
                         match source.reconnect().await {
                             Ok(()) => {
                                 info!("WebSocket reconnected successfully");
-                                reconnect_delay_secs = 1; // Reset backoff on success
+                                last_successful_connect_time = Some(std::time::Instant::now());
+                                // Backoff reset is deferred until the connection proves stable.
                             }
                             Err(e) => {
                                 warn!("WebSocket reconnection failed: {}", e);
+                                last_successful_connect_time = None;
                                 // Exponential backoff with jitter, capped at MAX_RECONNECT_DELAY.
                                 // Jitter prevents thundering herd when multiple instances reconnect.
                                 let base = (reconnect_delay_secs * 2).min(MAX_RECONNECT_DELAY);
@@ -162,6 +174,17 @@ impl PriceAggregator {
                                 reconnect_delay_secs = base + jitter;
                                 continue; // Try again after delay
                             }
+                        }
+                    }
+
+                    // DR-006: Reset backoff only after the connection has been alive long enough
+                    // to be considered stable, avoiding premature resets on flapping connections.
+                    if let Some(connected_at) = last_successful_connect_time {
+                        if connected_at.elapsed().as_secs() >= STABLE_CONNECTION_SECS
+                            && reconnect_delay_secs > 1
+                        {
+                            reconnect_delay_secs = 1;
+                            last_successful_connect_time = None; // Don't reset repeatedly
                         }
                     }
 
@@ -184,17 +207,19 @@ impl PriceAggregator {
                                 tracing::debug!("Price cache: evicted {} stale entries", evicted);
                             }
 
-                            // If still over max size, evict oldest entries
+                            // If still over max size, retain only the newest MAX_CACHE_SIZE entries.
+                            // We find the timestamp cutoff without draining the whole map:
+                            // collect timestamps, sort, take the cutoff, then retain in-place.
                             if p.len() > MAX_CACHE_SIZE {
-                                let mut entries: Vec<_> = p.drain().collect();
-                                entries.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
-                                entries.truncate(MAX_CACHE_SIZE);
-                                for (k, v) in entries {
-                                    p.insert(k, v);
-                                }
+                                let mut timestamps: Vec<_> =
+                                    p.values().map(|v| v.timestamp).collect();
+                                timestamps.sort_unstable();
+                                // Keep entries at or newer than the MAX_CACHE_SIZE-th oldest
+                                let cutoff = timestamps[timestamps.len() - MAX_CACHE_SIZE];
+                                p.retain(|_, v| v.timestamp >= cutoff);
                                 tracing::warn!(
-                                    "Price cache exceeded max size, truncated to {}",
-                                    MAX_CACHE_SIZE
+                                    "Price cache exceeded max size, retained {} newest entries",
+                                    p.len()
                                 );
                             }
                         }
@@ -367,15 +392,24 @@ impl PriceAggregator {
         self.get_price_realtime(symbol, "USD").await
     }
 
-    /// Get batch prices for multiple stocks
+    /// Get batch prices for multiple stocks concurrently.
+    ///
+    /// All symbols are fetched in parallel via `join_all`, replacing the previous
+    /// sequential loop that blocked on each HTTP round-trip before starting the next.
     pub async fn get_stock_prices_batch(
         &self,
         symbols: &[&str],
     ) -> Result<HashMap<String, PricePoint>> {
-        let mut results = HashMap::new();
+        let futures: Vec<_> = symbols
+            .iter()
+            .map(|&symbol| async move { (symbol, self.get_stock_price(symbol).await) })
+            .collect();
 
-        for symbol in symbols {
-            match self.get_stock_price(symbol).await {
+        let outcomes = futures::future::join_all(futures).await;
+
+        let mut results = HashMap::with_capacity(outcomes.len());
+        for (symbol, outcome) in outcomes {
+            match outcome {
                 Ok(price) => {
                     results.insert(symbol.to_string(), price);
                 }
@@ -409,7 +443,7 @@ impl PriceAggregator {
                 is_healthy: ws.is_connected().await,
                 last_success: Some(Utc::now()),
                 last_error: None,
-                success_rate_24h: if ws.is_connected().await { 1.0 } else { 0.0 },
+                success_rate: if ws.is_connected().await { 1.0 } else { 0.0 },
                 avg_latency_ms: 50, // WebSocket is fast
             });
         }
@@ -420,7 +454,7 @@ impl PriceAggregator {
     /// Get supported symbols for each asset class
     pub fn get_supported_symbols(&self) -> SupportedSymbols {
         SupportedSymbols {
-            crypto: vec!["BTC", "ETH", "SOL", "BNB", "XRP", "ADA"],
+            crypto: CRYPTO_SYMBOLS.to_vec(),
             stocks: PythClient::supported_stocks(),
             etfs: PythClient::supported_etfs(),
             metals: PythClient::supported_metals(),
