@@ -20,7 +20,7 @@ type BotStrategyRoute = RouteProp<RootStackParamList, 'BotStrategyConfig'>;
 type BotStrategyNav = NativeStackNavigationProp<RootStackParamList, 'BotStrategyConfig'>;
 
 const ALGORITHMS: AlgorithmMode[] = ['trend', 'mean_reversion', 'breakout'];
-const ASSETS: AssetFocus[] = ['majors', 'tokenized_equities', 'tokenized_metals', 'custom', 'memes'];
+const ASSETS: AssetFocus[] = ['majors', 'tokenized_equities', 'tokenized_metals', 'finance_2', 'custom', 'memes'];
 const STRICTNESS: Strictness[] = ['low', 'medium', 'high'];
 
 export function BotStrategyConfigScreen() {
