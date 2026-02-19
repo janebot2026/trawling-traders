@@ -8,65 +8,80 @@ use sqlx::PgPool;
 
 /// Get a configuration value from platform_config table
 ///
-/// Returns None if key doesn't exist or value is empty.
-pub async fn get_config(pool: &PgPool, key: &str) -> Option<String> {
+/// Returns Ok(None) if key doesn't exist or value is empty.
+/// Returns Err on database errors (connection, query, etc.).
+pub async fn get_config(pool: &PgPool, key: &str) -> Result<Option<String>, sqlx::Error> {
     let result: Option<(String, bool)> =
         sqlx::query_as("SELECT value, encrypted FROM platform_config WHERE key = $1")
             .bind(key)
             .fetch_optional(pool)
-            .await
-            .ok()?;
+            .await?;
 
     match result {
-        Some((value, _encrypted)) if !value.is_empty() => Some(value),
-        _ => None,
+        Some((value, _encrypted)) if !value.is_empty() => Ok(Some(value)),
+        _ => Ok(None),
     }
 }
 
 /// Get a configuration value, decrypting if necessary
 ///
 /// Uses SecretsManager to decrypt encrypted values.
+/// Returns Ok(None) if key doesn't exist or value is empty.
+/// Returns Err on database or decryption errors.
 pub async fn get_config_decrypted(
     pool: &PgPool,
     secrets: &SecretsManager,
     key: &str,
-) -> Option<String> {
+) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
     let result: Option<(String, bool)> =
         sqlx::query_as("SELECT value, encrypted FROM platform_config WHERE key = $1")
             .bind(key)
             .fetch_optional(pool)
-            .await
-            .ok()?;
+            .await?;
 
     match result {
         Some((value, encrypted)) if !value.is_empty() => {
             if encrypted {
-                secrets.decrypt(&value).ok()
+                Ok(Some(secrets.decrypt(&value)?))
             } else {
-                Some(value)
+                Ok(Some(value))
             }
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
 /// Get a configuration value with a default fallback
+///
+/// Returns the default on missing key or DB error (logs warning on error).
 pub async fn get_config_or(pool: &PgPool, key: &str, default: &str) -> String {
-    get_config(pool, key)
-        .await
-        .unwrap_or_else(|| default.to_string())
+    match get_config(pool, key).await {
+        Ok(Some(v)) => v,
+        Ok(None) => default.to_string(),
+        Err(e) => {
+            tracing::warn!(key, error = %e, "get_config_or: DB error, using default");
+            default.to_string()
+        }
+    }
 }
 
 /// Get a decrypted configuration value with a default fallback
+///
+/// Returns the default on missing key or error (logs warning on error).
 pub async fn get_config_decrypted_or(
     pool: &PgPool,
     secrets: &SecretsManager,
     key: &str,
     default: &str,
 ) -> String {
-    get_config_decrypted(pool, secrets, key)
-        .await
-        .unwrap_or_else(|| default.to_string())
+    match get_config_decrypted(pool, secrets, key).await {
+        Ok(Some(v)) => v,
+        Ok(None) => default.to_string(),
+        Err(e) => {
+            tracing::warn!(key, error = %e, "get_config_decrypted_or: error, using default");
+            default.to_string()
+        }
+    }
 }
 
 /// Configuration keys used throughout the application

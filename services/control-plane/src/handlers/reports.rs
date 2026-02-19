@@ -178,7 +178,14 @@ async fn collect_report_rows(
 async fn resolve_webhook_url(state: &AppState) -> Result<String, (StatusCode, String)> {
     let webhook_url_from_db =
         config::get_config_decrypted(&state.db, &state.secrets, config::keys::EMAIL_WEBHOOK_URL)
-            .await;
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "Failed to read email webhook URL from DB");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to read webhook configuration".to_string(),
+                )
+            })?;
 
     webhook_url_from_db
         .filter(|url| !url.trim().is_empty())
