@@ -1,8 +1,40 @@
+use axum::http::{header, HeaderValue, Method};
 use axum::{routing::get, Router};
 use std::sync::Arc;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn, Level};
+
+/// Default CORS origins when `CORS_ALLOWED_ORIGINS` env var is not set.
+const DEFAULT_CORS_ORIGINS: &[&str] = &[
+    "https://trawlingtraders.com",
+    "https://www.trawlingtraders.com",
+    "https://trawling-traders-web.vercel.app",
+];
+
+/// Build a restrictive CORS layer. Origins are read from the
+/// `CORS_ALLOWED_ORIGINS` env var (comma-separated) or fall back to
+/// [`DEFAULT_CORS_ORIGINS`].
+fn build_cors_layer() -> CorsLayer {
+    let origins: Vec<HeaderValue> = std::env::var("CORS_ALLOWED_ORIGINS")
+        .ok()
+        .map(|val| {
+            val.split(',')
+                .filter_map(|o| o.trim().parse::<HeaderValue>().ok())
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            DEFAULT_CORS_ORIGINS
+                .iter()
+                .filter_map(|o| o.parse::<HeaderValue>().ok())
+                .collect()
+        });
+
+    CorsLayer::new()
+        .allow_origin(origins)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([header::CONTENT_TYPE, header::ACCEPT])
+}
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -78,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/prices/{symbol}", get(handlers::get_price))
         .route("/prices", get(handlers::get_price))
         .route("/health", get(handlers::health_check))
-        .layer(CorsLayer::new().allow_origin(Any))
+        .layer(build_cors_layer())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
