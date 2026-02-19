@@ -107,11 +107,10 @@ export function useUser() {
 
 interface UseBotMetricsOptions {
   botId: string;
-  range?: '7d' | '30d';
 }
 
 export function useBotMetrics(options: UseBotMetricsOptions) {
-  const { botId, range = '7d' } = options;
+  const { botId } = options;
   const [metrics, setMetrics] = useState<Array<{ timestamp: string; value: number }>>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -133,7 +132,7 @@ export function useBotMetrics(options: UseBotMetricsOptions) {
 
   useEffect(() => {
     fetchMetrics();
-  }, [fetchMetrics, range]);
+  }, [fetchMetrics]);
 
   return { metrics, loading, error, refetch: fetchMetrics };
 }
