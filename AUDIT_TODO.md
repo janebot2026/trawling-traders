@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 27 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 29 | **Deferred:** 5
 
 ---
 
@@ -120,10 +120,11 @@
   - Test: `npx tsc --noEmit`; reasoned check
   - **Done:** Fixed AlgorithmMode.mean-reversion and AssetFocus tokenized-equities/tokenized-metals/finance-2 to snake_case across types + 4 mobile files.
 
-- [ ] **INFRA-012** — Secrets visible in `docker inspect` via CLI args
+- [x] **INFRA-012** — Secrets visible in `docker inspect` via CLI args
   - Files: `.github/workflows/deploy.yml`
-  - Fix: Move secrets to env-file passed via `--env-file`
+  - Fix: Write secrets to temp env-file, pass via --env-file, remove after start
   - Test: YAML lint; reasoned check
+  - **Done:** Secrets now written to mktemp file, passed via --env-file, deleted immediately after docker run.
 
 - [x] **INFRA-022** — Bare `.env` not in `.gitignore`
   - Files: `.gitignore`
@@ -376,10 +377,11 @@
   - Fix: Remove `| string`
   - Test: `npx tsc --noEmit`; reasoned check
 
-- [ ] **INFRA-013** — Docker images tagged only :latest
+- [x] **INFRA-013** — Docker images tagged only :latest
   - Files: `.github/workflows/deploy.yml`
-  - Fix: Tag with git SHA
+  - Fix: Added SHA-tagged image env vars; both :latest and :sha pushed
   - Test: YAML lint; reasoned check
+  - **Done:** Images now tagged with both :latest and :${{ github.sha }} for traceability.
 
 - [ ] **INFRA-014** — always() with complex conditions
   - Files: `.github/workflows/deploy.yml`

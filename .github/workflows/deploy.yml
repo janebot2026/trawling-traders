@@ -25,7 +25,9 @@ on:
 
 env:
   CONTROL_PLANE_IMAGE: hdbdocker/trawling-traders-control-plane:latest
+  CONTROL_PLANE_IMAGE_SHA: hdbdocker/trawling-traders-control-plane:${{ github.sha }}
   DATA_RETRIEVAL_IMAGE: hdbdocker/trawling-traders-data-retrieval:latest
+  DATA_RETRIEVAL_IMAGE_SHA: hdbdocker/trawling-traders-data-retrieval:${{ github.sha }}
 
 jobs:
   check-changes:
@@ -142,7 +144,9 @@ jobs:
           context: .
           file: ./services/control-plane/Dockerfile
           push: true
-          tags: ${{ env.CONTROL_PLANE_IMAGE }}
+          tags: |
+            ${{ env.CONTROL_PLANE_IMAGE }}
+            ${{ env.CONTROL_PLANE_IMAGE_SHA }}
           cache-from: type=gha,scope=control-plane
           cache-to: type=gha,mode=max,scope=control-plane
 
@@ -173,7 +177,9 @@ jobs:
           context: .
           file: ./services/data-retrieval/Dockerfile
           push: true
-          tags: ${{ env.DATA_RETRIEVAL_IMAGE }}
+          tags: |
+            ${{ env.DATA_RETRIEVAL_IMAGE }}
+            ${{ env.DATA_RETRIEVAL_IMAGE_SHA }}
           cache-from: type=gha,scope=data-retrieval
           cache-to: type=gha,mode=max,scope=data-retrieval
 
@@ -230,16 +236,23 @@ jobs:
 
               # Only 3 true secrets as ENV - everything else is in platform_config DB table
               # Stripe config is managed via cedros-pay admin at /v1/pay/admin/config
+              # Write secrets to a temp env file so they are not visible in `docker inspect`
+              CP_ENV_FILE="$(mktemp)"
+              printf 'DATABASE_URL=%s\nJWT_SECRET=%s\nSECRETS_ENCRYPTION_KEY=%s\n' \
+                '${{ secrets.DATABASE_URL }}' \
+                '${{ secrets.JWT_SECRET }}' \
+                '${{ secrets.SECRETS_ENCRYPTION_KEY }}' \
+                > "$CP_ENV_FILE"
+
               docker run -d --restart unless-stopped \
                 --name trawling-traders-control-plane \
                 --network trawling-traders-network \
                 -p 127.0.0.1:3001:3000 \
                 --env PORT=3000 \
-                --env DATABASE_URL="${{ secrets.DATABASE_URL }}" \
-                --env JWT_SECRET="${{ secrets.JWT_SECRET }}" \
-                --env SECRETS_ENCRYPTION_KEY="${{ secrets.SECRETS_ENCRYPTION_KEY }}" \
+                --env-file "$CP_ENV_FILE" \
                 ${{ env.CONTROL_PLANE_IMAGE }}
 
+              rm -f "$CP_ENV_FILE"
               echo "control-plane deployed successfully"
             fi
 
