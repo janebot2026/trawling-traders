@@ -4,6 +4,7 @@ use reqwest::Client;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 /// Internal health tracking for API-free health checks
@@ -214,24 +215,26 @@ impl CoinGeckoClient {
 
     /// Get CoinGecko ID for asset symbol
     async fn get_coin_id(&self, symbol: &str) -> Result<String> {
-        // Common mappings for speed (avoid API call)
-        let static_mappings: HashMap<&str, &str> = [
-            ("BTC", "bitcoin"),
-            ("ETH", "ethereum"),
-            ("SOL", "solana"),
-            ("USDC", "usd-coin"),
-            ("USDT", "tether"),
-            ("BNB", "binancecoin"),
-            ("XRP", "ripple"),
-            ("ADA", "cardano"),
-            ("DOGE", "dogecoin"),
-            ("MATIC", "matic-network"),
-        ]
-        .iter()
-        .cloned()
-        .collect();
+        // Common mappings for speed (avoid API call) — initialized once at first use.
+        static STATIC_MAPPINGS: LazyLock<HashMap<&'static str, &'static str>> =
+            LazyLock::new(|| {
+                [
+                    ("BTC", "bitcoin"),
+                    ("ETH", "ethereum"),
+                    ("SOL", "solana"),
+                    ("USDC", "usd-coin"),
+                    ("USDT", "tether"),
+                    ("BNB", "binancecoin"),
+                    ("XRP", "ripple"),
+                    ("ADA", "cardano"),
+                    ("DOGE", "dogecoin"),
+                    ("MATIC", "matic-network"),
+                ]
+                .into_iter()
+                .collect()
+            });
 
-        if let Some(&id) = static_mappings.get(symbol.to_uppercase().as_str()) {
+        if let Some(&id) = STATIC_MAPPINGS.get(symbol.to_uppercase().as_str()) {
             return Ok(id.to_string());
         }
 
