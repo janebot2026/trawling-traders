@@ -24,11 +24,15 @@ function OfflineBanner({ isOnline }: { isOnline: boolean }) {
   const slideAnim = useRef(new Animated.Value(-50)).current;
 
   useEffect(() => {
-    Animated.timing(slideAnim, {
+    const animation = Animated.timing(slideAnim, {
       toValue: isOnline ? -50 : 0,
       duration: 300,
       useNativeDriver: true,
-    }).start();
+    });
+    animation.start();
+    return () => {
+      animation.stop();
+    };
   }, [isOnline, slideAnim]);
 
   if (isOnline) {
