@@ -39,7 +39,7 @@ impl ControlPlaneClient {
         })
     }
 
-    fn apply_auth<'a>(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    fn apply_auth(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         if let Some(token) = &self.auth_token {
             builder.bearer_auth(token)
         } else {
