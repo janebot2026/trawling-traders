@@ -483,10 +483,17 @@ impl BotRunner {
         self.status = RunnerStatus::Executing;
         self.write_state_file().await.ok();
 
+        // BR-015: Compute portfolio snapshot once before the intent loop so that
+        // validate_intent does not call portfolio.snapshot() for every intent.
+        let tick_snapshot = self.portfolio.snapshot();
+
+        // BR-010: Collect all events during the tick; flush in a single HTTP call.
+        let mut tick_events: Vec<EventInput> = Vec::new();
+
         // Validate and execute each intent
         for intent in &plan.intents {
             // Validate against hard risk rails
-            let validation = self.validate_intent(intent, &config);
+            let validation = self.validate_intent(intent, &config, &tick_snapshot);
 
             // Write journal entry
             let journal_entry = DecisionJournalEntry {
@@ -506,8 +513,8 @@ impl BotRunner {
                 );
                 self.write_journal_entry(&journal_entry).await.ok();
 
-                // Emit blocked event
-                self.emit_intent_blocked(intent, &validation).await;
+                // Buffer blocked event instead of sending immediately.
+                self.collect_intent_blocked_events(intent, &validation, &mut tick_events);
                 continue;
             }
 
@@ -548,8 +555,15 @@ impl BotRunner {
                 }
             }
 
-            // Emit trade events
-            self.emit_openclaw_trade_events(intent, &result, &config).await;
+            // Buffer trade events instead of sending per-intent.
+            self.collect_openclaw_trade_events(intent, &result, &config, &mut tick_events);
+        }
+
+        // BR-010: Flush all buffered events in a single HTTP call.
+        if !tick_events.is_empty() {
+            if let Err(e) = self.client.send_events(tick_events).await {
+                warn!("Failed to send tick events batch: {}", e);
+            }
         }
 
         // Update status back to idle
@@ -659,8 +673,16 @@ impl BotRunner {
         );
     }
 
-    /// Validate intent against hard risk rails
-    fn validate_intent(&self, intent: &OpenClawIntent, config: &BotConfig) -> IntentValidation {
+    /// Validate intent against hard risk rails.
+    ///
+    /// `snapshot` must be pre-computed by the caller so that `portfolio.snapshot()` is
+    /// not called once per intent inside the tick loop (BR-015).
+    fn validate_intent(
+        &self,
+        intent: &OpenClawIntent,
+        config: &BotConfig,
+        snapshot: &PortfolioSnapshot,
+    ) -> IntentValidation {
         // Check trade limit
         let max_trades = config.risk_caps.max_trades_per_day as u32;
         if self.trade_count >= max_trades {
@@ -675,19 +697,28 @@ impl BotRunner {
             };
         }
 
-        // Check position size limit
-        let snapshot = self.portfolio.snapshot();
+        // BR-011: Check the *resulting* position size, not just the trade amount.
+        // Existing exposure for the output mint (the asset being bought) is included.
         let max_position_value = snapshot.total_equity
             * Decimal::from(config.risk_caps.max_position_size_percent)
             / Decimal::from(100);
 
-        if intent.amount_usd > max_position_value {
+        let existing_exposure = snapshot
+            .positions
+            .iter()
+            .find(|p| p.mint == intent.output_mint)
+            .map(|p| p.market_value)
+            .unwrap_or(Decimal::ZERO);
+
+        let resulting_position = existing_exposure + intent.amount_usd;
+
+        if resulting_position > max_position_value {
             return IntentValidation {
                 intent: intent.clone(),
                 approved: false,
                 rejection_reason: Some(format!(
-                    "Amount ${} exceeds max position size ${}",
-                    intent.amount_usd, max_position_value
+                    "Resulting position ${} exceeds max position size ${}",
+                    resulting_position, max_position_value
                 )),
                 blocked_by: Some("max_position_size_percent".to_string()),
             };
@@ -722,7 +753,17 @@ impl BotRunner {
         intent: &OpenClawIntent,
         config: &BotConfig,
     ) -> NormalizedTradeResult {
-        let executor = self.executor.as_ref().unwrap();
+        // BR-020: executor may be None if apply_config has not completed yet.
+        let executor = match self.executor.as_ref() {
+            Some(e) => e,
+            None => {
+                warn!(
+                    "execute_openclaw_intent called with no executor (intent {})",
+                    intent.intent_id
+                );
+                return NormalizedTradeResult::default();
+            }
+        };
 
         // Determine trade side from action
         let side = match intent.action {
@@ -850,9 +891,14 @@ impl BotRunner {
         Ok(())
     }
 
-    /// Emit event when intent is blocked
-    async fn emit_intent_blocked(&self, intent: &OpenClawIntent, validation: &IntentValidation) {
-        let event = EventInput {
+    /// Collect event when intent is blocked into the tick-level event buffer.
+    fn collect_intent_blocked_events(
+        &self,
+        intent: &OpenClawIntent,
+        validation: &IntentValidation,
+        events: &mut Vec<EventInput>,
+    ) {
+        events.push(EventInput {
             event_type: "trade_blocked".to_string(),
             message: validation
                 .rejection_reason
@@ -868,21 +914,24 @@ impl BotRunner {
                 "rationale": intent.rationale,
             })),
             timestamp: chrono::Utc::now(),
-        };
-        self.client.send_events(vec![event]).await.ok();
+        });
     }
 
-    /// Emit trade events for OpenClaw intent execution
-    async fn emit_openclaw_trade_events(
+    /// Collect trade events for an OpenClaw intent execution into the tick-level event buffer.
+    ///
+    /// All events for a tick are flushed in a single HTTP call at the end of
+    /// `decision_tick`, replacing per-event HTTP sends that blocked the tick loop.
+    fn collect_openclaw_trade_events(
         &self,
         intent: &OpenClawIntent,
         result: &NormalizedTradeResult,
         config: &BotConfig,
+        events: &mut Vec<EventInput>,
     ) {
         use crate::executor::TradeStage;
 
-        // Always emit trade_intent_created first
-        let created_event = EventInput {
+        // Always collect trade_intent_created first
+        events.push(EventInput {
             event_type: "trade_intent_created".to_string(),
             message: format!("Trade intent from OpenClaw: {}", intent.intent_id),
             metadata: Some(serde_json::json!({
@@ -898,10 +947,9 @@ impl BotRunner {
                 "source": "openclaw",
             })),
             timestamp: chrono::Utc::now(),
-        };
-        self.client.send_events(vec![created_event]).await.ok();
+        });
 
-        // Emit stage-specific event
+        // Collect stage-specific event
         match result.stage_reached {
             TradeStage::Blocked => {
                 let error = result.error.as_ref();
@@ -909,7 +957,7 @@ impl BotRunner {
                     .map(|e| e.code.clone())
                     .unwrap_or_else(|| "unknown".to_string());
 
-                let blocked_event = EventInput {
+                events.push(EventInput {
                     event_type: "trade_blocked".to_string(),
                     message: error
                         .map(|e| e.message.clone())
@@ -924,12 +972,11 @@ impl BotRunner {
                         "shield_verdict": result.shield_result.as_ref().map(|s| format!("{:?}", s.verdict)),
                     })),
                     timestamp: chrono::Utc::now(),
-                };
-                self.client.send_events(vec![blocked_event]).await.ok();
+                });
             }
 
             TradeStage::Submitted => {
-                let submitted_event = EventInput {
+                events.push(EventInput {
                     event_type: "trade_submitted".to_string(),
                     message: format!("Trade submitted: {:?}", result.signature),
                     metadata: Some(serde_json::json!({
@@ -942,12 +989,11 @@ impl BotRunner {
                         "price_impact_pct": result.quote.price_impact_pct,
                     })),
                     timestamp: chrono::Utc::now(),
-                };
-                self.client.send_events(vec![submitted_event]).await.ok();
+                });
             }
 
             TradeStage::Confirmed => {
-                let confirmed_event = EventInput {
+                events.push(EventInput {
                     event_type: "trade_confirmed".to_string(),
                     message: format!("Trade confirmed: {:?}", result.signature),
                     metadata: Some(serde_json::json!({
@@ -963,8 +1009,7 @@ impl BotRunner {
                         "mode": format!("{:?}", config.trading_mode),
                     })),
                     timestamp: chrono::Utc::now(),
-                };
-                self.client.send_events(vec![confirmed_event]).await.ok();
+                });
             }
 
             TradeStage::Failed => {
@@ -976,7 +1021,7 @@ impl BotRunner {
                     .map(|e| e.code.clone())
                     .unwrap_or_else(|| "unknown".to_string());
 
-                let failed_event = EventInput {
+                events.push(EventInput {
                     event_type: "trade_failed".to_string(),
                     message: error
                         .map(|e| e.message.clone())
@@ -990,8 +1035,7 @@ impl BotRunner {
                         "in_amount": result.quote.in_amount,
                     })),
                     timestamp: chrono::Utc::now(),
-                };
-                self.client.send_events(vec![failed_event]).await.ok();
+                });
             }
         }
     }
