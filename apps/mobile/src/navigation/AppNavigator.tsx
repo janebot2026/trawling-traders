@@ -17,6 +17,7 @@ import { CreateBotScreen } from '../screens/CreateBotScreen';
 import { BotDetailScreen } from '../screens/BotDetailScreen';
 import { BotStrategyConfigScreen } from '../screens/BotStrategyConfigScreen';
 import { BotBehaviorConfigScreen } from '../screens/BotBehaviorConfigScreen';
+import { BotSettingsScreen } from '../screens/BotSettingsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { ReportsScreen } from '../screens/ReportsScreen';
@@ -248,11 +249,11 @@ function AppStack() {
         name="CreateBot"
         component={CreateBotScreen}
         options={({ navigation }) => ({
-          title: 'Create Boat',
+          title: 'Create Bot',
           headerTransparent: true,
           header: () => (
             <AppHeader
-              title="Create Boat"
+              title="Create Bot"
               showBack
               transparent
               onBack={navigation.goBack}
@@ -264,6 +265,7 @@ function AppStack() {
       <Stack.Screen name="BotDetail" component={BotDetailScreen} options={{ title: 'Bot Details' }} />
       <Stack.Screen name="BotStrategyConfig" component={BotStrategyConfigScreen} options={{ title: 'Strategy Config' }} />
       <Stack.Screen name="BotBehaviorConfig" component={BotBehaviorConfigScreen} options={{ title: 'Behavior Config' }} />
+      <Stack.Screen name="BotSettings" component={BotSettingsScreen} options={{ title: 'Bot Settings' }} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile', headerTransparent: true }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings', headerTransparent: true }} />
       <Stack.Screen

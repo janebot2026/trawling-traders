@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 30 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 32 | **Deferred:** 5
 
 ---
 
@@ -148,10 +148,11 @@
   - Test: `npx tsc --noEmit`; reasoned check
   - **Done:** onRefresh now async with await loadData().
 
-- [ ] **MB-007** — BotSettings route declared but Screen not registered
+- [x] **MB-007** — BotSettings route declared but Screen not registered
   - Files: `apps/mobile/src/navigation/AppNavigator.tsx`
-  - Fix: Register `BotSettings` screen component
+  - Fix: Added Screen registration for BotSettings with BotSettingsScreen component
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** Screen now registered — navigation to BotSettings no longer crashes.
 
 - [ ] **MB-011** — No partialize on secure store (entire state persisted)
   - Files: `apps/mobile/src/store/index.ts`
@@ -485,10 +486,11 @@
   - Fix: Extract shared constant; split file
   - Test: `npx tsc --noEmit`; reasoned check
 
-- [ ] **MB-026** — Screen title "Create Boat" not "Create Bot"
+- [x] **MB-026** — Screen title "Create Boat" not "Create Bot"
   - Files: `apps/mobile/src/navigation/AppNavigator.tsx`
-  - Fix: Change "Boat" to "Bot"
+  - Fix: Corrected "Create Boat" to "Create Bot"
   - Test: `npx tsc --noEmit`
+  - **Done:** Fixed typo in both title option and AppHeader prop.
 
 - [ ] **MB-027** — BotsListScreen dead (not in navigator)
   - Files: `apps/mobile/src/screens/BotsListScreen.tsx`
