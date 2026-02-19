@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -14,7 +14,7 @@ use data_retrieval::{types::SourceHealth, AssetClass};
 /// Query params for price endpoint
 #[derive(Debug, serde::Deserialize)]
 pub struct PriceQuery {
-    symbol: String,
+    symbol: Option<String>,
     #[serde(default = "default_quote")]
     quote: String,
 }
@@ -39,13 +39,19 @@ fn validate_batch_size(symbols_len: usize) -> Result<(), (StatusCode, String)> {
     Ok(())
 }
 
-/// GET /prices/:symbol - Get current price for any symbol
+/// GET /prices/:symbol or /prices?symbol= — Get current price for any symbol
 /// Works for both crypto (BTC) and stocks (AAPL)
 pub async fn get_price(
     State(state): State<Arc<AppState>>,
+    path_symbol: Option<Path<String>>,
     Query(query): Query<PriceQuery>,
 ) -> Result<Json<PriceResponse>, (StatusCode, String)> {
-    let symbol = query.symbol.to_uppercase();
+    // Path param takes precedence over query param
+    let raw_symbol = path_symbol
+        .map(|Path(s)| s)
+        .or(query.symbol)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Missing symbol parameter".to_string()))?;
+    let symbol = raw_symbol.to_uppercase();
     let quote = query.quote.to_uppercase();
 
     info!("Fetching price for {}/{}", symbol, quote);

@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 14 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 15 | **Deferred:** 5
 
 ---
 
@@ -86,10 +86,11 @@
   - Test: `cargo check`; reasoned check
   - **Done:** Single query fetches all matching suffixed names; loop checks in-memory HashSet. 998 queries -> 1.
 
-- [ ] **DR-002** — `/prices/{symbol}` path param never extracted
+- [x] **DR-002** — `/prices/{symbol}` path param never extracted
   - Files: `services/data-retrieval/src/handlers.rs`
-  - Fix: Add `Path(symbol)` extractor alongside query param fallback
+  - Fix: Add `Option<Path<String>>` extractor; path takes precedence over query param
   - Test: `cargo check`; reasoned check
+  - **Done:** Handler now accepts both `/prices/BTC` (path) and `/prices?symbol=BTC` (query).
 
 - [ ] **DR-004** — Batch pricing uses f64, losing Decimal precision
   - Files: `services/data-retrieval/src/sources/pyth.rs`
