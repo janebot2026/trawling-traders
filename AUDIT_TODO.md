@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 26 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 27 | **Deferred:** 5
 
 ---
 
@@ -234,10 +234,11 @@
   - Test: `cargo check`; reasoned check
   - **Done:** Added branch for NULL heartbeat — fires alert immediately for online bots that never sent one.
 
-- [ ] **CP-015** — csv_escape doesn't handle `\r` (CSV injection)
+- [x] **CP-015** — csv_escape doesn't handle `\r` (CSV injection)
   - Files: `services/control-plane/src/handlers/reports.rs`
-  - Fix: Strip or escape `\r`
+  - Fix: Strip `\r` before other escaping
   - Test: `cargo check`; reasoned check
+  - **Done:** Added `value.replace('\r', "")` as first step in csv_escape.
 
 - [ ] **CP-016** — simulate_signal handler never registered in router
   - Files: `services/control-plane/src/handlers/simulate.rs`

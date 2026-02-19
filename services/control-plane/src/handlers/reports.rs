@@ -27,7 +27,9 @@ struct EventWithBotName {
 }
 
 fn csv_escape(value: &str) -> String {
-    let mut escaped = value.replace('"', "\"\"");
+    // Strip \r first to prevent CSV injection via carriage-return smuggling.
+    let sanitized = value.replace('\r', "");
+    let mut escaped = sanitized.replace('"', "\"\"");
     if escaped.contains(',') || escaped.contains('\n') || escaped.contains('"') {
         escaped = format!("\"{}\"", escaped);
     }
