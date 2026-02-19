@@ -32,14 +32,8 @@ tracing-subscriber = "0.3"
 # Decimal for prices
 rust_decimal = { version = "1.40", features = ["serde", "maths"] }
 
-# Random numbers (for paper trading simulation)
-rand = "0.8"
-
 # UUID
 uuid = { version = "1.6", features = ["v4", "serde"] }
-
-# Config
-config = "0.13"
 
 # Unix process management (for targeted process kill)
 [target.'cfg(unix)'.dependencies]
