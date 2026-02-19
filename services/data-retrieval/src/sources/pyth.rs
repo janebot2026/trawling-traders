@@ -214,12 +214,31 @@ impl PythClient {
         let params: Vec<String> = feed_ids.iter().map(|id| format!("ids[]={}", id)).collect();
         let url = format!("{}/updates/price/latest?{}", self.base_url, params.join("&"));
 
-        let response = self
+        let start = std::time::Instant::now();
+        let response = match self
             .client
             .get(&url)
+            .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
-            .context("Failed to send Pyth batch request")?;
+        {
+            Ok(r) => r,
+            Err(e) => {
+                self.health_tracker.record_failure();
+                return Err(e).context("Failed to send Pyth batch request");
+            }
+        };
+
+        if !response.status().is_success() {
+            self.health_tracker.record_failure();
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!(
+                "Pyth batch API error: {} - {}",
+                status,
+                text
+            ));
+        }
 
         let update: PythPriceUpdate = response
             .json()
@@ -259,6 +278,9 @@ impl PythClient {
                 );
             }
         }
+
+        self.health_tracker
+            .record_success(start.elapsed().as_millis() as u64);
 
         Ok(result)
     }
