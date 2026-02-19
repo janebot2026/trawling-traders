@@ -414,7 +414,9 @@ pub async fn create_bot(
     let algorithm_factors_json = req
         .algorithm_factors
         .as_ref()
-        .map(|factors| serde_json::to_value(factors).unwrap_or(serde_json::Value::Null));
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid algorithm_factors payload: {}", e)))?;
 
     sqlx::query(
         r#"
@@ -911,7 +913,9 @@ pub async fn update_bot_config(
         .config
         .algorithm_factors
         .as_ref()
-        .map(|factors| serde_json::to_value(factors).unwrap_or(serde_json::Value::Null));
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid algorithm_factors payload: {}", e)))?;
 
     let config_id = Uuid::new_v4();
 

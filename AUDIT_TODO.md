@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 24 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 25 | **Deferred:** 5
 
 ---
 
@@ -217,10 +217,11 @@
   - Test: `cargo check`; reasoned check
   - **Done:** Added size guard to both ingest_events and heartbeat metrics batch.
 
-- [ ] **CP-012** — algorithm_factors serialization failure stores null
+- [x] **CP-012** — algorithm_factors serialization failure stores null
   - Files: `services/control-plane/src/handlers/bots.rs`
-  - Fix: Propagate serialization error
+  - Fix: Replaced unwrap_or(Null) with .transpose().map_err(400)
   - Test: `cargo check`; reasoned check
+  - **Done:** Serialization errors now return 400 instead of silently storing null.
 
 - [ ] **CP-013** — Background tasks have no panic supervision
   - Files: `services/control-plane/src/provisioning.rs`, `alerting.rs`
