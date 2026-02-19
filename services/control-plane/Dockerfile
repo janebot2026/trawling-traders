@@ -26,8 +26,10 @@ RUN mkdir -p /app/services/control-plane/migrations && \
 
 WORKDIR /app/services/control-plane
 
-# Build dependencies only - this layer is cached when only source changes
-RUN cargo build --release 2>/dev/null || true
+# Build dependencies only - this layer is cached when only source changes.
+# The stub source files will fail to compile our crate, but external
+# dependencies get compiled and cached. Failure is expected here.
+RUN cargo build --release || true
 
 # Build stage - uses cached dependencies
 FROM deps AS builder
