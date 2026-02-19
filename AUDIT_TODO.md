@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 19 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 22 | **Deferred:** 5
 
 ---
 
@@ -181,15 +181,17 @@
   - Fix: Split into per-step components
   - Test: `npx tsc --noEmit`; reasoned check
 
-- [ ] **BR-001** — Hold intents emit false trade_blocked events
+- [x] **BR-001** — Hold intents emit false trade_blocked events
   - Files: `services/bot-runner/src/runner.rs`
-  - Fix: Skip event emission when intent is `Hold`
+  - Fix: Added early-continue for Hold intents before execution/event emission
   - Test: `cargo check`; reasoned check
+  - **Done:** Hold intents now continue loop before execute_openclaw_intent, preventing false trade_blocked events.
 
-- [ ] **DR-003** — Reconnect spawns second message_handler without cancelling first
+- [x] **DR-003** — Reconnect spawns second message_handler without cancelling first
   - Files: `services/data-retrieval/src/sources/binance_ws.rs`
-  - Fix: Cancel previous task handle before spawning new one
+  - Fix: Store handler JoinHandle, abort previous before spawning new one
   - Test: `cargo check`; reasoned check
+  - **Done:** Committed together with DR-012 (same file). Handler task tracked and aborted on reconnect.
 
 ## Medium (59)
 

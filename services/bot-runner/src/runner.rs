@@ -507,6 +507,12 @@ impl BotRunner {
                 continue;
             }
 
+            // Hold intents require no execution or event emission.
+            if intent.action == TradeAction::Hold {
+                self.write_journal_entry(&journal_entry).ok();
+                continue;
+            }
+
             // Execute approved intent
             let result = self.execute_openclaw_intent(intent, &config).await;
 
