@@ -45,13 +45,36 @@ impl RateLimiter {
         }
     }
 
-    /// Check if request is allowed
+    /// Check if request is allowed.
+    ///
+    /// Strategy: read-lock first to reject already-exceeded callers cheaply; only
+    /// upgrade to a write-lock when we actually need to mutate state.  This avoids
+    /// serialising every request through a single write-lock on the fast path.
+    ///
+    /// Correctness: the double-check after acquiring the write-lock ensures no
+    /// race-condition bypass — two concurrent requests that both pass the read-check
+    /// will compete for the write-lock and one of them may then find the bucket full.
     pub async fn check(&self, key: &str) -> bool {
-        let mut buckets = self.buckets.write().await;
         let now = Instant::now();
         let window = Duration::from_secs(self.window_secs);
 
-        // Deterministic cleanup every 60 seconds (prevents memory leak)
+        // --- Read-lock fast path ---
+        // If the bucket exists and is clearly over the limit within its current window,
+        // reject without taking a write-lock.
+        {
+            let buckets = self.buckets.read().await;
+            if let Some(bucket) = buckets.get(key) {
+                let window_expired = now.duration_since(bucket.window_start) >= window;
+                if !window_expired && bucket.requests >= self.max_requests {
+                    return false;
+                }
+            }
+        }
+
+        // --- Write-lock mutating path ---
+        let mut buckets = self.buckets.write().await;
+
+        // Deterministic cleanup every 60 seconds (prevents memory leak).
         let should_cleanup = {
             let last = self.last_cleanup.read().await;
             now.duration_since(*last) >= Duration::from_secs(CLEANUP_INTERVAL_SECS)
@@ -68,23 +91,21 @@ impl RateLimiter {
 
         match buckets.get_mut(key) {
             Some(bucket) => {
-                // Check if window expired
+                // Re-check after write-lock acquisition (double-checked locking pattern).
                 if now.duration_since(bucket.window_start) >= window {
-                    // Reset window
+                    // Window expired — start a fresh window.
                     bucket.requests = 1;
                     bucket.window_start = now;
                     true
                 } else if bucket.requests < self.max_requests {
-                    // Increment and allow
                     bucket.requests += 1;
                     true
                 } else {
-                    // Rate limit exceeded
                     false
                 }
             }
             None => {
-                // New bucket
+                // First request for this key.
                 buckets.insert(
                     key.to_string(),
                     RateLimitBucket {
