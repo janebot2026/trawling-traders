@@ -1,545 +1,706 @@
 # Audit Remediation Checklist
 
-Legend: `[ ]` pending, `[x]` completed.
-
-## Critical
-
-- [x] **F-001 Bot route auth boundary (unauthenticated secret-bearing endpoints)**
-  - Files touched: `services/control-plane/src/main.rs`, `services/control-plane/src/middleware/mod.rs`, `services/control-plane/src/middleware/bot_auth.rs`, `services/control-plane/src/handlers/sync.rs`, `services/control-plane/src/lib.rs`
-  - Planned fix:
-    - Add dedicated bot auth middleware requiring `Authorization: Bearer <bootstrap_token>` for bot-facing routes.
-    - Enforce bot-id/token binding in middleware before handlers execute.
-    - Keep `/bot/{id}/secrets` one-time token semantics while preventing unauthenticated access to all `/bot/{id}/*` endpoints.
-  - Test plan:
-    - Add middleware unit tests for allow/deny cases.
-    - Integration-style handler test for unauthorized request returns 401.
-  - Completion note:
-    - Added `bot_auth_middleware` and wired it to all `/v1/bot/{id}/*` routes.
-    - Bot runner now sends `Authorization: Bearer $CONTROL_PLANE_BOT_TOKEN`; bootstrap writes token into service env file.
-    - Verified with `cd services/control-plane && cargo test middleware::bot_auth` and `cd services/bot-runner && cargo check`.
-
-- [x] **F-002 Remove production debug leaks (`/debug/*`)**
-  - Files touched: `services/control-plane/src/main.rs`
-  - Planned fix:
-    - Gate debug routes behind explicit env var `ENABLE_DEBUG_ROUTES=true`.
-    - Disable by default in all environments.
-    - Ensure no auth token preview is exposed when disabled.
-  - Test plan:
-    - Router test validating `/debug/startup` is absent by default.
-  - Completion note:
-    - Added `ENABLE_DEBUG_ROUTES` gate; debug routes are now disabled by default and only enabled when explicitly set to `true`.
-    - Added unit tests for flag parsing behavior.
-    - Verified with `cd services/control-plane && cargo test debug_routes`.
-
-## High
-
-- [x] **F-003 Broken test gate + missing CI coverage for bot-runner**
-  - Files touched: `services/bot-runner/tests/paper_trading_harness.rs`, `.github/workflows/deploy.yml`
-  - Planned fix:
-    - Fix `BotConfig` test fixture fields (`llm_model`, `telegram_bot_token`).
-    - Add bot-runner fmt/clippy/test jobs to CI workflow.
-    - Keep existing pipeline behavior for other services unchanged.
-  - Test plan:
-    - Run `cd services/bot-runner && cargo test`.
-    - Validate workflow YAML parses and references bot-runner steps.
-  - Completion note:
-    - Updated `paper_trading_harness` fixtures for current `BotConfig` fields (`llm_model`, `telegram_bot_token`).
-    - Added bot-runner fmt/clippy/test steps and target cache path in GitHub Actions deploy workflow.
-    - Verified with `cd services/bot-runner && cargo test`.
-
-- [x] **F-004 N+1 in report generation + non-global ordering risk**
-  - Files touched: `services/control-plane/src/handlers/reports.rs`
-  - Planned fix:
-    - Replace per-bot event loading loop with a single joined query by user/timeframe.
-    - Preserve report filtering semantics (`tax`, `trade-history`, `full`).
-    - Ensure stable global ordering by `created_at`.
-  - Test plan:
-    - Add unit test covering row ordering/filtering behavior.
-  - Completion note:
-    - Replaced per-bot event loading loop with a single `events`+`bots` join query filtered by user/timeframe and globally ordered by `created_at`.
-    - Added `filter_rows_preserves_order_and_filters_for_tax_report` unit test.
-    - Verified with `cd services/control-plane && cargo test filter_rows_preserves_order_and_filters_for_tax_report` and `cd services/control-plane && cargo check`.
-
-- [x] **F-005 Batch pricing endpoint is sequential and unbounded**
-  - Files touched: `services/data-retrieval/src/handlers.rs`
-  - Planned fix:
-    - Add max symbol limit validation.
-    - Process symbol requests concurrently with bounded fan-out.
-    - Preserve response shape and per-symbol error behavior.
-  - Test plan:
-    - Add tests for oversized request rejection.
-    - Add test for successful bounded batch execution.
-  - Completion note:
-    - Added max batch-size validation (`MAX_BATCH_SYMBOLS=100`) with explicit `400` error.
-    - Reworked batch lookups to bounded concurrent execution (`buffered(10)`) while preserving response semantics.
-    - Added tests `validate_batch_size_rejects_oversized` and `get_prices_batch_accepts_empty_batch`; verified with `cd services/data-retrieval && cargo test validate_batch_size_rejects_oversized`, `cd services/data-retrieval && cargo test get_prices_batch_accepts_empty_batch`, and `cd services/data-retrieval && cargo check`.
-
-## Medium
-
-- [x] **F-006 Missing explicit upstream timeouts/client reuse in chat/report handlers**
-  - Files touched: `services/control-plane/src/lib.rs`, `services/control-plane/src/main.rs`, `services/control-plane/src/handlers/chat.rs`, `services/control-plane/src/handlers/reports.rs`
-  - Planned fix:
-    - Add shared `reqwest::Client` to app state with explicit timeout.
-    - Replace ad hoc `reqwest::Client::new()` calls in handlers.
-    - Preserve payload and error mapping semantics.
-  - Test plan:
-    - Compile checks and existing handler tests.
-  - Completion note:
-    - Added shared `reqwest::Client` with explicit 15s timeout to `AppState`.
-    - Updated chat/report webhook handlers to reuse the shared client instead of creating ad hoc clients per request.
-    - Verified with `cd services/control-plane && cargo check` and `cd services/control-plane && cargo test handlers::reports::tests::filter_rows_preserves_order_and_filters_for_tax_report`.
-
-- [x] **F-007 Runtime panic footguns (`unwrap`/`expect`)**
-  - Files touched: `services/control-plane/src/webhook.rs`, `services/control-plane/src/provisioning.rs`, `services/control-plane/src/handlers/bots.rs`
-  - Planned fix:
-    - Replace runtime `expect`/`unwrap` with explicit error propagation/fallback handling.
-    - Keep response codes/messages stable where possible.
-    - Add defensive handling for serialization/encryption edge cases.
-  - Test plan:
-    - Existing test suite + new targeted unit tests for error branches.
-  - Completion note:
-    - Replaced webhook client constructor `expect` with non-panicking fallback and warning.
-    - Replaced runtime `serde_json::to_value(...).unwrap()` in bot config handlers with explicit `400` error mapping.
-    - Verified with `cd services/control-plane && cargo check` and `cd services/control-plane && cargo test handlers::settings::tests::normalize_display_name_trims_and_keeps_valid_input`.
-    - Note: `with_retry` zero-attempt panic is intentionally handled in `F-012`.
-
-- [x] **F-008 Dead router path divergence (`lib.rs::app` unused)**
-  - Files touched: `services/control-plane/src/lib.rs`
-  - Planned fix:
-    - Remove unused `app(...)` router builder to avoid drift.
-    - Keep only the `main.rs` router composition as source of truth.
-    - Ensure public exports remain intact.
-  - Test plan:
-    - `cd services/control-plane && cargo check`.
-  - Completion note:
-    - Removed unused `control_plane::app(...)` router builder from `lib.rs` so route composition is defined only in `main.rs`.
-    - Cleaned now-unused imports from `lib.rs`.
-    - Verified with `cd services/control-plane && cargo check`.
-
-- [x] **F-009 Duplicate API client implementation drift (`index.ts` vs `client.ts`)**
-  - Files touched: `packages/api-client/src/client.ts`, `packages/api-client/src/index.ts` (if needed)
-  - Planned fix:
-    - Make `client.ts` a thin re-export of canonical `index.ts` implementation.
-    - Remove duplicate logic to avoid behavioral divergence.
-    - Preserve import compatibility for existing consumers.
-  - Test plan:
-    - `cd packages/api-client && npm run build`.
-    - `cd apps/mobile && npm run --silent tsc --noEmit` (if available).
-  - Completion note:
-    - Replaced duplicated `client.ts` implementation with a compatibility re-export of canonical `index.ts`.
-    - Verified package build with `cd packages/api-client && npm run build`.
-    - `cd apps/mobile && npx tsc --noEmit` reports an existing unrelated screen typing error in `/Users/conorholdsworth/Workspace/temp/trawling-traders/apps/mobile/src/screens/create-bot/CreateBotWizardSteps.tsx`.
-
-## Low
-
-- [x] **F-010 Root lint/typecheck scripts are non-runnable**
-  - Files touched: `package.json`
-  - Planned fix:
-    - Make root scripts workspace-aware and runnable in repo context.
-    - Avoid introducing broad lint config churn.
-    - Ensure commands fail only on real project issues.
-  - Test plan:
-    - Run `npm run lint` and `npm run typecheck` from repo root.
-  - Completion note:
-    - Updated root scripts to workspace-aware, runnable commands that execute shared TS package builds from repo root.
-    - Verified with `npm run lint` and `npm run typecheck`.
-
-- [x] **F-011 Over-broad dead_code allowances in bot-runner**
-  - Files touched: `services/bot-runner/src/main.rs`, `services/bot-runner/src/lib.rs`
-  - Planned fix:
-    - Remove crate-level `#![allow(dead_code)]`.
-    - Add localized `#[allow(dead_code)]` only where intentionally needed.
-    - Keep build warning-clean where practical.
-  - Test plan:
-    - `cd services/bot-runner && cargo check`.
-  - Completion note:
-    - Removed crate-level `#![allow(dead_code)]` from both bot-runner library and binary entrypoints.
-    - Verified with `cd services/bot-runner && cargo check` (warnings are now visible and can be addressed incrementally).
-
-- [x] **F-012 `with_retry` zero-attempt panic edge case**
-  - Files touched: `services/control-plane/src/provisioning.rs`
-  - Planned fix:
-    - Validate `max_attempts >= 1` before loop.
-    - Return explicit error instead of panicking when invalid config passed.
-    - Add unit test for invalid retry config.
-  - Test plan:
-    - New unit test + `cd services/control-plane && cargo test provisioning`.
-  - Completion note:
-    - Updated `with_retry` to return `anyhow::Result<T>` and explicitly reject `max_attempts == 0` with a structured error.
-    - Removed panic-based `expect` fallback in retry completion path.
-    - Added `with_retry_rejects_zero_attempts` unit test and verified with `cd services/control-plane && cargo test with_retry_rejects_zero_attempts` and `cd services/control-plane && cargo check`.
+**Total findings:** 136 | **Fixed:** 1 | **Deferred:** 5
 
 ---
 
-# Round 2 Audit Findings
+## Critical (4)
 
-Based on comprehensive full-codebase audit (2026-02-18). IDs prefixed R2- to distinguish from Round 1.
+- [x] **CP-001** — No ownership check on openclaw_config
+  - Files: `services/control-plane/src/handlers/openclaw_config.rs`
+  - Fix: Add `Extension(auth)` extraction + verify `bot.user_id == auth.user_id` before any read/write
+  - Test: Reasoned check — ownership guard prevents cross-user access; `cargo check`
+  - **Done:** Added `Extension(auth): Extension<AuthContext>` + ownership check to both get/update handlers. `cargo check` clean.
 
-## Critical
+- [ ] **CP-002** — Infinite cleanup loop (status set back to 'destroying')
+  - Files: `services/control-plane/src/provisioning.rs:403-409`
+  - Fix: Change `status = 'destroying'` to `status = 'error'` in cleanup query
+  - Test: `cargo check`; reasoned check — terminal state breaks loop
 
-- [x] **R2-001 Persona enum mismatch: DB `quant_lite` vs TS `quant-lite`**
-  - Files: `packages/types/src/index.ts`, `apps/mobile/src/screens/CreateBotScreen.tsx`, `apps/mobile/src/screens/BotSettingsScreen.tsx`, `services/control-plane/src/models/mod.rs`, `docs/frontend-architecture.md`
-  - Planned fix:
-    - Add `#[serde(rename_all = "snake_case")]` to Persona enum so API returns `quant_lite`
-    - Change TypeScript `Persona` type from `'quant-lite'` to `'quant_lite'`
-    - Update all mobile references from `quant-lite` to `quant_lite`
-  - Test plan: `cargo check` (control-plane), `npx tsc --noEmit` (types, api-client)
-  - Completion note:
-    - Added `#[serde(rename_all = "snake_case")]` to Persona enum — API now serializes as `quant_lite` matching DB
-    - Updated TS type, mobile screens (CreateBotScreen, BotSettingsScreen), and docs
-    - Verified: `cargo check` clean, `tsc --noEmit` clean for both packages
+- [ ] **DR-001** — Route shadowing (`/prices/supported` unreachable)
+  - Files: `services/data-retrieval/src/main.rs:73-79`
+  - Fix: Move static routes (`/prices/batch`, `/prices/supported`) before `/:symbol` param route
+  - Test: `cargo check`; reasoned check — Axum matches first route
 
-## High
+- [ ] **INFRA-011** — Docker password via CLI flag; SSH action unpinned
+  - Files: `.github/workflows/deploy.yml`
+  - Fix: Use `--password-stdin` for docker login; pin SSH action to commit SHA
+  - Test: YAML lint; reasoned check of deploy workflow
 
-- [x] **R2-002 Encryption silently returns empty string on failure**
-  - Files: `services/control-plane/src/handlers/bots.rs`
-  - Planned fix:
-    - Replace `.unwrap_or_default()` on `secrets.encrypt()` with proper error propagation via `map_err`
-    - Return 500 to caller instead of storing empty string
-  - Test plan: `cargo check`, `cargo test` on control-plane
-  - Completion note:
-    - Added `encrypt_secret()` helper that maps encryption errors to 500 with error logging
-    - Replaced all 6 `.unwrap_or_default()` on encrypt calls with `encrypt_secret()` + `?` propagation
-    - Verified: `cargo check` clean
+## High (29)
 
-- [x] **R2-003 Histogram memory leak in MetricsCollector**
-  - Files: `services/control-plane/src/observability.rs`, `services/control-plane/src/handlers/sync.rs`
-  - Planned fix:
-    - Remove unused histogram collection (histograms field, `histogram()` method) since `snapshot()` never surfaces it
-    - Simplify MetricsInner struct
-  - Test plan: `cargo check` on control-plane
-  - Completion note:
-    - Removed `histograms` field, `HashMap` allocation, and `histogram()` method from MetricsCollector
-    - Converted 2 call sites in sync.rs from `histogram()` to `gauge()` so duration data is actually visible in snapshots
-    - Verified: `cargo check` clean
-
-- [x] **R2-004 Spawned provisioning tasks silently swallow panics**
-  - Files: `services/control-plane/src/handlers/bots.rs`
-  - Planned fix:
-    - Wrap each `tokio::spawn` call with a supervisor that catches JoinError and updates bot status to "error"
-    - Log panic info for diagnostics
-  - Test plan: `cargo check`, `cargo test` on control-plane
-  - Completion note:
-    - Added `supervised_spawn()` helper that wraps a JoinHandle and catches panics
-    - On panic: logs error with bot_id and updates bot status to Error
-    - Applied to all 3 spawn sites (create, redeploy, destroy)
-    - Verified: `cargo check` clean
-
-## Medium
-
-- [x] **R2-005 No pagination on bot list endpoint**
-  - Files: `services/control-plane/src/handlers/bots.rs`
-  - Planned fix:
-    - Add `LIMIT 50` default to `list_bots` query
-    - Accept optional `?limit=N` query param (max 100)
-  - Test plan: `cargo check` on control-plane
-  - Completion note:
-    - Added `ListBotsQuery` with optional `limit` param, clamped to 1..100, default 50
-    - Added LIMIT $2 to SQL query
-    - Verified: `cargo check` clean
-
-- [x] **R2-006 Missing `llmModel` in BotConfig response mapping**
-  - Files: `packages/types/src/index.ts`, `packages/api-client/src/index.ts`
-  - Planned fix:
-    - Add `llmModel?: string` to `BotConfig` interface
-    - Map `llm_model` in `mapBotConfig()`
-  - Test plan: `npm run typecheck`
-  - Completion note:
-    - Added `llmModel?: LlmModel` to BotConfig interface in types package
-    - Added `llmModel` mapping in api-client `mapBotConfig()`
-    - Verified: `tsc --noEmit` clean for both packages
-
-- [x] **R2-007 Plaintext secrets fallback in production**
-  - Files: `services/control-plane/src/secrets.rs`
-  - Planned fix:
-    - Add startup guard: if ENVIRONMENT is not "development"/"dev" and encryption key is missing, log error and exit
-  - Test plan: `cargo check` on control-plane
-  - Completion note:
-    - Exit with error if SECRETS_ENCRYPTION_KEY unset unless ALLOW_PLAINTEXT_SECRETS=true
-    - Production will fail fast; dev explicitly opts in to plaintext
-    - Verified: `cargo check` clean, `cargo test secrets` passes (4/4)
-
-- [x] **R2-008 Kline processing stub does nothing**
-  - Files: `services/data-retrieval/src/sources/binance_ws.rs`
-  - Planned fix:
-    - Remove unimplemented kline processing stub
-    - Have `subscribe_klines()` return an error indicating feature is not yet implemented
-  - Test plan: `cargo check` on data-retrieval
-  - Completion note:
-    - Removed dead `subscribe_klines()` (never called) and stub `process_kline()` (parsed then discarded data)
-    - Kline events in `process_message` now just log a debug message
-    - Verified: `cargo check` clean
-
-- [x] **R2-009 `live_trading_guard_middleware` defined but never applied**
-  - Files: `services/control-plane/src/handlers/bots.rs`
-  - Planned fix:
-    - Apply `live_trading_guard_middleware` to the bot update/deploy routes that can change trading mode
-  - Test plan: `cargo check` on control-plane
-  - Completion note:
-    - Added `require_live_trading_permission()` targeted check in create_bot and update_bot_config
-    - Rejects live trading mode for Free-tier users with 403, allows paper mode for all tiers
-    - Chose handler-level check over applying blunt middleware (which would block all Free requests)
-    - Verified: `cargo check` clean
-
-- [x] **R2-010 LLM API keys stored in AsyncStorage (not SecureStore)**
-  - Files: `apps/mobile/src/store/index.ts`
-  - Planned fix:
-    - Move sensitive settings (llmApiKey fields) to expo-secure-store wrapper
-    - Keep non-sensitive preferences in AsyncStorage
-  - Test plan: Mobile typecheck
-  - Completion note:
-    - Created `secureStorage` Zustand adapter backed by `expo-secure-store` (encrypted at rest)
-    - Changed settings store (containing API keys) from AsyncStorage to secureStorage
-    - Non-sensitive stores (bots, user, prices) remain on AsyncStorage
-    - Verified: `tsc --noEmit` clean (only pre-existing error in CreateBotWizardSteps)
-
-## Low
-
-- [x] **R2-011 Dead code in bot-runner (clippy warnings)**
-  - Files: `services/bot-runner/src/executor.rs`, `services/bot-runner/src/intent.rs`, `services/bot-runner/src/reconciler.rs`, `services/bot-runner/src/openclaw.rs`, `services/bot-runner/src/gateway.rs`, `services/bot-runner/src/amount.rs`, `services/bot-runner/src/config.rs`
-  - Planned fix:
-    - Remove unused fields/methods flagged by clippy
-    - Remove legacy `TradeResult` struct
-  - Test plan: `cargo clippy` on bot-runner with zero warnings, `cargo test`
-  - Completion note:
-    - Removed legacy `TradeResult` struct and duplicate token utility functions from executor.rs
-    - Added module-level `#![allow(dead_code)]` to 4 WIP modules (intent, reconciler, openclaw, gateway)
-    - Added targeted `#[allow(dead_code)]` on specific WIP items in executor.rs, amount.rs, config.rs
-    - Verified: `cargo check` clean (0 warnings), `cargo test` passes (13/13)
-
-- [x] **R2-012 `_error` parameter never used in `update_bot_status`**
-  - Files: `services/control-plane/src/handlers/bots.rs`
-  - Planned fix:
-    - Log the error parameter with `tracing::warn!` when status is error
-    - Remove underscore prefix
-  - Test plan: `cargo check` on control-plane
-  - Completion note:
-    - Renamed `_error` to `reason`, log it with `warn!` when status is Error
-    - Verified: `cargo check` clean
-
-- [x] **R2-013 Pyth health check makes real API call**
-  - Files: `services/data-retrieval/src/sources/pyth.rs`
-  - Planned fix:
-    - Add `HealthTracker` struct (same pattern as CoinGecko) with atomic success/failure counters
-    - Return cached health instead of making API call
-  - Test plan: `cargo check` on data-retrieval
-  - Completion note:
-    - Added `HealthTracker` with atomic counters (same pattern as CoinGecko)
-    - Instrumented `get_price()` to record success/failure + latency
-    - `health()` now returns cached stats instead of making a live BTC price call
-    - Verified: `cargo check` clean
-
-- [x] **R2-014 `redis` v0.25.4 future incompatibility**
-  - Files: `services/data-retrieval/Cargo.toml`
-  - Planned fix:
-    - Upgrade redis dependency to latest compatible version
-  - Test plan: `cargo check` with no future-incompat warnings
-  - Completion note:
-    - Upgraded redis from 0.25 to 1.0 (API-compatible, no code changes needed)
-    - Future-incompat warnings eliminated across all services
-    - Verified: `cargo check` clean for both data-retrieval and control-plane
-
-- [x] **R2-015 Duplicate SafeAreaProvider in App.tsx**
-  - Files: `apps/mobile/App.tsx`
-  - Planned fix:
-    - Remove nested SafeAreaProvider wrapping payments error banner
-  - Test plan: Visual check; typecheck
-  - Completion note:
-    - Removed redundant inner SafeAreaProvider (already provided by outer content wrapper)
-    - Error banner View is now a direct child of the Fragment
-
-- [x] **R2-016 Dead animation code in mobile**
-  - Files: `apps/mobile/src/utils/animations.ts`
-  - Planned fix:
-    - Remove unused `AnimationPresets` and deprecated animation functions
-  - Test plan: Grep for imports to verify no references
-  - Completion note:
-    - Removed AnimationPresets and 7 deprecated functions (fadeIn, slideInFromRight, pulse, staggerFadeIn, shimmer, bounce)
-    - Kept `pressScale` (still imported by AnimatedBotCard and BotFleetCard)
-    - Kept all hook versions (useFadeIn, useSlideIn, etc.) as they're the proper replacements
-
-- [x] **R2-017 API key auth uses two separate queries**
-  - Files: `services/control-plane/src/middleware/auth.rs`
-  - Planned fix:
-    - Merge api_keys + users lookup into single JOIN query
-  - Test plan: `cargo check` on control-plane
-  - Completion note:
-    - Merged 3 separate queries (api_keys lookup, is_admin check, email lookup) into single JOIN
-    - Reduces API key auth from 3 round-trips to 1
-    - Verified: `cargo check` clean
-
-- [x] **R2-018 `strict: false` in API client tsconfig**
-  - Files: `packages/api-client/tsconfig.json`
-  - Planned fix:
-    - Enable `strict: true` and fix resulting type errors
-  - Test plan: `npm run typecheck`
-  - Completion note:
-    - Enabled `strict: true` and removed redundant `noImplicitAny: false`
-    - Code was already strict-compatible, zero errors
-    - Verified: `tsc --noEmit` clean
-
----
-
-# Round 3 Audit Findings
-
-Full-codebase audit (2026-02-18). IDs match `docs/FULL_AUDIT_REPORT.md`.
-
-## High Severity
-
-- [x] **F-002** — `realized_pnl_today` never updated (daily loss risk rail broken)
+- [ ] **BR-002** — Daily trade_count never resets at midnight
   - Files: `services/bot-runner/src/runner.rs`
-  - Fix: After confirmed sell, compute realized PnL from avg_entry vs execution price; accumulate into `self.realized_pnl_today`; add daily reset check
-  - Test: `cargo test` + `cargo check` on bot-runner
-  - Verified: `cargo check` clean, 41 tests pass (13+13+2+13)
-  - Completion note: Added `accumulate_realized_pnl()` (computes PnL from portfolio entry price vs execution price), `maybe_reset_daily_pnl()` (UTC midnight reset), `pnl_reset_date` field. Called on every confirmed sell and at start of each decision tick.
+  - Fix: Add `self.trade_count = 0` in `maybe_reset_daily_pnl`
+  - Test: `cargo check`; reasoned check
 
-- [x] **F-003** — Config version increment race condition
+- [ ] **BR-003** — Config acked before apply_config succeeds
+  - Files: `services/bot-runner/src/runner.rs`
+  - Fix: Swap order — call `apply_config` first, then `ack_config` on success
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-004** — USD-to-raw overflow silently produces zero-value trade
+  - Files: `services/bot-runner/src/runner.rs`
+  - Fix: Add overflow check; return error if amount rounds to zero
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-007** — SIGTERM not handled (no graceful shutdown)
+  - Files: `services/bot-runner/src/runner.rs`
+  - Fix: Add `tokio::signal::ctrl_c()` and SIGTERM handler in main loop
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-003** — Bot marked 'online' when droplet created (not running)
   - Files: `services/control-plane/src/handlers/bots.rs`
-  - Fix: Use atomic `INSERT ... SELECT COALESCE(MAX(version),0)+1` in a transaction
-  - Test: `cargo check` on control-plane
-  - Verified: `cargo check` clean
-  - Completion note: Replaced separate read+write with single `INSERT ... (SELECT COALESCE(MAX(version),0)+1) ... RETURNING version`. Concurrent requests now get serialized by Postgres row-level locking on the subquery.
+  - Fix: Remove premature status update; bot goes online on first heartbeat
+  - Test: `cargo check`; reasoned check
 
-- [x] **F-004** — Panicking `unwrap()` in trading engine
-  - Files: `services/control-plane/src/brain/engine.rs`
-  - Fix: Replace `Decimal::from_str(...).unwrap()` with consts; replace `candles.last().unwrap()` with `.ok_or()`
-  - Test: `cargo test` + `cargo check` on control-plane
-  - Verified: `cargo check` clean, 21 tests pass
-  - Completion note: Added `STOP_LOSS_95`, `TAKE_PROFIT_108`, `TAKE_PROFIT_110` as compile-time Decimal consts via `from_parts`. Replaced 6 runtime `from_str().unwrap()` calls. Changed bare `.unwrap()` to `.expect()` with safety comments where value is guaranteed by prior checks. Replaced `from_str` with `try_from` for f64→Decimal conversion.
-
-- [x] **F-005** — Hardcoded bot limit ignores subscription tier
+- [ ] **CP-004** — config_versions INSERT uses Uuid::nil() as bot_id
   - Files: `services/control-plane/src/handlers/bots.rs`
-  - Fix: Replace `>= 4` with subscription tier's `max_bots()`
-  - Test: `cargo check` on control-plane
-  - Verified: `cargo check` clean
-  - Completion note: Replaced `>= 4` with `>= sub.tier.max_bots() as i64`. Error message now includes tier-specific limit info.
+  - Fix: Generate `bot_id` before transaction and use real ID
+  - Test: `cargo check`; reasoned check
 
-- [x] **F-006** — Silent decryption failure for LLM API key
+- [ ] **CP-005** — Bootstrap token compared with `==` (timing side-channel)
   - Files: `services/control-plane/src/handlers/sync.rs`
-  - Fix: Add `tracing::warn!` on decryption failure instead of silent `unwrap_or_default()`
-  - Test: `cargo check` on control-plane
-  - Verified: `cargo check` clean
-  - Completion note: Replaced `.unwrap_or_default()` with explicit match that logs `warn!` with bot_id on failure. Still returns empty string (graceful degradation) but now observable.
+  - Fix: Use constant-time comparison
+  - Test: `cargo check`; reasoned check
 
-- [x] **F-001** — N+1 query loop in bot name availability (up to 998 queries)
-  - Files: `services/control-plane/src/handlers/bots.rs`
-  - Fix: Single query to fetch all existing names matching prefix; compute next available in Rust
-  - Test: `cargo check` on control-plane
-  - Verified: `cargo check` clean
-  - Completion note: Replaced 2..=999 loop (up to 998 DB queries) with single `SELECT name FROM bots WHERE name LIKE $prefix-%` + HashSet lookup in Rust. O(1) DB round-trip regardless of how many names are taken.
+- [ ] **CP-006** — Debug endpoints leak error strings in production
+  - Files: `services/control-plane/src/main.rs`
+  - Fix: Gate debug routes behind admin auth or remove from production
+  - Test: `cargo check`; reasoned check
 
-## Medium Severity
+- [ ] **CP-007** — 998 sequential DB queries for display name check
+  - Files: `services/control-plane/src/handlers/settings.rs`
+  - Fix: Replace loop with single SQL query
+  - Test: `cargo check`; reasoned check
 
-- [x] **F-007** — Heartbeat metrics N+1 INSERT
-  - Files: `services/control-plane/src/handlers/sync.rs`
-  - Fix: Batch INSERT using unnest arrays
-  - Test: `cargo check` on control-plane
-  - Verified: `cargo check` clean
-  - Completion note: Replaced per-metric INSERT loop with single `INSERT INTO metrics SELECT * FROM unnest(...)` batch. Pre-validates all values before touching DB.
+- [ ] **DR-002** — `/prices/{symbol}` path param never extracted
+  - Files: `services/data-retrieval/src/handlers.rs`
+  - Fix: Add `Path(symbol)` extractor alongside query param fallback
+  - Test: `cargo check`; reasoned check
 
-- [x] **F-008** — Event ingest N+1 INSERT
-  - Files: `services/control-plane/src/handlers/sync.rs`
-  - Fix: Batch INSERT using unnest arrays
-  - Test: `cargo check` on control-plane
-  - Verified: `cargo check` clean
-  - Completion note: Replaced per-event INSERT loop with single `INSERT INTO events SELECT * FROM unnest(...)` batch. Metrics counting loop remains in-memory (no DB overhead).
-
-- [x] **F-009** — Unsafe `libc::kill()` without error handling
-  - Files: `services/bot-runner/src/executor.rs`
-  - Fix: Check return value of `libc::kill`; log on failure
-  - Test: `cargo check` on bot-runner
-  - Verified: `cargo check` clean
-  - Completion note: Check return value of `libc::kill`, log warning with errno via `last_os_error()` on failure. Handles case where process already exited.
-
-- [x] **F-010** — Cache TTL mismatch (30s app vs 60s Redis)
-  - Files: `services/data-retrieval/src/cache/mod.rs`
-  - Fix: Align Redis TTL to 30s
-  - Test: `cargo check` on data-retrieval
-  - Verified: `cargo check` clean
-  - Completion note: Changed Redis `set_ex` TTL from 60 to 30 seconds to match in-memory cache check.
-
-- [x] **F-011** — Missing DB pool timeout and idle settings
-  - Files: `services/control-plane/src/db/mod.rs`
-  - Fix: Add `idle_timeout(600s)` and `max_lifetime` to pool
-  - Test: `cargo check` on control-plane
-  - Verified: `cargo check` clean
-  - Completion note: Added `idle_timeout(600s)` and `max_lifetime(1800s)` to prevent stale connections accumulating.
-
-- [x] **F-012** — Pyth price conversion loses precision via f64
+- [ ] **DR-004** — Batch pricing uses f64, losing Decimal precision
   - Files: `services/data-retrieval/src/sources/pyth.rs`
-  - Fix: Use Decimal arithmetic directly instead of f64 intermediate
-  - Test: `cargo check` on data-retrieval
-  - Verified: `cargo check` clean
-  - Completion note: Replaced `(price_int as f64) * 10f64.powi(expo)` → `Decimal::from(price_int) / Decimal::from(10^|expo|)`. Eliminates f64 precision loss for BTC-class prices. Confidence also computed via Decimal.
+  - Fix: Use `Decimal` arithmetic throughout batch path
+  - Test: `cargo check`; reasoned check
 
-- [x] **F-013** — No backpressure on Binance WebSocket channel
+- [ ] **DR-008** — CORS fully open, no auth or rate limiting
+  - Files: `services/data-retrieval/src/main.rs`
+  - Fix: Restrict CORS origins to known domains
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-012** — WS disconnect leaves consumer blocked forever
   - Files: `services/data-retrieval/src/sources/binance_ws.rs`
-  - Fix: Replace `send()` with `try_send()` + warning log on channel full
-  - Test: `cargo check` on data-retrieval
-  - Verified: `cargo check` clean
-  - Completion note: Replaced blocking `send().await` with `try_send()`. On channel full, drops update with warning log instead of stalling the message handler.
+  - Fix: Drop `price_tx` on disconnect so `rx.recv()` returns `None`
+  - Test: `cargo check`; reasoned check
 
-- [x] **F-015** — Mobile: `usePrices` hook dependency fragility
-  - Files: `apps/mobile/src/hooks/usePrices.ts`
-  - Fix: Add `useMemo` for symbol key stabilization; add explanatory comment
-  - Test: TypeScript typecheck
-  - Verified: `tsc --noEmit` clean
-  - Completion note: Added `useMemo` for `symbolsKey`, replaced raw `symbols.join(',')` in deps array. Added comment explaining the stabilization pattern.
+- [ ] **INFRA-001** — configureApi() writes to unused global
+  - Files: `packages/api-client/src/index.ts`, `packages/api-client/src/config.ts`
+  - Fix: Remove dead `configureApi` or wire into actual API calls
+  - Test: `npx tsc --noEmit`; reasoned check
 
-- [x] **F-016** — Mobile: Silent error swallowing in BotDetailScreen
-  - Files: `apps/mobile/src/screens/BotDetailScreen.tsx`
-  - Fix: Add `console.warn` in `.catch()` handler
-  - Test: TypeScript typecheck
-  - Verified: Manual code review
-  - Completion note: Added `console.warn` with error message in catch handler. Still returns empty messages for graceful UI degradation.
+- [ ] **INFRA-002** — TS enum kebab-case vs Postgres snake_case mismatch
+  - Files: `packages/types/src/index.ts`
+  - Fix: Align enum values to match Postgres (snake_case)
+  - Test: `npx tsc --noEmit`; reasoned check
 
-- [x] **F-019** — `HomeOverviewScreen`: `Promise.all` fails atomically
+- [ ] **INFRA-012** — Secrets visible in `docker inspect` via CLI args
+  - Files: `.github/workflows/deploy.yml`
+  - Fix: Move secrets to env-file passed via `--env-file`
+  - Test: YAML lint; reasoned check
+
+- [ ] **INFRA-022** — Bare `.env` not in `.gitignore`
+  - Files: `.gitignore`
+  - Fix: Add `.env` entry
+  - Test: `git check-ignore .env`
+
+- [ ] **MB-001** — configureApi re-called on every auth state change
+  - Files: `apps/mobile/src/api/ApiProvider.tsx`
+  - Fix: Guard with ref to only configure once
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-002** — Offline banner animation broken (unmounted node)
+  - Files: `apps/mobile/src/context/NetworkContext.tsx`
+  - Fix: Add cleanup/cancel on unmount
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-003** — onRefresh doesn't await loadData
   - Files: `apps/mobile/src/screens/HomeOverviewScreen.tsx`
-  - Fix: N/A — already has individual try/catch per bot (lines 67-73, 77-82)
-  - Test: N/A
-  - Verified: Code review confirms each inner promise catches individually
-  - Completion note: False positive — already addressed in current code
+  - Fix: Add `await` to `loadData()` call in `onRefresh`
+  - Test: `npx tsc --noEmit`; reasoned check
 
-## Low Severity
+- [ ] **MB-007** — BotSettings route declared but Screen not registered
+  - Files: `apps/mobile/src/navigation/AppNavigator.tsx`
+  - Fix: Register `BotSettings` screen component
+  - Test: `npx tsc --noEmit`; reasoned check
 
-- [x] **F-014** — No jitter in reconnection backoff
+- [ ] **MB-011** — No partialize on secure store (entire state persisted)
+  - Files: `apps/mobile/src/store/index.ts`
+  - Fix: Add `partialize` to exclude sensitive fields from persistence
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-012** — LLM API key round-trips server-client-server
+  - Files: `apps/mobile/src/screens/BotSettingsScreen.tsx`, `BotStrategyConfigScreen.tsx`
+  - Fix: Don't send key back to client; use placeholder for display
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-015** — No cancellation on per-bot metric fetches (memory leak)
+  - Files: `apps/mobile/src/screens/HomeOverviewScreen.tsx`
+  - Fix: Add AbortController cleanup in useEffect
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-016** — CHART_WIDTH computed once at module load
+  - Files: `apps/mobile/src/components/PnlHistoryChart.tsx`
+  - Fix: Use `useWindowDimensions` hook
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-020** — Bot fleet uses ScrollView.map (unbounded render)
+  - Files: `apps/mobile/src/screens/HomeOverviewScreen.tsx`
+  - Fix: Replace with `FlatList`
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-024** — CreateBotWizardSteps.tsx is 1193 lines
+  - Files: `apps/mobile/src/screens/create-bot/CreateBotWizardSteps.tsx`
+  - Fix: Split into per-step components
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **BR-001** — Hold intents emit false trade_blocked events
+  - Files: `services/bot-runner/src/runner.rs`
+  - Fix: Skip event emission when intent is `Hold`
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-003** — Reconnect spawns second message_handler without cancelling first
+  - Files: `services/data-retrieval/src/sources/binance_ws.rs`
+  - Fix: Cancel previous task handle before spawning new one
+  - Test: `cargo check`; reasoned check
+
+## Medium (59)
+
+- [ ] **CP-008** — Bootstrap token stored in plaintext (not hashed)
+  - Files: `services/control-plane/src/handlers/sync.rs`
+  - Fix: Hash token before storing; compare hashes
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-009** — Rate limiter write lock on every request
+  - Files: `services/control-plane/src/middleware/rate_limit.rs`
+  - Fix: Use read lock for check, write lock only for insert/update
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-010** — Subscription is_active true when no subscription exists
+  - Files: `services/control-plane/src/middleware/subscription.rs`
+  - Fix: Default `is_active` to `false` when no row found
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-011** — Unbounded event/metric batches (no size cap)
+  - Files: `services/control-plane/src/handlers/sync.rs`
+  - Fix: Add max batch size constant; reject oversized payloads
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-012** — algorithm_factors serialization failure stores null
+  - Files: `services/control-plane/src/handlers/bots.rs`
+  - Fix: Propagate serialization error
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-013** — Background tasks have no panic supervision
+  - Files: `services/control-plane/src/provisioning.rs`, `alerting.rs`
+  - Fix: Wrap spawned tasks with panic supervision loop
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-014** — Offline checker skips bots with NULL last_heartbeat_at
+  - Files: `services/control-plane/src/alerting.rs`
+  - Fix: Include bots with NULL heartbeat in 'online' status
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-015** — csv_escape doesn't handle `\r` (CSV injection)
+  - Files: `services/control-plane/src/handlers/reports.rs`
+  - Fix: Strip or escape `\r`
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-016** — simulate_signal handler never registered in router
+  - Files: `services/control-plane/src/handlers/simulate.rs`
+  - Fix: Delete dead handler
+  - Test: `cargo check`
+
+- [ ] **CP-017** — live_trading_guard_middleware defined but never applied
+  - Files: `services/control-plane/src/middleware/subscription.rs`
+  - Fix: Remove dead function
+  - Test: `cargo check`
+
+- [ ] **CP-023** — get_authorized_bot helper duplicated
+  - Files: `services/control-plane/src/handlers/bots.rs`, `handlers/chat.rs`
+  - Fix: Extract into shared handler helper
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-005** — Use-after-move of child on non-Unix
+  - Files: `services/bot-runner/src/executor.rs`
+  - Fix: Restructure to avoid move before conditional use
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-006** — last_plan_time always set to "now"
+  - Files: `services/bot-runner/src/runner.rs`
+  - Fix: Store actual plan timestamp
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-008** — Blocking std::fs::write in async context
+  - Files: `services/bot-runner/src/runner.rs`
+  - Fix: Replace with `tokio::fs::write`
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-009** — Blocking std::process::Command in async context
+  - Files: `services/bot-runner/src/gateway.rs`
+  - Fix: Replace with `tokio::process::Command`
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-010** — Per-event HTTP sends block tick loop
+  - Files: `services/bot-runner/src/runner.rs`
+  - Fix: Batch events or send via background channel
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-011** — Position-size rail checks trade size, not resulting position
+  - Files: `services/bot-runner/src/runner.rs`
+  - Fix: Check resulting position after trade
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-012** — llm_api_key in serializable struct (latent leak)
+  - Files: `services/bot-runner/src/config.rs`
+  - Fix: Add `#[serde(skip_serializing)]`
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-014** — Partial reconciliation fails on SOL balance error
+  - Files: `services/bot-runner/src/reconciler.rs`
+  - Fix: Continue reconciliation for other assets on individual failure
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-005** — ORO listed as Metal but has no Pyth feed ID
   - Files: `services/data-retrieval/src/lib.rs`
-  - Fix: Add random jitter to exponential backoff delay
-  - Test: `cargo check` on data-retrieval
-  - Verified: `cargo check` clean
-  - Completion note: Added time-based jitter (0 to base*250ms) to exponential backoff. Prevents thundering herd without adding a `rand` dependency.
+  - Fix: Remove ORO from Metal list
+  - Test: `cargo check`; reasoned check
 
-- [x] **F-017** — API client: `any` types in map functions
-  - Files: `packages/api-client/src/index.ts`, `packages/types/src/index.ts`
-  - Fix: Add typed raw response interfaces; replace `any` with typed params
+- [ ] **DR-006** — Reconnect backoff resets on brief success
+  - Files: `services/data-retrieval/src/lib.rs`
+  - Fix: Add minimum stable duration before resetting backoff
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-007** — Pyth batch URL with trailing `&`
+  - Files: `services/data-retrieval/src/sources/pyth.rs`
+  - Fix: Use `join("&")` to avoid trailing ampersand
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-009** — get_coin_id allocates fresh HashMap on every call
+  - Files: `services/data-retrieval/src/sources/coingecko.rs`
+  - Fix: Use `once_cell::Lazy` or `static`
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-010** — get_stock_prices_batch fetches sequentially
+  - Files: `services/data-retrieval/src/lib.rs`
+  - Fix: Use `futures::join_all` for concurrent fetching
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-011** — Cache eviction drains entire HashMap under write lock
+  - Files: `services/data-retrieval/src/lib.rs`
+  - Fix: Evict only oldest entries instead of drain+rebuild
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-013** — Pyth batch has no health tracking or timeout
+  - Files: `services/data-retrieval/src/sources/pyth.rs`
+  - Fix: Add per-request timeout and health tracking
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-014** — success_rate_24h is actually lifetime rate
+  - Files: `services/data-retrieval/src/sources/coingecko.rs`, `pyth.rs`
+  - Fix: Rename to `success_rate`
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-016** — aggregate_prices and normalize_price never called
+  - Files: `services/data-retrieval/src/aggregators/mod.rs`, `normalizers/mod.rs`
+  - Fix: Delete dead modules
+  - Test: `cargo check`
+
+- [ ] **DR-017** — HealthTracker duplicated in two files
+  - Files: `services/data-retrieval/src/sources/coingecko.rs`, `pyth.rs`
+  - Fix: Extract into shared `sources/health.rs`
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-020** — Crypto symbol list inconsistent between functions
+  - Files: `services/data-retrieval/src/lib.rs`
+  - Fix: Unify symbol lists
+  - Test: `cargo check`; reasoned check
+
+- [ ] **INFRA-003** — dataApi methods lack timeout/retry/typed errors
+  - Files: `packages/api-client/src/index.ts`
+  - Fix: Add timeout and basic retry
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **INFRA-005** — api-client 777 lines, 5+ responsibilities
+  - Files: `packages/api-client/src/index.ts`
+  - Fix: Split into modules
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **INFRA-006** — response.json() on 204 No Content
+  - Files: `packages/api-client/src/index.ts`
+  - Fix: Check status code before parsing JSON
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **INFRA-007** — Secrets could leak via error messages
+  - Files: `packages/api-client/src/index.ts`
+  - Fix: Redact request body from error context
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **INFRA-008** — LlmModel includes `| string` defeating exhaustive checks
+  - Files: `packages/types/src/index.ts`
+  - Fix: Remove `| string`
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **INFRA-013** — Docker images tagged only :latest
+  - Files: `.github/workflows/deploy.yml`
+  - Fix: Tag with git SHA
+  - Test: YAML lint; reasoned check
+
+- [ ] **INFRA-014** — always() with complex conditions
+  - Files: `.github/workflows/deploy.yml`
+  - Fix: Simplify deploy conditions
+  - Test: YAML lint; reasoned check
+
+- [ ] **INFRA-015** — Change detection uses HEAD~1
+  - Files: `.github/workflows/deploy.yml`
+  - Fix: Use `github.event.before` for comparison
+  - Test: YAML lint; reasoned check
+
+- [ ] **INFRA-020** — Makefile migrate/control use different DB URLs
+  - Files: `Makefile`
+  - Fix: Unify DB URL variable
+  - Test: Reasoned check
+
+- [ ] **INFRA-025** — Redundant migration 002
+  - Files: `services/control-plane/migrations/002`
+  - Fix: Add comment documenting redundancy
+  - Test: Reasoned check
+
+- [ ] **INFRA-027** — docs_analytics_events missing event_type index
+  - Files: `services/control-plane/migrations/`
+  - Fix: Add new migration with index
+  - Test: `cargo check`
+
+- [ ] **INFRA-028** — DROP COLUMN non-reversible
+  - Files: `services/control-plane/migrations/006`
+  - Fix: Document irreversibility
+  - Test: Reasoned check
+
+- [ ] **INFRA-032** — No validation encrypted fields are actually encrypted
+  - Files: `services/control-plane/migrations/004`
+  - Fix: Add application-level validation
+  - Test: Reasoned check
+
+- [ ] **MB-004** — isNavigatingRef guard ineffective
+  - Files: `apps/mobile/src/screens/AuthScreen.tsx`
+  - Fix: Use proper async guard with timeout
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-005** — BotDetailScreen refresh not async/memoized
+  - Files: `apps/mobile/src/screens/BotDetailScreen.tsx`
+  - Fix: Make async and wrap in useCallback
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-006** — Signal knob switches bypass onChange
+  - Files: `apps/mobile/src/screens/BotSettingsScreen.tsx`
+  - Fix: Wire signal knob changes through `onChange()`
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-008** — Stale isOnline closure in fetchBots
+  - Files: `apps/mobile/src/screens/BotsListScreen.tsx`
+  - Fix: Note — file scheduled for deletion (MB-027). Will be resolved by that.
+  - Test: N/A (dead code)
+
+- [ ] **MB-009** — Two effects mutating selectedAssets (race)
+  - Files: `apps/mobile/src/screens/CreateBotScreen.tsx`
+  - Fix: Consolidate into single effect
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-013** — Payment errors logged to console in production
+  - Files: `apps/mobile/src/screens/SubscribeScreen.tsx`
+  - Fix: Guard with `__DEV__` check
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-014** — Raw server error shown to user
+  - Files: `apps/mobile/src/screens/settings/AccountSettings.tsx`
+  - Fix: Show user-friendly message
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-017** — selectedBotId in loadBots deps
+  - Files: `apps/mobile/src/screens/ChatScreen.tsx`
+  - Fix: Remove from effect dependencies
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-018** — Failed send overwrites user draft
+  - Files: `apps/mobile/src/screens/BotDetailScreen.tsx`
+  - Fix: Preserve draft on failure
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-019** — Race condition on payment config retry
+  - Files: `apps/mobile/App.tsx`
+  - Fix: Add cancellation or sequence check
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-021** — onChange creates closures inline every render
+  - Files: `apps/mobile/src/screens/BotSettingsScreen.tsx`
+  - Fix: Memoize with useCallback
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-022** — Double search scan on every keystroke
+  - Files: `apps/mobile/src/screens/DocsScreen.tsx`
+  - Fix: Combine into single scan
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-025** — BotSettingsScreen 676 lines; LLM_MODELS duplicated
+  - Files: `apps/mobile/src/screens/BotSettingsScreen.tsx`
+  - Fix: Extract shared constant; split file
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-026** — Screen title "Create Boat" not "Create Bot"
+  - Files: `apps/mobile/src/navigation/AppNavigator.tsx`
+  - Fix: Change "Boat" to "Bot"
   - Test: `npx tsc --noEmit`
-  - Verified: `tsc --noEmit` clean for api-client, types, and mobile (only pre-existing CreateBotWizardSteps error)
-  - Completion note: Added 8 raw API interfaces (RawTradeableAsset, RawAssistantOption, RawMetricPoint, RawBotEvent, RawDocsArticle, RawDocsCategory + existing RawBot, RawBotConfig, RawChatMessage). Replaced all inline `any` map params with typed interfaces. Added union-literal type imports and `as` casts for API string → enum coercions. Updated GetBotResponse.config to accept null.
 
-- [x] **F-018** — Unused `tempfile::tempdir` import
-  - Files: `services/bot-runner/src/gateway.rs`, `services/bot-runner/Cargo.toml`
-  - Fix: Remove unused import and dev-dependency
-  - Test: `cargo check` on bot-runner — no warnings
-  - Verified: `cargo check` clean
-  - Completion note: Removed unused `use tempfile::tempdir` import and `tempfile` dev-dependency (no other usage in crate).
+- [ ] **MB-027** — BotsListScreen dead (not in navigator)
+  - Files: `apps/mobile/src/screens/BotsListScreen.tsx`
+  - Fix: Delete dead file
+  - Test: `npx tsc --noEmit`
 
-- [x] **F-020** — Dead `get_holdings()` returns empty vec
-  - Files: `services/bot-runner/src/executor.rs`
-  - Fix: Remove deprecated function and unused `TokenHolding` struct (no callers)
-  - Test: `cargo check` on bot-runner
-  - Verified: `cargo check` clean
-  - Completion note: Removed `get_holdings()` (deprecated, always returned empty vec) and `TokenHolding` struct (only referenced by get_holdings).
+- [ ] **MB-028** — AnimatedCard unused
+  - Files: `apps/mobile/src/components/AnimatedCard.tsx`
+  - Fix: Delete dead file
+  - Test: `npx tsc --noEmit`
 
-- [x] **F-021** — `QuoteCache` dead code with `#[allow(dead_code)]`
-  - Files: `services/bot-runner/src/executor.rs`
-  - Fix: Wire up `spawn_cleanup_task()` in executor init; remove unused `with_max_size` and `size` methods
-  - Test: `cargo check` on bot-runner
-  - Verified: `cargo check` clean
-  - Completion note: Wired `spawn_cleanup_task()` at QuoteCache init so expired entries get periodically evicted (every 60s). Removed unused `with_max_size()` and `size()`. Removed `#[allow(dead_code)]` from `cleanup()` since it's now called.
+- [ ] **MB-029** — DashboardHeader unused
+  - Files: `apps/mobile/src/screens/home/DashboardHeader.tsx`
+  - Fix: Delete dead file
+  - Test: `npx tsc --noEmit`
 
-- [x] **F-022** — Docker Compose default Postgres credentials
-  - Files: `docker-compose.yml`
-  - Fix: Already documented with "DEVELOPMENT ONLY" comments. No code change needed.
+- [ ] **MB-032** — Expo SDK 49 past end-of-life
+  - Files: `apps/mobile/package.json`
+  - Fix: DEFERRED — Major upgrade
   - Test: N/A
-  - Verified: Acknowledged — dev-only, properly documented
-  - Completion note: No change. Docker Compose credentials are for local dev only and already documented as such.
+
+## Low (44)
+
+- [ ] **CP-018** — reqwest 0.11 (two hyper runtimes)
+  - Files: `services/control-plane/Cargo.toml`
+  - Fix: DEFERRED — reqwest 0.12 migration
+  - Test: N/A
+
+- [ ] **CP-019** — Unused `config` crate
+  - Files: `services/control-plane/Cargo.toml`
+  - Fix: Remove dependency
+  - Test: `cargo check`
+
+- [ ] **CP-020** — Unused `jsonwebtoken` crate
+  - Files: `services/control-plane/Cargo.toml`
+  - Fix: Remove dependency
+  - Test: `cargo check`
+
+- [ ] **CP-021** — get_config swallows DB errors
+  - Files: `services/control-plane/src/config.rs`
+  - Fix: Propagate error
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-022** — Hardcoded API URL
+  - Files: `services/control-plane/src/handlers/sync.rs`
+  - Fix: Read from environment
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-024** — Circuit breaker not windowed
+  - Files: `services/control-plane/src/provisioning.rs`
+  - Fix: Add time window
+  - Test: `cargo check`; reasoned check
+
+- [ ] **CP-025** — Dockerfile suppresses build errors
+  - Files: `services/control-plane/Dockerfile`
+  - Fix: Remove `2>/dev/null`
+  - Test: Reasoned check
+
+- [ ] **BR-013** — Shield defaults to Allow when CLI missing
+  - Files: `services/bot-runner/src/executor.rs`
+  - Fix: Default to Deny
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-015** — portfolio.snapshot() called 4+ times per tick
+  - Files: `services/bot-runner/src/runner.rs`
+  - Fix: Cache snapshot for tick duration
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-016** — StateManager dead code
+  - Files: `services/bot-runner/src/state.rs`
+  - Fix: Delete file and module declaration
+  - Test: `cargo check`
+
+- [ ] **BR-017** — Unused `config` crate
+  - Files: `services/bot-runner/Cargo.toml`
+  - Fix: Remove dependency
+  - Test: `cargo check`
+
+- [ ] **BR-018** — Unused `rand` crate
+  - Files: `services/bot-runner/Cargo.toml`
+  - Fix: Remove dependency
+  - Test: `cargo check`
+
+- [ ] **BR-019** — Unused lifetime on apply_auth
+  - Files: `services/bot-runner/src/client.rs`
+  - Fix: Remove unused lifetime
+  - Test: `cargo check`
+
+- [ ] **BR-020** — unwrap() on possibly-None executor
+  - Files: `services/bot-runner/src/runner.rs`
+  - Fix: Replace with proper error handling
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-021** — HTTP price fallback hardcodes 1 SOL
+  - Files: `services/bot-runner/src/executor.rs`
+  - Fix: Use actual trade amount
+  - Test: `cargo check`; reasoned check
+
+- [ ] **BR-022** — IntentRegistry not wired in
+  - Files: `services/bot-runner/src/intent.rs`
+  - Fix: Document as future feature or remove
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-015** — No timeout on Pyth single-symbol fetch
+  - Files: `services/data-retrieval/src/sources/pyth.rs`
+  - Fix: Add request timeout
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-018** — reconnect_ws trivial wrapper
+  - Files: `services/data-retrieval/src/lib.rs`
+  - Fix: Inline at call sites
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-019** — Private clone() shadows Clone semantics
+  - Files: `services/data-retrieval/src/sources/binance_ws.rs`
+  - Fix: Rename to `clone_state()`
+  - Test: `cargo check`; reasoned check
+
+- [ ] **DR-021** — redis pinned to "1.0"
+  - Files: `services/data-retrieval/Cargo.toml`
+  - Fix: Update version range
+  - Test: `cargo check`
+
+- [ ] **INFRA-004** — ApiError.data typed as `any`
+  - Files: `packages/api-client/src/index.ts`
+  - Fix: Type as `unknown`
+  - Test: `npx tsc --noEmit`
+
+- [ ] **INFRA-009** — Subscription interface likely dead
+  - Files: `packages/types/src/index.ts`
+  - Fix: Remove if unused
+  - Test: `npx tsc --noEmit`
+
+- [ ] **INFRA-010** — llmApiKey doesn't distinguish format
+  - Files: `packages/types/src/index.ts`
+  - Fix: Add JSDoc annotation
+  - Test: Reasoned check
+
+- [ ] **INFRA-016** — Health check only verifies container running
+  - Files: `.github/workflows/deploy.yml`
+  - Fix: Add HTTP health check
+  - Test: YAML lint; reasoned check
+
+- [ ] **INFRA-017** — No dep caching in data-retrieval Dockerfile
+  - Files: `services/data-retrieval/Dockerfile`
+  - Fix: Add cargo dependency caching layer
+  - Test: Reasoned check
+
+- [ ] **INFRA-018** — Health endpoint inconsistency
+  - Files: `services/data-retrieval/Dockerfile`
+  - Fix: Standardize endpoint name
+  - Test: Reasoned check
+
+- [ ] **INFRA-019** — Duplicate of CP-025
+  - Files: `services/control-plane/Dockerfile`
+  - Fix: Covered by CP-025
+  - Test: N/A
+
+- [ ] **INFRA-021** — make all is interactive
+  - Files: `Makefile`
+  - Fix: Document behavior
+  - Test: Reasoned check
+
+- [ ] **INFRA-023** — Cargo.lock gitignored
+  - Files: `.gitignore`
+  - Fix: Remove Cargo.lock from gitignore for binary crates
+  - Test: Reasoned check
+
+- [ ] **INFRA-024** — Root deps belong in mobile
+  - Files: `package.json`
+  - Fix: Move to apps/mobile/package.json
+  - Test: Reasoned check
+
+- [ ] **INFRA-026** — No user_id index on dropped table
+  - Files: N/A
+  - Fix: MOOT — table dropped
+  - Test: N/A
+
+- [ ] **INFRA-029** — email NULL allows multiple NULLs
+  - Files: `services/control-plane/migrations/006`
+  - Fix: Document behavior
+  - Test: Reasoned check
+
+- [ ] **INFRA-030** — No DOWN migration scripts
+  - Files: `services/control-plane/migrations/`
+  - Fix: DEFERRED — large effort
+  - Test: N/A
+
+- [ ] **INFRA-031** — updated_at trigger only on users table
+  - Files: `services/control-plane/migrations/`
+  - Fix: Add migration for other tables
+  - Test: Migration check
+
+- [ ] **INFRA-033** — config_versions index optimization
+  - Files: `services/control-plane/migrations/`
+  - Fix: Add optimized index
+  - Test: Migration check
+
+- [ ] **MB-010** — Factor key includes rowIndex
+  - Files: `apps/mobile/src/screens/create-bot/CreateBotWizardSteps.tsx`
+  - Fix: Use stable key
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-023** — 1193-line component re-evaluates all steps
+  - Files: `apps/mobile/src/screens/create-bot/CreateBotWizardSteps.tsx`
+  - Fix: Covered by MB-024 (split)
+  - Test: N/A
+
+- [ ] **MB-030** — range param accepted but never sent
+  - Files: `apps/mobile/src/hooks/useBots.ts`
+  - Fix: Remove dead parameter
+  - Test: `npx tsc --noEmit`
+
+- [ ] **MB-031** — Wallet address untruncated
+  - Files: `apps/mobile/src/screens/BotDetailScreen.tsx`
+  - Fix: Truncate display
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-033** — Subscription check ref set early
+  - Files: `apps/mobile/src/screens/AuthScreen.tsx`
+  - Fix: Set ref after async
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-034** — Onboarding step 4 wrong condition
+  - Files: `apps/mobile/src/screens/home/OnboardingSection.tsx`
+  - Fix: Use correct condition
+  - Test: `npx tsc --noEmit`; reasoned check
+
+- [ ] **MB-035** — Asset focus options inconsistent
+  - Files: `apps/mobile/src/screens/BotStrategyConfigScreen.tsx`
+  - Fix: Align options
+  - Test: `npx tsc --noEmit`; reasoned check
+
+---
+
+## Deferred Items
+
+| ID | Reason |
+|----|--------|
+| CP-018 | reqwest 0.12 migration is a large dependency update |
+| MB-032 | Expo SDK 49->51+ is a major version upgrade |
+| INFRA-026 | Table already dropped — moot |
+| INFRA-030 | Retrofitting DOWN migrations is large effort |
+| INFRA-019 | Duplicate of CP-025 |

@@ -5,13 +5,14 @@
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    Json,
+    Extension, Json,
 };
 use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
 
 use crate::{
+    middleware::auth::AuthContext,
     models::{Bot, BotOpenClawConfig, OpenClawConfigResponse, UpdateOpenClawConfigRequest},
     AppState,
 };
@@ -19,9 +20,13 @@ use crate::{
 /// GET /bots/:id/openclaw-config - Get OpenClaw config (secrets masked)
 pub async fn get_openclaw_config(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<OpenClawConfigResponse>, (StatusCode, String)> {
-    // Verify bot exists and belongs to caller (auth would go here in production)
+    // Verify bot exists and caller owns it
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
+
     let _bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
         .bind(bot_id)
         .fetch_one(&state.db)
@@ -30,6 +35,10 @@ pub async fn get_openclaw_config(
             sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
             _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         })?;
+
+    if _bot.user_id != user_id {
+        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+    }
 
     let config = sqlx::query_as::<_, BotOpenClawConfig>(
         "SELECT * FROM bot_openclaw_config WHERE bot_id = $1",
@@ -51,10 +60,14 @@ pub async fn get_openclaw_config(
 /// POST /bots/:id/openclaw-config - Create/Update OpenClaw config
 pub async fn update_openclaw_config(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
     Json(req): Json<UpdateOpenClawConfigRequest>,
 ) -> Result<Json<OpenClawConfigResponse>, (StatusCode, String)> {
-    // Verify bot exists
+    // Verify bot exists and caller owns it
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
+
     let _bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
         .bind(bot_id)
         .fetch_one(&state.db)
@@ -63,6 +76,10 @@ pub async fn update_openclaw_config(
             sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
             _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         })?;
+
+    if _bot.user_id != user_id {
+        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+    }
 
     // Encrypt sensitive fields
     let encrypted_llm_api_key = match &req.llm_api_key {
