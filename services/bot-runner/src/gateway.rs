@@ -377,10 +377,13 @@ impl GatewayManager {
     /// Get gateway version via CLI
     ///
     /// Runs: `openclaw --version`
-    pub fn gateway_version(&self) -> Result<String> {
-        let output = std::process::Command::new(&self.openclaw_bin)
+    pub async fn gateway_version(&self) -> Result<String> {
+        let output = Command::new(&self.openclaw_bin)
             .arg("--version")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .output()
+            .await
             .with_context(|| {
                 format!(
                     "Failed to get gateway version: {}",
