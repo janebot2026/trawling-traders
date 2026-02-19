@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   ImageBackground,
   RefreshControl,
   ScrollView,
@@ -244,9 +245,33 @@ export function HomeOverviewScreen() {
     );
   }
 
+  const listHeader = (
+    <>
+      {error && <Text style={styles.errorText}>{error}</Text>}
+      <KpiStrip
+        bots={bots}
+        openTrades={stats.openTrades}
+        totalTrades={stats.totalTrades}
+      />
+      <TodayInsights bots={bots} allMetrics={allMetrics} />
+      <Text style={styles.sectionTitle}>Your Fleet</Text>
+    </>
+  );
+
   return (
     <ImageBackground source={homeBackground} style={styles.bgFill} resizeMode="cover">
-      <ScrollView
+      <FlatList
+        data={bots}
+        keyExtractor={(bot) => bot.id}
+        renderItem={({ item, index }) => (
+          <BotFleetCard
+            bot={item}
+            index={index}
+            onPauseResume={handlePauseResume}
+          />
+        )}
+        ListHeaderComponent={listHeader}
+        ListFooterComponent={<AlertsPanel events={allEvents} />}
         contentContainerStyle={[styles.content, { paddingTop: contentTopPadding + spacing.md }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -256,29 +281,7 @@ export function HomeOverviewScreen() {
             tintColor={colors.primary[700]}
           />
         }
-      >
-        {error && <Text style={styles.errorText}>{error}</Text>}
-
-        <KpiStrip
-          bots={bots}
-          openTrades={stats.openTrades}
-          totalTrades={stats.totalTrades}
-        />
-
-        <TodayInsights bots={bots} allMetrics={allMetrics} />
-
-        <Text style={styles.sectionTitle}>Your Fleet</Text>
-        {bots.map((bot, index) => (
-          <BotFleetCard
-            key={bot.id}
-            bot={bot}
-            index={index}
-            onPauseResume={handlePauseResume}
-          />
-        ))}
-
-        <AlertsPanel events={allEvents} />
-      </ScrollView>
+      />
     </ImageBackground>
   );
 }
