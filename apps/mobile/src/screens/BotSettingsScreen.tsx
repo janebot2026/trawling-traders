@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -168,12 +168,12 @@ export function BotSettingsScreen() {
     }
   };
 
-  const onChange = <T, >(setter: React.Dispatch<React.SetStateAction<T>>) => {
+  const onChange = useCallback(<T, >(setter: React.Dispatch<React.SetStateAction<T>>) => {
     return (value: T) => {
       setter(value);
       setHasChanges(true);
     };
-  };
+  }, []);
 
   const renderSection = (title: string, children: React.ReactNode) => (
     <View style={styles.card}>
