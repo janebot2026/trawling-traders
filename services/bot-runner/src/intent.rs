@@ -36,7 +36,14 @@ pub struct TradeIntent {
     pub strategy_version: Option<String>,
 }
 
-/// Intent registry for tracking trade attempts
+/// Intent registry for tracking trade attempts.
+///
+/// # Status
+///
+/// BR-022: This registry is instantiated in `BotRunner` but its idempotency methods
+/// (`create`, `try_create`, `find_equivalent`) are not yet wired into the active
+/// execution path in `runner.rs`.  It is retained as a future-feature placeholder for
+/// deduplication and replay-safety once the OpenClaw intent pipeline stabilises.
 pub struct IntentRegistry {
     intents: HashMap<String, TradeIntent>,
     max_age: Duration,
