@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Dimensions, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import type { MetricPoint } from '@trawling-traders/types';
 import { lightTheme } from '../theme';
@@ -9,9 +9,9 @@ interface PnlHistoryChartProps {
   height?: number;
 }
 
-const CHART_WIDTH = Dimensions.get('window').width - 56;
-
 export function PnlHistoryChart({ metrics, height = 170 }: PnlHistoryChartProps) {
+  const { width: windowWidth } = useWindowDimensions();
+  const chartWidth = windowWidth - 56;
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
   const series = useMemo(() => {
@@ -57,7 +57,7 @@ export function PnlHistoryChart({ metrics, height = 170 }: PnlHistoryChartProps)
           labels: series.labels,
           datasets: [{ data: series.points }],
         }}
-        width={CHART_WIDTH}
+        width={chartWidth}
         height={height}
         bezier
         withInnerLines={false}

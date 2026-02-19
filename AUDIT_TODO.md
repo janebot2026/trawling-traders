@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 32 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 34 | **Deferred:** 5
 
 ---
 
@@ -170,10 +170,11 @@
   - Test: `npx tsc --noEmit`; reasoned check
   - **Done:** Added cancelled flag guarding all setState calls after unmount.
 
-- [ ] **MB-016** — CHART_WIDTH computed once at module load
+- [x] **MB-016** — CHART_WIDTH computed once at module load
   - Files: `apps/mobile/src/components/PnlHistoryChart.tsx`
-  - Fix: Use `useWindowDimensions` hook
+  - Fix: Replaced module-level constant with useWindowDimensions hook
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** Chart width now responsive to rotation/resize.
 
 - [ ] **MB-020** — Bot fleet uses ScrollView.map (unbounded render)
   - Files: `apps/mobile/src/screens/HomeOverviewScreen.tsx`
