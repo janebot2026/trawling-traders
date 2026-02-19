@@ -217,7 +217,11 @@ export function BotDetailScreen() {
           <Text style={styles.cardTitle}>Trading Wallet</Text>
           {bot.agentWallet ? (
             <>
-              <Text style={styles.walletAddress}>{bot.agentWallet}</Text>
+              <Text style={styles.walletAddress}>
+                {bot.agentWallet.length > 12
+                  ? `${bot.agentWallet.slice(0, 6)}...${bot.agentWallet.slice(-4)}`
+                  : bot.agentWallet}
+              </Text>
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={async () => {
