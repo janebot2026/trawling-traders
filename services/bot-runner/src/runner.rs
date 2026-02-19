@@ -690,10 +690,19 @@ impl BotRunner {
             }
         };
 
-        // Convert USD amount to raw amount
+        // Convert USD amount to raw amount (USDC has 6 decimals)
         let usdc_decimals = 6u8;
-        let in_amount =
-            (intent.amount_usd * Decimal::from(10u64.pow(usdc_decimals as u32))).to_u64().unwrap_or(0);
+        let raw = intent.amount_usd * Decimal::from(10u64.pow(usdc_decimals as u32));
+        let in_amount = match raw.to_u64() {
+            Some(v) if v > 0 => v,
+            _ => {
+                warn!(
+                    "Trade amount rounds to zero or overflows: {} USD -> {} raw",
+                    intent.amount_usd, raw
+                );
+                return NormalizedTradeResult::default();
+            }
+        };
 
         // Execute trade
         executor

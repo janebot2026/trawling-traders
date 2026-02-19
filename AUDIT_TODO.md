@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 6 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 7 | **Deferred:** 5
 
 ---
 
@@ -44,10 +44,11 @@
   - Test: `cargo check`; reasoned check
   - **Done:** Saved version_id before move, then apply first, ack on success only.
 
-- [ ] **BR-004** — USD-to-raw overflow silently produces zero-value trade
+- [x] **BR-004** — USD-to-raw overflow silently produces zero-value trade
   - Files: `services/bot-runner/src/runner.rs`
   - Fix: Add overflow check; return error if amount rounds to zero
   - Test: `cargo check`; reasoned check
+  - **Done:** Added match guard — returns default (no trade) with warning on zero/overflow.
 
 - [ ] **BR-007** — SIGTERM not handled (no graceful shutdown)
   - Files: `services/bot-runner/src/runner.rs`
