@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 4 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 5 | **Deferred:** 5
 
 ---
 
@@ -32,10 +32,11 @@
 
 ## High (29)
 
-- [ ] **BR-002** — Daily trade_count never resets at midnight
+- [x] **BR-002** — Daily trade_count never resets at midnight
   - Files: `services/bot-runner/src/runner.rs`
   - Fix: Add `self.trade_count = 0` in `maybe_reset_daily_pnl`
   - Test: `cargo check`; reasoned check
+  - **Done:** Added `self.trade_count = 0` alongside PnL reset. Also added trade_count to the log message.
 
 - [ ] **BR-003** — Config acked before apply_config succeeds
   - Files: `services/bot-runner/src/runner.rs`

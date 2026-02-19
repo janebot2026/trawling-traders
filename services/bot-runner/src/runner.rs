@@ -570,15 +570,16 @@ impl BotRunner {
         })
     }
 
-    /// Reset daily PnL if the UTC date has changed
+    /// Reset daily PnL and trade count if the UTC date has changed
     fn maybe_reset_daily_pnl(&mut self) {
         let today = chrono::Utc::now().date_naive();
         if today != self.pnl_reset_date {
             info!(
-                "Daily PnL reset: {} -> {} (was {})",
-                self.pnl_reset_date, today, self.realized_pnl_today
+                "Daily PnL reset: {} -> {} (was {}, trades: {})",
+                self.pnl_reset_date, today, self.realized_pnl_today, self.trade_count
             );
             self.realized_pnl_today = Decimal::ZERO;
+            self.trade_count = 0;
             self.pnl_reset_date = today;
         }
     }
