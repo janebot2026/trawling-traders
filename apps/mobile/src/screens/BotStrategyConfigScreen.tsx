@@ -61,7 +61,7 @@ export function BotStrategyConfigScreen() {
           riskCaps: config.riskCaps,
           tradingMode: config.tradingMode,
           llmProvider: config.llmProvider,
-          llmApiKey: config.llmApiKey,
+          llmApiKey: undefined,
           signalKnobs: config.signalKnobs,
         },
       });

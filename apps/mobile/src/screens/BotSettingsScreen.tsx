@@ -43,6 +43,12 @@ const ASSET_FOCUSES: { value: AssetFocus; label: string; description: string; ti
   { value: 'memes', label: 'Memes ⚠️', description: 'High risk', tier: 'speculative' },
 ];
 
+/** Show only last 4 chars of an API key, e.g. "sk-...a1b2" */
+function maskApiKey(key: string | undefined | null): string {
+  if (!key || key.length < 8) return key ? '****' : '';
+  return `${key.slice(0, 3)}...${key.slice(-4)}`;
+}
+
 export function BotSettingsScreen() {
   const route = useRoute<BotSettingsScreenRouteProp>();
   const navigation = useNavigation<BotSettingsScreenNavigationProp>();
@@ -66,6 +72,7 @@ export function BotSettingsScreen() {
   const [tradingMode, setTradingMode] = useState<TradingMode>('paper');
   const [llmProvider, setLlmProvider] = useState<LlmProvider>('openai');
   const [llmApiKey, setLlmApiKey] = useState('');
+  const [llmApiKeyDirty, setLlmApiKeyDirty] = useState(false);
   const [maxPositionSize, setMaxPositionSize] = useState('5');
   const [maxDailyLoss, setMaxDailyLoss] = useState('50');
   const [maxDrawdown, setMaxDrawdown] = useState('10');
@@ -88,7 +95,8 @@ export function BotSettingsScreen() {
         setStrictness(response.config.strictness);
         setTradingMode(response.config.tradingMode);
         setLlmProvider(response.config.llmProvider);
-        setLlmApiKey(response.config.llmApiKey || '');
+        setLlmApiKey(maskApiKey(response.config.llmApiKey));
+        setLlmApiKeyDirty(false);
         setMaxPositionSize(response.config.riskCaps?.maxPositionSizePercent?.toString() || '5');
         setMaxDailyLoss(response.config.riskCaps?.maxDailyLossUsd?.toString() || '50');
         setMaxDrawdown(response.config.riskCaps?.maxDrawdownPercent?.toString() || '10');
@@ -136,7 +144,7 @@ export function BotSettingsScreen() {
           },
           tradingMode,
           llmProvider,
-          llmApiKey: llmApiKey.trim(),
+          llmApiKey: llmApiKeyDirty ? llmApiKey.trim() : undefined,
           signalKnobs: {
             volumeConfirmation,
             volatilityBrake,
@@ -146,8 +154,7 @@ export function BotSettingsScreen() {
         },
       });
       setHasChanges(false);
-      // Clear sensitive data from state after successful save
-      setLlmApiKey('');
+      setLlmApiKeyDirty(false);
       Alert.alert('Success', 'Configuration updated!');
       navigation.goBack();
     } catch (error) {
@@ -373,9 +380,19 @@ export function BotSettingsScreen() {
             <TextInput
               style={styles.input}
               value={llmApiKey}
-              onChangeText={onChange(setLlmApiKey)}
+              onChangeText={(text) => {
+                setLlmApiKey(text);
+                setLlmApiKeyDirty(true);
+                setHasChanges(true);
+              }}
+              onFocus={() => {
+                if (!llmApiKeyDirty) {
+                  setLlmApiKey('');
+                  setLlmApiKeyDirty(true);
+                }
+              }}
               placeholder="sk-..."
-              secureTextEntry
+              secureTextEntry={llmApiKeyDirty}
             />
           </>
         )}
