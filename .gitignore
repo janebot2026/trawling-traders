@@ -29,6 +29,7 @@ npm-debug.log*
 Thumbs.db
 
 # Secrets
+.env
 .env.local
 .env.*.local
 secrets.env

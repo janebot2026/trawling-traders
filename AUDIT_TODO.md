@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 11 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 12 | **Deferred:** 5
 
 ---
 
@@ -119,10 +119,11 @@
   - Fix: Move secrets to env-file passed via `--env-file`
   - Test: YAML lint; reasoned check
 
-- [ ] **INFRA-022** — Bare `.env` not in `.gitignore`
+- [x] **INFRA-022** — Bare `.env` not in `.gitignore`
   - Files: `.gitignore`
   - Fix: Add `.env` entry
   - Test: `git check-ignore .env`
+  - **Done:** Added `.env` to gitignore Secrets section.
 
 - [ ] **MB-001** — configureApi re-called on every auth state change
   - Files: `apps/mobile/src/api/ApiProvider.tsx`
