@@ -47,7 +47,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
-    public data?: any
+    public data?: unknown
   ) {
     super(message);
     this.name = 'ApiError';
@@ -182,9 +182,10 @@ async function fetchApi(
       headers,
       signal: controller.signal,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
+    const err = error as { name?: string; message?: string };
+    if (err.name === 'AbortError') {
       throw new TimeoutError(`Request to ${endpoint} timed out after ${DEFAULT_TIMEOUT_MS}ms`);
     }
     // Retry network errors
@@ -193,8 +194,8 @@ async function fetchApi(
       await sleep(delay);
       return fetchApi(endpoint, options, isAuthRetry, retryCount + 1);
     }
-    // Wrap in NetworkError for better error differentiation
-    throw new NetworkError(error.message || 'Network request failed');
+    // Wrap in NetworkError — redact body to prevent secret leakage
+    throw new NetworkError(`Network request to ${endpoint} failed`);
   } finally {
     clearTimeout(timeoutId);
   }
