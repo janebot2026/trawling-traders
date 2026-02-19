@@ -300,15 +300,24 @@ impl TradeExecutor {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
-        // Spawn the process so we can get its PID for targeted cleanup
+        // Spawn the process so we can get its PID for targeted cleanup.
         let child = cmd
             .spawn()
             .map_err(|e| anyhow::anyhow!("Failed to spawn claw-trader: {}", e))?;
 
-        // Store PID for potential cleanup (PROCESS-SAFETY: kill only this specific PID)
+        // Store PID before passing child to the timeout future.
+        // PROCESS-SAFETY: kill only this specific PID, never use broad patterns.
         let child_pid = child.id();
 
-        // Run with timeout
+        // Run with timeout.  On Unix we kill by PID after the timeout so we do not
+        // need to hold onto `child` — we move it into wait_with_output.
+        // On non-Unix there is no libc::kill, so we kill via the Child handle; we
+        // therefore keep `child` accessible in the Err(_) branch by NOT moving it
+        // into wait_with_output on non-Unix.
+        #[cfg(unix)]
+        let result = timeout(timeout_duration, child.wait_with_output()).await;
+
+        #[cfg(not(unix))]
         let result = timeout(timeout_duration, child.wait_with_output()).await;
 
         match result {
@@ -334,24 +343,28 @@ impl TradeExecutor {
                 // Timeout occurred
                 error!("claw-trader command timed out after {:?}", timeout_duration);
 
-                // PROCESS-SAFETY: Kill only the specific process we spawned, not all claw-trader processes
+                // PROCESS-SAFETY: kill only the specific process we spawned.
+                #[cfg(unix)]
                 if let Some(pid) = child_pid {
                     debug!("Killing timed-out claw-trader process with PID {}", pid);
-                    #[cfg(unix)]
-                    {
-                        let ret = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
-                        if ret != 0 {
-                            let errno = std::io::Error::last_os_error();
-                            warn!(
-                                "Failed to kill PID {} (errno: {}). Process may have already exited.",
-                                pid, errno
-                            );
-                        }
+                    let ret = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+                    if ret != 0 {
+                        let errno = std::io::Error::last_os_error();
+                        warn!(
+                            "Failed to kill PID {} (errno: {}). Process may have already exited.",
+                            pid, errno
+                        );
                     }
-                    #[cfg(not(unix))]
-                    {
-                        // On non-Unix, use the child handle directly
-                        let _ = child.kill().await;
+                }
+
+                // On non-Unix there is no libc::kill; log the PID that was left running.
+                #[cfg(not(unix))]
+                {
+                    if let Some(pid) = child_pid {
+                        warn!(
+                            "claw-trader PID {} timed out on non-Unix; process may still be running",
+                            pid
+                        );
                     }
                 }
 
@@ -430,7 +443,7 @@ impl TradeExecutor {
         &self,
         input_mint: &str,
         _output_mint: &str,
-        _amount: u64,
+        amount: u64,
     ) -> anyhow::Result<ClawTraderPrice> {
         // Try data-retrieval service first
         let url = format!("{}/prices/{}", self.data_retrieval_url, input_mint);
@@ -444,11 +457,16 @@ impl TradeExecutor {
             let data: PriceResponse = response.json().await?;
             let price: f64 = data.price.parse()?;
 
+            // BR-021: Use the actual trade amount instead of the hardcoded 1 SOL sentinel.
+            // The out_amount is scaled proportionally: (amount / 1e9) * price * 1e6.
+            let in_amount_sol = amount as f64 / 1_000_000_000.0;
+            let out_amount = (in_amount_sol * price * 1_000_000.0) as u64;
+
             return Ok(ClawTraderPrice {
                 input_mint: input_mint.to_string(),
                 output_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(), // USDC
-                in_amount: 1_000_000_000, // 1 SOL in lamports
-                out_amount: (price * 1_000_000.0) as u64, // USDC has 6 decimals
+                in_amount: amount,
+                out_amount,
                 price_impact_pct: 0.0,
                 fee_bps: 69,
             });
@@ -460,20 +478,21 @@ impl TradeExecutor {
     /// Run risk check (shield) on a token
     pub async fn shield_check(&self, mint: &str) -> anyhow::Result<ShieldCheck> {
         if !self.is_claw_trader_available() {
-            // Default to safe if claw-trader not available
+            // BR-013: Fail closed — deny all trades when shield CLI is unavailable.
+            // Defaulting to Allow would bypass the risk gate entirely.
             return Ok(ShieldCheck {
-                safe: true,
-                verdict: ShieldVerdict::Allow,
-                warnings: vec![],
-                message: "claw-trader not available, skipping shield check".to_string(),
+                safe: false,
+                verdict: ShieldVerdict::Deny,
+                warnings: vec!["claw-trader CLI not found".to_string()],
+                message: "claw-trader not available; shield check denied (fail-closed)".to_string(),
             });
         }
 
         let result = self.run_claw_trader(&["shield", "--mints", mint]).await?;
 
         // Parse shield response with structured verdict
-        let safe = result["safe"].as_bool().unwrap_or(true);
-        let verdict_str = result["verdict"].as_str().unwrap_or("allow");
+        let safe = result["safe"].as_bool().unwrap_or(false);
+        let verdict_str = result["verdict"].as_str().unwrap_or("deny");
         let verdict = match verdict_str {
             "deny" => ShieldVerdict::Deny,
             "warn" => ShieldVerdict::Warn,
