@@ -24,13 +24,17 @@ pub struct BinanceWebSocketClient {
     ws_sink: Arc<Mutex<WsSink>>,
     /// WebSocket read half (for receiving messages)
     ws_reader: Arc<Mutex<WsReader>>,
-    /// Channel for receiving price updates
-    price_tx: mpsc::Sender<PricePoint>,
+    /// Channel sender — wrapped in Option so the message handler can drop it on
+    /// disconnect, which causes `price_rx.recv()` to return `None` (DR-012).
+    price_tx: Arc<Mutex<Option<mpsc::Sender<PricePoint>>>>,
     price_rx: Arc<Mutex<mpsc::Receiver<PricePoint>>>,
     /// Subscribed streams
     subscriptions: Arc<RwLock<HashMap<String, String>>>, // symbol -> stream_name
     /// Connection status
     connected: Arc<RwLock<bool>>,
+    /// Handle to the running message-handler task.
+    /// Stored so reconnect can abort the old task before spawning a new one (DR-003).
+    handler_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl BinanceWebSocketClient {
@@ -55,17 +59,19 @@ impl BinanceWebSocketClient {
         let client = Self {
             ws_sink: Arc::new(Mutex::new(ws_sink)),
             ws_reader: Arc::new(Mutex::new(ws_reader)),
-            price_tx,
+            price_tx: Arc::new(Mutex::new(Some(price_tx))),
             price_rx: Arc::new(Mutex::new(price_rx)),
             subscriptions: Arc::new(RwLock::new(HashMap::new())),
             connected: Arc::new(RwLock::new(true)),
+            handler_task: Arc::new(Mutex::new(None)),
         };
 
-        // Spawn message handler
+        // Spawn message handler and store the handle
         let client_clone = client.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             client_clone.message_handler().await;
         });
+        *client.handler_task.lock().await = Some(handle);
 
         Ok(client)
     }
@@ -75,10 +81,11 @@ impl BinanceWebSocketClient {
         Self {
             ws_sink: Arc::clone(&self.ws_sink),
             ws_reader: Arc::clone(&self.ws_reader),
-            price_tx: self.price_tx.clone(),
+            price_tx: Arc::clone(&self.price_tx),
             price_rx: Arc::clone(&self.price_rx),
             subscriptions: Arc::clone(&self.subscriptions),
             connected: Arc::clone(&self.connected),
+            handler_task: Arc::clone(&self.handler_task),
         }
     }
 
@@ -169,6 +176,12 @@ impl BinanceWebSocketClient {
             *connected = false;
         }
 
+        // Drop the sender so any caller blocked on price_rx.recv() gets None (DR-012).
+        {
+            let mut tx = self.price_tx.lock().await;
+            *tx = None;
+        }
+
         warn!("WebSocket message handler exited");
     }
 
@@ -238,13 +251,16 @@ impl BinanceWebSocketClient {
         };
 
         // Non-blocking send — drop update rather than stalling the message handler
-        match self.price_tx.try_send(price_point) {
-            Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                warn!("Price channel full (10k entries). Dropping update — consumer may be behind.");
-            }
-            Err(mpsc::error::TrySendError::Closed(_)) => {
-                warn!("Price channel closed. Consumer disconnected.");
+        let tx_guard = self.price_tx.lock().await;
+        if let Some(tx) = tx_guard.as_ref() {
+            match tx.try_send(price_point) {
+                Ok(()) => {}
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    warn!("Price channel full (10k entries). Dropping update — consumer may be behind.");
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    warn!("Price channel closed. Consumer disconnected.");
+                }
             }
         }
 
@@ -321,11 +337,33 @@ impl BinanceWebSocketClient {
             *connected = true;
         }
 
-        // Restart message handler
+        // Restore the sender so process_trade can forward messages again (DR-012).
+        // The receiver end is unchanged — callers continue to hold the same price_rx.
+        {
+            let mut tx = self.price_tx.lock().await;
+            // Only create a fresh channel when the old sender was dropped.
+            // If it is still present the existing channel is reusable.
+            if tx.is_none() {
+                let (new_tx, new_rx) = mpsc::channel(10000);
+                *tx = Some(new_tx);
+                *self.price_rx.lock().await = new_rx;
+            }
+        }
+
+        // Abort the previous message-handler task before starting a new one (DR-003).
+        {
+            let mut task = self.handler_task.lock().await;
+            if let Some(old_handle) = task.take() {
+                old_handle.abort();
+            }
+        }
+
+        // Restart message handler and store the new handle
         let client_clone = self.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             client_clone.message_handler().await;
         });
+        *self.handler_task.lock().await = Some(handle);
 
         info!("Reconnected to Binance WebSocket");
         Ok(())

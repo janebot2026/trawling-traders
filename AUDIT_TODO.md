@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 18 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 19 | **Deferred:** 5
 
 ---
 
@@ -102,10 +102,11 @@
   - Fix: Restrict CORS origins to known domains
   - Test: `cargo check`; reasoned check
 
-- [ ] **DR-012** — WS disconnect leaves consumer blocked forever
+- [x] **DR-012** — WS disconnect leaves consumer blocked forever
   - Files: `services/data-retrieval/src/sources/binance_ws.rs`
-  - Fix: Drop `price_tx` on disconnect so `rx.recv()` returns `None`
+  - Fix: Changed `price_tx` to `Arc<Mutex<Option<Sender>>>`, dropped on disconnect
   - Test: `cargo check`; reasoned check
+  - **Done:** Sender wrapped in Option, set to None on disconnect; rx.recv() returns None immediately.
 
 - [x] **INFRA-001** — configureApi() writes to unused global
   - Files: `packages/api-client/src/index.ts`, `packages/api-client/src/config.ts`, `apps/mobile/src/api/ApiProvider.tsx`
