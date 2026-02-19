@@ -55,16 +55,31 @@ export function DocsScreen() {
     [selectedCategory, selectedArticleId]
   );
 
-  const filteredOverviewCategories = useMemo(() => {
-    if (!normalizedQuery) return categories;
-
-    return categories.filter((category) => {
-      if (matchesQuery(category.title, normalizedQuery) || matchesQuery(category.description, normalizedQuery)) {
-        return true;
+  // Single pass: filter categories and compute per-category match counts together.
+  const { filteredOverviewCategories, filteredOverviewCounts } = useMemo(() => {
+    const counts: Record<string, number> = {};
+    if (!normalizedQuery) {
+      for (const category of categories) {
+        counts[category.id] = category.articles.length;
       }
+      return { filteredOverviewCategories: categories, filteredOverviewCounts: counts };
+    }
 
-      return category.articles.some((article) => articleMatchesQuery(article, normalizedQuery));
-    });
+    const matched: typeof categories = [];
+    for (const category of categories) {
+      const matchingArticles = category.articles.filter((article) =>
+        articleMatchesQuery(article, normalizedQuery)
+      );
+      const categoryMatches =
+        matchesQuery(category.title, normalizedQuery) ||
+        matchesQuery(category.description, normalizedQuery) ||
+        matchingArticles.length > 0;
+      if (categoryMatches) {
+        matched.push(category);
+        counts[category.id] = matchingArticles.length;
+      }
+    }
+    return { filteredOverviewCategories: matched, filteredOverviewCounts: counts };
   }, [categories, normalizedQuery]);
 
   const filteredCategoryArticles = useMemo(() => {
@@ -72,18 +87,6 @@ export function DocsScreen() {
     if (!normalizedQuery) return selectedCategory.articles;
     return selectedCategory.articles.filter((article) => articleMatchesQuery(article, normalizedQuery));
   }, [selectedCategory, normalizedQuery]);
-
-  const filteredOverviewCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const category of filteredOverviewCategories) {
-      if (!normalizedQuery) {
-        counts[category.id] = category.articles.length;
-      } else {
-        counts[category.id] = category.articles.filter((article) => articleMatchesQuery(article, normalizedQuery)).length;
-      }
-    }
-    return counts;
-  }, [filteredOverviewCategories, normalizedQuery]);
 
   const trackDocsEvent = useCallback(async (request: TrackDocsEventRequest) => {
     try {
