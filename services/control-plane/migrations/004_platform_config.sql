@@ -1,6 +1,11 @@
 -- Migration: Platform configuration table for admin-managed settings
 -- Allows runtime configuration without environment variable changes
 
+-- NOTE: The 'encrypted' boolean flag indicates the value is AES-256-GCM
+-- encrypted, but there is no database-level CHECK constraint verifying
+-- that encrypted=true rows actually contain valid ciphertext. Application
+-- code (SecretsManager) must validate decryption at read time and handle
+-- failures gracefully.
 CREATE TABLE IF NOT EXISTS platform_config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
