@@ -376,12 +376,12 @@ async fn build_router(
         None => control_plane::cedros::login::placeholder_routes(),
     };
 
-    // Startup diagnostics (temporary - shows why integrations failed)
+    // Startup diagnostics — only show integration status, not raw error strings
     let diag = serde_json::json!({
         "login": if login_error.is_none() { "active" } else { "placeholder" },
-        "login_error": login_error,
+        "login_error": login_error.as_ref().map(|_| "integration unavailable"),
         "pay": if pay_error.is_none() { "active" } else { "placeholder" },
-        "pay_error": pay_error,
+        "pay_error": pay_error.as_ref().map(|_| "integration unavailable"),
     });
     let diagnostics_route = Router::new()
         .route(

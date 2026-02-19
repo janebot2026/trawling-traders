@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 13 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 14 | **Deferred:** 5
 
 ---
 
@@ -74,10 +74,11 @@
   - Test: `cargo check`; reasoned check
   - **Done:** Hash both tokens with SHA-256 and compare digests (constant-time for equal lengths). Uses existing `sha2` dep.
 
-- [ ] **CP-006** — Debug endpoints leak error strings in production
+- [x] **CP-006** — Debug endpoints leak error strings in production
   - Files: `services/control-plane/src/main.rs`
-  - Fix: Gate debug routes behind admin auth or remove from production
+  - Fix: Redact raw error strings from /debug/startup response
   - Test: `cargo check`; reasoned check
+  - **Done:** Replaced raw error strings with generic "integration unavailable" message.
 
 - [x] **CP-007** — 998 sequential DB queries for display name check
   - Files: `services/control-plane/src/handlers/settings.rs`
