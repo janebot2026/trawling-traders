@@ -389,7 +389,7 @@ export function BotSettingsScreen() {
             ].map((k) => (
               <View key={k.label} style={styles.switchRow}>
                 <Text style={styles.switchLabel}>{k.label}</Text>
-                <Switch value={k.value} onValueChange={k.setter} />
+                <Switch value={k.value} onValueChange={onChange(k.setter)} />
               </View>
             ))}
             
