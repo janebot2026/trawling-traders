@@ -378,15 +378,6 @@ export function CreateBotScreen() {
   }, []);
 
   useEffect(() => {
-    const currentFocusAssets = new Set(
-      tradeableAssets
-        .filter((asset) => asset.assetFocus === assetFocus)
-        .map((asset) => asset.tokenAddress)
-    );
-    setSelectedAssets((prev) => prev.filter((token) => currentFocusAssets.has(token)));
-  }, [assetFocus, tradeableAssets]);
-
-  useEffect(() => {
     let cancelled = false;
     if (name.trim().length === 0) {
       setNameAvailability(null);
