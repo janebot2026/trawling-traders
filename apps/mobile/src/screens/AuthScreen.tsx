@@ -77,7 +77,11 @@ export function AuthScreen() {
     }
     isNavigatingRef.current = true;
     navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
-    isNavigatingRef.current = false;
+    // Reset guard after navigation has committed so it does not block future calls
+    // (e.g. if the component remounts after a logout).
+    setTimeout(() => {
+      isNavigatingRef.current = false;
+    }, 500);
   }, [navigation]);
 
   useEffect(() => {
