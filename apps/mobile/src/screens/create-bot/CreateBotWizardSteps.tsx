@@ -149,19 +149,19 @@ const BOAT_IMAGES = {
 } as const;
 
 const CATEGORY_IMAGES: Record<AssetFocus, number> = {
-  'tokenized-equities': require('../../../../../assets/branding/tt-stocks.png'),
-  'tokenized-metals': require('../../../../../assets/branding/tt-commodities.png'),
+  'tokenized_equities': require('../../../../../assets/branding/tt-stocks.png'),
+  'tokenized_metals': require('../../../../../assets/branding/tt-commodities.png'),
   majors: require('../../../../../assets/branding/tt-crypto-majors.png'),
-  'finance-2': require('../../../../../assets/branding/tt-finance-2.png'),
+  'finance_2': require('../../../../../assets/branding/tt-finance-2.png'),
   memes: require('../../../../../assets/branding/tt-memecoins.png'),
   custom: require('../../../../../assets/branding/tt-finance-2.png'),
 };
 
 const CATEGORY_COPY: Record<AssetFocus, string> = {
-  'tokenized-equities': 'Global stock exposure for broad directional and rotational setups.',
-  'tokenized-metals': 'Hard-asset markets for inflation and macro cycle positioning.',
+  'tokenized_equities': 'Global stock exposure for broad directional and rotational setups.',
+  'tokenized_metals': 'Hard-asset markets for inflation and macro cycle positioning.',
   majors: 'Large-cap crypto pairs with deeper liquidity and tighter structure.',
-  'finance-2': 'On-chain finance leaders where narratives can shift quickly.',
+  'finance_2': 'On-chain finance leaders where narratives can shift quickly.',
   memes: 'High-volatility memecoin markets for aggressive momentum trawling.',
   custom: 'Custom portfolio scope for a manually curated trading universe.',
 };
@@ -173,7 +173,7 @@ function imageForCaptainKey(imageKey: string) {
 }
 
 function imageForCategory(value: AssetFocus) {
-  return CATEGORY_IMAGES[value] ?? CATEGORY_IMAGES['tokenized-equities'];
+  return CATEGORY_IMAGES[value] ?? CATEGORY_IMAGES['tokenized_equities'];
 }
 
 function displayBoatName(value: string): string {
@@ -614,7 +614,6 @@ export function CreateBotWizardSteps(props: CreateBotWizardStepsProps) {
 
     return (
       <View>
-        <Text style={styles.helperText}>Swipe to browse specialty categories.</Text>
         <View
           style={styles.categoryModeVisual}
           onLayout={(event) => {
@@ -663,8 +662,7 @@ export function CreateBotWizardSteps(props: CreateBotWizardStepsProps) {
             />
           </TouchableOpacity>
           <View style={styles.captainInfoCopy}>
-            <Text style={styles.captainName}>{activeCategory?.label}</Text>
-            <Text style={styles.captainDescription}>{CATEGORY_COPY[activeCategory?.value ?? 'tokenized-equities']}</Text>
+            <Text style={styles.categoryTitle}>{activeCategory?.label}</Text>
           </View>
           <TouchableOpacity
             style={styles.captainArrowButton}
@@ -678,7 +676,6 @@ export function CreateBotWizardSteps(props: CreateBotWizardStepsProps) {
             />
           </TouchableOpacity>
         </View>
-        <Text style={styles.sectionLabel}>Target Assets</Text>
         {assetsLoading ? (
           <Text style={styles.helperText}>Loading curated assets...</Text>
         ) : assetsForFocus.length === 0 ? (

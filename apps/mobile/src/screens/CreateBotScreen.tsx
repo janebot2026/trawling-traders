@@ -164,10 +164,10 @@ const NAME_BOATS = [
 ];
 
 const ASSET_CHOICES: { value: AssetFocus; label: string; recommended?: boolean }[] = [
-  { value: 'tokenized-equities', label: 'Stocks' },
-  { value: 'tokenized-metals', label: 'Commodities' },
+  { value: 'tokenized_equities', label: 'Stocks' },
+  { value: 'tokenized_metals', label: 'Commodities' },
   { value: 'majors', label: 'Crypto Majors' },
-  { value: 'finance-2', label: 'Finance 2.0' },
+  { value: 'finance_2', label: 'Finance 2.0' },
   { value: 'memes', label: 'Memecoins' },
 ];
 
@@ -281,7 +281,7 @@ export function CreateBotScreen() {
 
   const [name, setName] = useState(generateFishingName);
   const userEditedName = useRef(false);
-  const [assetFocus, setAssetFocus] = useState<AssetFocus>('tokenized-equities');
+  const [assetFocus, setAssetFocus] = useState<AssetFocus>('tokenized_equities');
   const [assistantStyle, setAssistantStyle] = useState<Persona>('beginner');
   const [assistantOptions, setAssistantOptions] = useState<AIAssistantOption[]>([]);
   const [assistantOptionsLoading, setAssistantOptionsLoading] = useState(false);
@@ -315,9 +315,9 @@ export function CreateBotScreen() {
       case 'event-driven':
         return 'breakout';
       case 'smart-money':
-        return 'mean-reversion';
+        return 'mean_reversion';
       case 'range':
-        return 'mean-reversion';
+        return 'mean_reversion';
       default:
         return 'trend';
     }

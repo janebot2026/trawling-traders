@@ -19,8 +19,8 @@ import { lightTheme } from '../theme';
 type BotStrategyRoute = RouteProp<RootStackParamList, 'BotStrategyConfig'>;
 type BotStrategyNav = NativeStackNavigationProp<RootStackParamList, 'BotStrategyConfig'>;
 
-const ALGORITHMS: AlgorithmMode[] = ['trend', 'mean-reversion', 'breakout'];
-const ASSETS: AssetFocus[] = ['majors', 'tokenized-equities', 'tokenized-metals', 'custom', 'memes'];
+const ALGORITHMS: AlgorithmMode[] = ['trend', 'mean_reversion', 'breakout'];
+const ASSETS: AssetFocus[] = ['majors', 'tokenized_equities', 'tokenized_metals', 'custom', 'memes'];
 const STRICTNESS: Strictness[] = ['low', 'medium', 'high'];
 
 export function BotStrategyConfigScreen() {

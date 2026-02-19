@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 17 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 18 | **Deferred:** 5
 
 ---
 
@@ -113,10 +113,11 @@
   - Test: `npx tsc --noEmit`; reasoned check
   - **Done:** Removed configureApi, getConfig, and globalConfig from config.ts; removed export and call site in ApiProvider.tsx.
 
-- [ ] **INFRA-002** — TS enum kebab-case vs Postgres snake_case mismatch
-  - Files: `packages/types/src/index.ts`
-  - Fix: Align enum values to match Postgres (snake_case)
+- [x] **INFRA-002** — TS enum kebab-case vs Postgres snake_case mismatch
+  - Files: `packages/types/src/index.ts`, 4 mobile screen files
+  - Fix: Changed kebab-case enum values to snake_case; updated all usage sites
   - Test: `npx tsc --noEmit`; reasoned check
+  - **Done:** Fixed AlgorithmMode.mean-reversion and AssetFocus tokenized-equities/tokenized-metals/finance-2 to snake_case across types + 4 mobile files.
 
 - [ ] **INFRA-012** — Secrets visible in `docker inspect` via CLI args
   - Files: `.github/workflows/deploy.yml`

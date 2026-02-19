@@ -31,14 +31,14 @@ const PERSONAS: { value: Persona; label: string; description: string }[] = [
 
 const ALGORITHMS: { value: AlgorithmMode; label: string; description: string }[] = [
   { value: 'trend', label: 'Trend', description: 'Ride momentum' },
-  { value: 'mean-reversion', label: 'Mean Reversion', description: 'Fade extremes' },
+  { value: 'mean_reversion', label: 'Mean Reversion', description: 'Fade extremes' },
   { value: 'breakout', label: 'Breakout', description: 'Volume breakouts' },
 ];
 
 const ASSET_FOCUSES: { value: AssetFocus; label: string; description: string; tier: 'core' | 'quality' | 'speculative' }[] = [
   { value: 'majors', label: 'Crypto Majors', description: 'BTC, ETH, SOL', tier: 'core' },
-  { value: 'tokenized-equities', label: 'xStocks', description: 'AAPL, TSLA, SPY', tier: 'quality' },
-  { value: 'tokenized-metals', label: 'Commodities', description: 'Gold, silver, and more', tier: 'quality' },
+  { value: 'tokenized_equities', label: 'xStocks', description: 'AAPL, TSLA, SPY', tier: 'quality' },
+  { value: 'tokenized_metals', label: 'Commodities', description: 'Gold, silver, and more', tier: 'quality' },
   { value: 'custom', label: 'Custom', description: 'Your basket', tier: 'quality' },
   { value: 'memes', label: 'Memes ⚠️', description: 'High risk', tier: 'speculative' },
 ];
@@ -60,7 +60,7 @@ export function BotSettingsScreen() {
   // Bot state
   const [name, setName] = useState('');
   const [persona, setPersona] = useState<Persona>('beginner');
-  const [assetFocus, setAssetFocus] = useState<AssetFocus>('tokenized-equities');
+  const [assetFocus, setAssetFocus] = useState<AssetFocus>('tokenized_equities');
   const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>('trend');
   const [strictness, setStrictness] = useState<Strictness>('high');
   const [tradingMode, setTradingMode] = useState<TradingMode>('paper');
