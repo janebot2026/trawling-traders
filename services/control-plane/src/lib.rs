@@ -10,6 +10,7 @@ pub mod handlers {
     pub mod bots;
     pub mod chat;
     pub mod docs;
+    pub mod helpers;
     pub mod openclaw_config;
     pub mod presets;
     pub mod reports;

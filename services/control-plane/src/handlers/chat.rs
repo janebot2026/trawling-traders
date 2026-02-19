@@ -42,6 +42,7 @@ struct LlmConfig {
     api_key: String,
 }
 
+/// Parse `user_id` from auth context and delegate to the shared [`helpers::get_authorized_bot`].
 async fn get_authorized_bot(
     db: &sqlx::PgPool,
     auth: &AuthContext,
@@ -49,21 +50,7 @@ async fn get_authorized_bot(
 ) -> Result<Bot, (StatusCode, String)> {
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
-
-    let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
-        .bind(bot_id)
-        .fetch_one(db)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        })?;
-
-    if bot.user_id != user_id {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
-    }
-
-    Ok(bot)
+    super::helpers::get_authorized_bot(db, bot_id, user_id).await
 }
 
 async fn load_llm_config(
