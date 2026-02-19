@@ -120,6 +120,9 @@ impl HoldingsReconciler {
     }
 
     /// Fetch on-chain holdings via claw-trader
+    ///
+    /// BR-014: Failures on individual asset fetches (e.g. native SOL) are logged and
+    /// skipped rather than aborting the entire reconciliation pass.
     async fn fetch_on_chain_holdings(&self) -> anyhow::Result<HashMap<String, u64>> {
         // Use claw-trader holdings command
         let result = self
@@ -143,18 +146,29 @@ impl HoldingsReconciler {
             }
         }
 
-        // Also get native SOL balance
-        let native_result = self
+        // Also get native SOL balance.
+        // BR-014: An error here must not abort the whole reconciliation — other asset
+        // balances are still valid and useful.  Log and continue.
+        match self
             .executor
             .run_claw_trader(&["holdings-native", "--address", &self.wallet_address])
-            .await?;
-
-        if let Some(balance) = native_result["balance"].as_str() {
-            if let Ok(amount) = balance.parse::<u64>() {
-                // SOL mint
-                holdings.insert(
-                    "So11111111111111111111111111111111111111112".to_string(),
-                    amount,
+            .await
+        {
+            Ok(native_result) => {
+                if let Some(balance) = native_result["balance"].as_str() {
+                    if let Ok(amount) = balance.parse::<u64>() {
+                        // SOL native mint address
+                        holdings.insert(
+                            "So11111111111111111111111111111111111111112".to_string(),
+                            amount,
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to fetch native SOL balance for {}; continuing without it: {}",
+                    self.wallet_address, e
                 );
             }
         }
