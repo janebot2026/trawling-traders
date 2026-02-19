@@ -221,23 +221,25 @@ pub async fn check_display_name_availability(
         }));
     }
 
+    // Single query: fetch all taken suffixed names matching "name N" pattern
+    let taken_names: Vec<String> = sqlx::query_scalar(
+        "SELECT LOWER(name) FROM users
+         WHERE id != $1
+           AND name IS NOT NULL
+           AND (LOWER(name) LIKE LOWER($2) || ' %')",
+    )
+    .bind(user_id)
+    .bind(&normalized_name)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let taken_set: std::collections::HashSet<String> = taken_names.into_iter().collect();
+    let base_lower = normalized_name.to_lowercase();
+
     for idx in 2..=999 {
         let candidate = format!("{} {}", normalized_name, idx);
-        let candidate_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(
-                SELECT 1 FROM users
-                WHERE id != $1
-                  AND name IS NOT NULL
-                  AND LOWER(name) = LOWER($2)
-            )",
-        )
-        .bind(user_id)
-        .bind(&candidate)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-        if !candidate_exists {
+        if !taken_set.contains(&format!("{} {}", base_lower, idx)) {
             return Ok(Json(NameAvailabilityResponse {
                 available: false,
                 normalized_name,

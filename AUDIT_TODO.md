@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 10 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 11 | **Deferred:** 5
 
 ---
 
@@ -78,10 +78,11 @@
   - Fix: Gate debug routes behind admin auth or remove from production
   - Test: `cargo check`; reasoned check
 
-- [ ] **CP-007** — 998 sequential DB queries for display name check
+- [x] **CP-007** — 998 sequential DB queries for display name check
   - Files: `services/control-plane/src/handlers/settings.rs`
-  - Fix: Replace loop with single SQL query
+  - Fix: Replace loop with single SQL query + HashSet lookup
   - Test: `cargo check`; reasoned check
+  - **Done:** Single query fetches all matching suffixed names; loop checks in-memory HashSet. 998 queries -> 1.
 
 - [ ] **DR-002** — `/prices/{symbol}` path param never extracted
   - Files: `services/data-retrieval/src/handlers.rs`
