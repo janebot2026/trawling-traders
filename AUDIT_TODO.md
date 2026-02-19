@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 22 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 23 | **Deferred:** 5
 
 ---
 
@@ -205,10 +205,11 @@
   - Fix: Use read lock for check, write lock only for insert/update
   - Test: `cargo check`; reasoned check
 
-- [ ] **CP-010** — Subscription is_active true when no subscription exists
+- [x] **CP-010** — Subscription is_active true when no subscription exists
   - Files: `services/control-plane/src/middleware/subscription.rs`
-  - Fix: Default `is_active` to `false` when no row found
+  - Fix: Changed `unwrap_or(true)` to `unwrap_or(false)` for missing subscription rows
   - Test: `cargo check`; reasoned check
+  - **Done:** Default is_active to false when no subscription row found.
 
 - [ ] **CP-011** — Unbounded event/metric batches (no size cap)
   - Files: `services/control-plane/src/handlers/sync.rs`

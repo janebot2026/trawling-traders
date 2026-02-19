@@ -133,7 +133,9 @@ pub async fn subscription_middleware(
 
     let sub_context = SubscriptionContext {
         tier,
-        is_active: expires_at.map(|e| e > chrono::Utc::now()).unwrap_or(true),
+        // Default to false: no subscription row means no active subscription.
+        // Previously defaulted to true, which let deleted-subscription users bypass the paywall.
+        is_active: expires_at.map(|e| e > chrono::Utc::now()).unwrap_or(false),
         expires_at,
         bot_count,
     };
