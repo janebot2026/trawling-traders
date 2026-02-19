@@ -5,9 +5,17 @@
 -- migrations succeed.
 
 -- Drop cedros_user_id (not needed with embedded auth)
+-- WARNING: DROP COLUMN is non-reversible. Data in cedros_user_id cannot be
+-- recovered after this migration runs. A down migration would need to
+-- re-populate the column from an external source.
 ALTER TABLE users DROP COLUMN IF EXISTS cedros_user_id;
 
 -- Make email nullable (cedros-login allows wallet-only users)
+-- NOTE: With email nullable, the UNIQUE constraint on email still allows
+-- multiple NULL values (PostgreSQL treats NULLs as distinct for UNIQUE).
+-- This is intentional: wallet-only users have no email. If only one NULL
+-- email is desired, add a partial unique index:
+--   CREATE UNIQUE INDEX ... ON users(email) WHERE email IS NOT NULL;
 ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
 
 -- Columns from cedros-login-server's initial schema
