@@ -174,23 +174,5 @@ pub async fn bot_create_limit_middleware(
     Ok(next.run(request).await)
 }
 
-/// Middleware to enforce live trading requires Pro+ tier
-pub async fn live_trading_guard_middleware(
-    request: Request<Body>,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let sub = request
-        .extensions()
-        .get::<SubscriptionContext>()
-        .ok_or(StatusCode::FORBIDDEN)?;
-
-    // Live trading requires Pro tier or higher
-    if sub.tier == SubscriptionTier::Free {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    Ok(next.run(request).await)
-}
-
 /// Extract SubscriptionContext from request extensions
 pub use axum::extract::Extension as SubscriptionExtension;

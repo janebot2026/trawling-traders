@@ -12,6 +12,5 @@ pub use auth::{auth_middleware, AuthContext};
 pub use bot_auth::bot_auth_middleware;
 pub use rate_limit::rate_limit_middleware;
 pub use subscription::{
-    bot_create_limit_middleware, live_trading_guard_middleware, subscription_middleware,
-    SubscriptionContext, SubscriptionTier,
+    bot_create_limit_middleware, subscription_middleware, SubscriptionContext, SubscriptionTier,
 };
