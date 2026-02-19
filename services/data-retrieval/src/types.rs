@@ -160,7 +160,7 @@ pub struct SourceHealth {
     pub is_healthy: bool,
     pub last_success: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
-    pub success_rate_24h: f64,
+    pub success_rate: f64,
     pub avg_latency_ms: u64,
 }
 

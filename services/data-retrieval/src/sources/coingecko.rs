@@ -1,68 +1,12 @@
+use crate::sources::health::HealthTracker;
 use crate::types::*;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
-
-/// Internal health tracking for API-free health checks
-struct HealthTracker {
-    /// Timestamp of last successful request (millis since epoch)
-    last_success_ms: AtomicU64,
-    /// Timestamp of last failed request (millis since epoch)
-    last_failure_ms: AtomicU64,
-    /// Recent success count (approximation)
-    success_count: AtomicU64,
-    /// Recent failure count (approximation)
-    failure_count: AtomicU64,
-    /// Last known latency in ms
-    last_latency_ms: AtomicU64,
-}
-
-impl HealthTracker {
-    fn new() -> Self {
-        Self {
-            last_success_ms: AtomicU64::new(0),
-            last_failure_ms: AtomicU64::new(0),
-            success_count: AtomicU64::new(0),
-            failure_count: AtomicU64::new(0),
-            last_latency_ms: AtomicU64::new(0),
-        }
-    }
-
-    fn record_success(&self, latency_ms: u64) {
-        let now_ms = Utc::now().timestamp_millis() as u64;
-        self.last_success_ms.store(now_ms, Ordering::Relaxed);
-        self.last_latency_ms.store(latency_ms, Ordering::Relaxed);
-        self.success_count.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn record_failure(&self) {
-        let now_ms = Utc::now().timestamp_millis() as u64;
-        self.last_failure_ms.store(now_ms, Ordering::Relaxed);
-        self.failure_count.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn is_healthy(&self) -> bool {
-        let last_success = self.last_success_ms.load(Ordering::Relaxed);
-        let last_failure = self.last_failure_ms.load(Ordering::Relaxed);
-
-        // Healthy if: had at least one success AND (no failures OR last success > last failure)
-        last_success > 0 && (last_failure == 0 || last_success > last_failure)
-    }
-
-    fn success_rate(&self) -> f64 {
-        let successes = self.success_count.load(Ordering::Relaxed);
-        let failures = self.failure_count.load(Ordering::Relaxed);
-        let total = successes + failures;
-        if total == 0 {
-            return 1.0; // No requests yet, assume healthy
-        }
-        successes as f64 / total as f64
-    }
-}
 
 /// CoinGecko API client
 pub struct CoinGeckoClient {
@@ -378,7 +322,7 @@ impl CoinGeckoClient {
             } else {
                 Some("Recent failures detected".to_string())
             },
-            success_rate_24h: success_rate,
+            success_rate,
             avg_latency_ms: latency,
         }
     }

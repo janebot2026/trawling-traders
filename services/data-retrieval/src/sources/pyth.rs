@@ -4,62 +4,13 @@ use reqwest::Client;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use tracing::{debug, info};
 
+use crate::sources::health::HealthTracker;
 use crate::types::{
     Candle, DataRetrievalError, PriceDataSource, PricePoint, SourceHealth, TimeFrame,
 };
-
-/// Tracks API success/failure to avoid live health-check calls.
-struct HealthTracker {
-    last_success_ms: AtomicU64,
-    last_failure_ms: AtomicU64,
-    success_count: AtomicU64,
-    failure_count: AtomicU64,
-    last_latency_ms: AtomicU64,
-}
-
-impl HealthTracker {
-    fn new() -> Self {
-        Self {
-            last_success_ms: AtomicU64::new(0),
-            last_failure_ms: AtomicU64::new(0),
-            success_count: AtomicU64::new(0),
-            failure_count: AtomicU64::new(0),
-            last_latency_ms: AtomicU64::new(0),
-        }
-    }
-
-    fn record_success(&self, latency_ms: u64) {
-        let now_ms = Utc::now().timestamp_millis() as u64;
-        self.last_success_ms.store(now_ms, Ordering::Relaxed);
-        self.last_latency_ms.store(latency_ms, Ordering::Relaxed);
-        self.success_count.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn record_failure(&self) {
-        let now_ms = Utc::now().timestamp_millis() as u64;
-        self.last_failure_ms.store(now_ms, Ordering::Relaxed);
-        self.failure_count.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn is_healthy(&self) -> bool {
-        let last_success = self.last_success_ms.load(Ordering::Relaxed);
-        let last_failure = self.last_failure_ms.load(Ordering::Relaxed);
-        last_success > 0 && (last_failure == 0 || last_success > last_failure)
-    }
-
-    fn success_rate(&self) -> f64 {
-        let successes = self.success_count.load(Ordering::Relaxed);
-        let failures = self.failure_count.load(Ordering::Relaxed);
-        let total = successes + failures;
-        if total == 0 {
-            return 1.0;
-        }
-        successes as f64 / total as f64
-    }
-}
 
 const PYTH_HERMES_BASE: &str = "https://hermes.pyth.network/v2";
 
@@ -158,7 +109,16 @@ impl PythClient {
         debug!("Fetching Pyth price for {} from {}", symbol, url);
 
         let start = std::time::Instant::now();
-        let response = match self.client.get(&url).send().await {
+        // DR-015: Apply an explicit per-request timeout so a stalled Pyth connection
+        // cannot block the caller indefinitely.  The client-level timeout is a fallback;
+        // the per-request timeout gives us a predictable, observable failure mode.
+        let response = match self
+            .client
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 self.health_tracker.record_failure();
@@ -358,7 +318,7 @@ impl PriceDataSource for PythClient {
             is_healthy: self.health_tracker.is_healthy(),
             last_success,
             last_error: None,
-            success_rate_24h: self.health_tracker.success_rate(),
+            success_rate: self.health_tracker.success_rate(),
             avg_latency_ms: self.health_tracker.last_latency_ms.load(Ordering::Relaxed),
         }
     }
