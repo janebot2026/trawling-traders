@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -72,10 +72,10 @@ export function BotDetailScreen() {
     fetchBotDetails();
   }, [fetchBotDetails]);
 
-  const refresh = () => {
+  const refresh = useCallback(async () => {
     setIsRefreshing(true);
-    fetchBotDetails();
-  };
+    await fetchBotDetails();
+  }, [fetchBotDetails]);
 
   const tradeEvents = useMemo(
     () => events.filter((event) => event.type === 'trade_opened' || event.type === 'trade_closed'),
