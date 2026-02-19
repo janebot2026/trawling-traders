@@ -157,6 +157,11 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'settings-preferences',
       storage: createJSONStorage(() => secureStorage),
+      // apiKeys contain sensitive credentials and must not be persisted
+      partialize: (state) => ({
+        preferredModels: state.preferredModels,
+        disabledCustodians: state.disabledCustodians,
+      }),
     }
   )
 );
