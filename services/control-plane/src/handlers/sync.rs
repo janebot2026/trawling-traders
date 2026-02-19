@@ -561,7 +561,11 @@ pub async fn get_bot_secrets(
         )
     })?;
 
-    if stored_token != &request.bootstrap_token {
+    // Constant-time comparison to prevent timing side-channel attacks
+    use sha2::{Digest, Sha256};
+    let stored_hash = Sha256::digest(stored_token.as_bytes());
+    let request_hash = Sha256::digest(request.bootstrap_token.as_bytes());
+    if stored_hash.as_slice() != request_hash.as_slice() {
         warn!("Invalid bootstrap token attempt for bot {}", bot_id);
         return Err((
             StatusCode::UNAUTHORIZED,

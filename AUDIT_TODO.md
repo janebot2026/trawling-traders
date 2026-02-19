@@ -1,6 +1,6 @@
 # Audit Remediation Checklist
 
-**Total findings:** 136 | **Fixed:** 9 | **Deferred:** 5
+**Total findings:** 136 | **Fixed:** 10 | **Deferred:** 5
 
 ---
 
@@ -67,10 +67,11 @@
   - Fix: Generate `bot_id` before transaction and use real ID
   - Test: `cargo check`; reasoned check
 
-- [ ] **CP-005** — Bootstrap token compared with `==` (timing side-channel)
+- [x] **CP-005** — Bootstrap token compared with `==` (timing side-channel)
   - Files: `services/control-plane/src/handlers/sync.rs`
-  - Fix: Use constant-time comparison
+  - Fix: Use constant-time comparison via SHA-256 digest
   - Test: `cargo check`; reasoned check
+  - **Done:** Hash both tokens with SHA-256 and compare digests (constant-time for equal lengths). Uses existing `sha2` dep.
 
 - [ ] **CP-006** — Debug endpoints leak error strings in production
   - Files: `services/control-plane/src/main.rs`
