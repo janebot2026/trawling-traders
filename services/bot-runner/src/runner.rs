@@ -76,6 +76,8 @@ pub struct BotRunner {
     status: RunnerStatus,
     /// Last decision plan ID
     last_plan_id: Option<uuid::Uuid>,
+    /// Timestamp when the last plan was received from OpenClaw
+    last_plan_time: Option<chrono::DateTime<chrono::Utc>>,
     /// Last trade outcome for state tracking
     last_trade_outcome: Option<LastTradeOutcome>,
     /// Daily realized PnL tracking
@@ -121,6 +123,7 @@ impl BotRunner {
             state_dir,
             status: RunnerStatus::Idle,
             last_plan_id: None,
+            last_plan_time: None,
             last_trade_outcome: None,
             realized_pnl_today: Decimal::ZERO,
             pnl_reset_date: chrono::Utc::now().date_naive(),
@@ -329,7 +332,7 @@ impl BotRunner {
         }
 
         // Get gateway version for event metadata
-        let gateway_version = self.gateway_manager.gateway_version().unwrap_or_default();
+        let gateway_version = self.gateway_manager.gateway_version().await.unwrap_or_default();
 
         // Send event
         let event = EventInput {
@@ -448,13 +451,13 @@ impl BotRunner {
 
         // Update status
         self.status = RunnerStatus::Deciding;
-        self.write_state_file().ok();
+        self.write_state_file().await.ok();
 
         // Build decision context
         let context = self.build_decision_context(&config).await?;
 
         // Write context to file for debugging
-        self.write_context_file(&context).ok();
+        self.write_context_file(&context).await.ok();
 
         // Request decision plan from OpenClaw
         let plan = match self.openclaw_client.tick(&context).await {
@@ -462,7 +465,7 @@ impl BotRunner {
             Err(e) => {
                 warn!("OpenClaw decision request failed: {}", e);
                 self.status = RunnerStatus::Idle;
-                self.write_state_file().ok();
+                self.write_state_file().await.ok();
                 return Ok(());
             }
         };
@@ -474,10 +477,11 @@ impl BotRunner {
         );
 
         self.last_plan_id = Some(plan.plan_id);
+        self.last_plan_time = Some(chrono::Utc::now());
 
         // Update status
         self.status = RunnerStatus::Executing;
-        self.write_state_file().ok();
+        self.write_state_file().await.ok();
 
         // Validate and execute each intent
         for intent in &plan.intents {
@@ -500,7 +504,7 @@ impl BotRunner {
                     "Intent {} blocked: {:?}",
                     intent.intent_id, validation.rejection_reason
                 );
-                self.write_journal_entry(&journal_entry).ok();
+                self.write_journal_entry(&journal_entry).await.ok();
 
                 // Emit blocked event
                 self.emit_intent_blocked(intent, &validation).await;
@@ -509,7 +513,7 @@ impl BotRunner {
 
             // Hold intents require no execution or event emission.
             if intent.action == TradeAction::Hold {
-                self.write_journal_entry(&journal_entry).ok();
+                self.write_journal_entry(&journal_entry).await.ok();
                 continue;
             }
 
@@ -524,7 +528,7 @@ impl BotRunner {
                 out_amount: Some(result.execution.out_amount_raw),
                 error: result.error.as_ref().map(|e| e.message.clone()),
             });
-            self.write_journal_entry(&final_entry).ok();
+            self.write_journal_entry(&final_entry).await.ok();
 
             // Update trade count and state
             if result.stage_reached == crate::executor::TradeStage::Confirmed {
@@ -550,7 +554,7 @@ impl BotRunner {
 
         // Update status back to idle
         self.status = RunnerStatus::Idle;
-        self.write_state_file().ok();
+        self.write_state_file().await.ok();
 
         Ok(())
     }
@@ -807,13 +811,13 @@ impl BotRunner {
     }
 
     /// Write current state to now.json
-    fn write_state_file(&self) -> anyhow::Result<()> {
+    async fn write_state_file(&self) -> anyhow::Result<()> {
         let snapshot = self.portfolio.snapshot();
 
         let state = RunnerState {
             status: self.status,
             last_plan_id: self.last_plan_id,
-            last_plan_time: self.last_plan_id.map(|_| chrono::Utc::now()),
+            last_plan_time: self.last_plan_time,
             last_trade_outcome: self.last_trade_outcome.clone(),
             portfolio_equity_usd: snapshot.total_equity,
             positions_count: snapshot.positions.len(),
@@ -822,27 +826,27 @@ impl BotRunner {
 
         let path = self.state_dir.join("now.json");
         let content = serde_json::to_string_pretty(&state)?;
-        std::fs::write(path, content)?;
+        tokio::fs::write(path, content).await?;
 
         Ok(())
     }
 
     /// Write decision context to file
-    fn write_context_file(&self, context: &DecisionContext) -> anyhow::Result<()> {
+    async fn write_context_file(&self, context: &DecisionContext) -> anyhow::Result<()> {
         let path = self.state_dir.join("decision_context.json");
         let content = serde_json::to_string_pretty(context)?;
-        std::fs::write(path, content)?;
+        tokio::fs::write(path, content).await?;
         Ok(())
     }
 
     /// Write journal entry for decision
-    fn write_journal_entry(&self, entry: &DecisionJournalEntry) -> anyhow::Result<()> {
+    async fn write_journal_entry(&self, entry: &DecisionJournalEntry) -> anyhow::Result<()> {
         let path = self
             .state_dir
             .join("journal/decisions")
             .join(format!("{}.json", entry.intent_id));
         let content = serde_json::to_string_pretty(entry)?;
-        std::fs::write(path, content)?;
+        tokio::fs::write(path, content).await?;
         Ok(())
     }
 
