@@ -50,6 +50,7 @@
     "react-native-svg": "^13.9.0",
     "stream-browserify": "^3.0.0",
     "tailwind-merge": "^3.4.0",
+    "text-encoding-polyfill": "^0.6.7",
     "zustand": "^4.4.7"
   },
   "devDependencies": {
