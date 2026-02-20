@@ -1,6 +1,6 @@
 # Audit Remediation Checklist — Round 5
 
-**Total findings:** 90 | **Fixed:** 9 | **Deferred:** 0
+**Total findings:** 90 | **Fixed:** 13 | **Deferred:** 0
 
 **Previous rounds:** Rounds 1–4 fixed 186 findings (134 in Round 4, 2 deferred: CP-018 reqwest 0.12, MB-032 Expo SDK).
 
@@ -58,10 +58,11 @@
   - Test: `npx tsc --noEmit`; reasoned check — `instanceof` works with Babel/Metro transpilation
   - **Done:** Added `Object.setPrototypeOf(this, new.target.prototype)` to all 7 error class constructors.
 
-- [ ] **R5-DR-001** — Redis cache never initialized
+- [x] **R5-DR-001** — Redis cache never initialized
   - Files: `services/data-retrieval/src/main.rs:87-95`
   - Fix: Call `.with_cache()` during aggregator initialization when `REDIS_URL` is set
   - Test: `cargo check`; reasoned check — cache used when Redis available
+  - **Done:** Added Redis cache initialization when REDIS_URL env var is set; graceful fallback on connection failure.
 
 - [ ] **R5-CP-002** — Subscription middleware blocks all GET routes for unpaid users
   - Files: `services/control-plane/src/middleware/subscription.rs:82-153`

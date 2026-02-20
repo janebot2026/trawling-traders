@@ -94,6 +94,19 @@ async fn main() -> anyhow::Result<()> {
         info!("✓ Real-time price consumer started");
     }
 
+    // Initialize Redis cache when REDIS_URL is configured (R5-DR-001)
+    if let Ok(redis_url) = std::env::var("REDIS_URL") {
+        match data_retrieval::cache::RedisCache::new(&redis_url).await {
+            Ok(cache) => {
+                aggregator = aggregator.with_cache(cache);
+                info!("✓ Redis cache initialized");
+            }
+            Err(e) => {
+                warn!("⚠ Redis cache unavailable ({}), continuing without cache", e);
+            }
+        }
+    }
+
     // Create app state
     let state = Arc::new(AppState {
         price_aggregator: aggregator,
