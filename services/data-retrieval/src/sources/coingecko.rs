@@ -7,6 +7,10 @@ use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
+
+/// TTL for dynamic coin ID lookups (24 hours).
+const COIN_ID_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// CoinGecko API client
 pub struct CoinGeckoClient {
@@ -17,6 +21,8 @@ pub struct CoinGeckoClient {
     last_request: tokio::sync::Mutex<Instant>,
     /// Internal health tracking to avoid API calls in health()
     health_tracker: HealthTracker,
+    /// In-memory cache for dynamic coin ID lookups (symbol -> (id, fetched_at))
+    coin_id_cache: RwLock<HashMap<String, (String, Instant)>>,
 }
 
 impl CoinGeckoClient {
@@ -40,6 +46,7 @@ impl CoinGeckoClient {
             rate_limiter: tokio::sync::Semaphore::new(permits),
             last_request: tokio::sync::Mutex::new(Instant::now() - Duration::from_secs(10)),
             health_tracker: HealthTracker::new(),
+            coin_id_cache: RwLock::new(HashMap::new()),
         }
     }
 
@@ -157,7 +164,10 @@ impl CoinGeckoClient {
         ))
     }
 
-    /// Get CoinGecko ID for asset symbol
+    /// Get CoinGecko ID for asset symbol.
+    ///
+    /// Static mappings are checked first (no API call). Dynamic lookups hit the
+    /// CoinGecko /search endpoint and are cached in-memory for 24 hours.
     async fn get_coin_id(&self, symbol: &str) -> Result<String> {
         // Common mappings for speed (avoid API call) — initialized once at first use.
         static STATIC_MAPPINGS: LazyLock<HashMap<&'static str, &'static str>> =
@@ -178,20 +188,38 @@ impl CoinGeckoClient {
                 .collect()
             });
 
-        if let Some(&id) = STATIC_MAPPINGS.get(symbol.to_uppercase().as_str()) {
+        let upper = symbol.to_uppercase();
+        if let Some(&id) = STATIC_MAPPINGS.get(upper.as_str()) {
             return Ok(id.to_string());
         }
 
-        // Fallback: search API (expensive, cache this)
+        // Check in-memory cache for dynamic lookups
+        {
+            let cache = self.coin_id_cache.read().await;
+            if let Some((id, fetched_at)) = cache.get(&upper) {
+                if fetched_at.elapsed() < COIN_ID_CACHE_TTL {
+                    return Ok(id.clone());
+                }
+            }
+        }
+
+        // Fallback: search API (expensive), then cache the result
         let endpoint = format!("/search?query={}", symbol);
         let response: SearchResponse = self.rate_limited_request(&endpoint).await?;
 
-        response
+        let id = response
             .coins
             .into_iter()
             .find(|c| c.symbol.eq_ignore_ascii_case(symbol))
             .map(|c| c.id)
-            .ok_or_else(|| DataRetrievalError::AssetNotFound(symbol.to_string()))
+            .ok_or_else(|| DataRetrievalError::AssetNotFound(symbol.to_string()))?;
+
+        self.coin_id_cache
+            .write()
+            .await
+            .insert(upper, (id.clone(), Instant::now()));
+
+        Ok(id)
     }
 
     /// Get current price for an asset
