@@ -42,7 +42,14 @@ interface CedrosPayShopConfigResponse {
 
 export async function fetchCedrosPayConfig(): Promise<CedrosPayConfig> {
   const endpoint = `${CEDROS_PAY_SERVER_URL}/paywall/v1/shop`;
-  const response = await fetch(endpoint);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  let response: Response;
+  try {
+    response = await fetch(endpoint, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} at ${endpoint}`);
   }
