@@ -64,10 +64,11 @@
   - Test: `cargo check`; reasoned check — cache used when Redis available
   - **Done:** Added Redis cache initialization when REDIS_URL env var is set; graceful fallback on connection failure.
 
-- [ ] **R5-CP-002** — Subscription middleware blocks all GET routes for unpaid users
+- [x] **R5-CP-002** — Subscription middleware blocks all GET routes for unpaid users
   - Files: `services/control-plane/src/middleware/subscription.rs:82-153`
   - Fix: Allow GET requests (read-only) through; only block mutating operations (POST/PUT/PATCH/DELETE)
   - Test: `cargo check`; reasoned check — free-tier users can still read their data
+  - **Done:** Added `request.method() != Method::GET` guard to subscription check; GET requests pass through for inactive users.
 
 - [x] **R5-BR-005** — Integer overflow in reconciler: `on_chain_amount as i64 - pos.quantity_raw as i64`
   - Files: `services/bot-runner/src/reconciler.rs:207`

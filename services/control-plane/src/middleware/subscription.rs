@@ -5,7 +5,7 @@
 use axum::{
     body::Body,
     extract::{Request, State},
-    http::StatusCode,
+    http::{Method, StatusCode},
     middleware::Next,
     response::Response,
 };
@@ -140,8 +140,10 @@ pub async fn subscription_middleware(
         bot_count,
     };
 
-    // Check if subscription is active
-    if !sub_context.is_active {
+    // Block mutating operations for inactive subscriptions.
+    // GET (read-only) requests pass through so free-tier users can still
+    // read their own data (e.g. /bots, /me, /account/settings).
+    if !sub_context.is_active && request.method() != Method::GET {
         return Err(StatusCode::PAYMENT_REQUIRED);
     }
 
