@@ -7,6 +7,7 @@ export class ApiError extends Error {
   ) {
     super(message);
     this.name = 'ApiError';
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
@@ -15,6 +16,7 @@ export class AuthExpiredError extends ApiError {
   constructor(message: string = 'Session expired. Please log in again.') {
     super(401, message);
     this.name = 'AuthExpiredError';
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
@@ -23,6 +25,7 @@ export class TimeoutError extends ApiError {
   constructor(message: string = 'Request timed out') {
     super(0, message);
     this.name = 'TimeoutError';
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
@@ -31,6 +34,7 @@ export class NetworkError extends ApiError {
   constructor(message: string = 'Network error. Please check your connection.') {
     super(0, message);
     this.name = 'NetworkError';
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
@@ -39,6 +43,7 @@ export class RateLimitError extends ApiError {
   constructor(public retryAfter?: number) {
     super(429, 'Too many requests. Please try again later.');
     this.name = 'RateLimitError';
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
@@ -47,6 +52,7 @@ export class ServerError extends ApiError {
   constructor(status: number, message: string = 'Server error. Please try again.') {
     super(status, message);
     this.name = 'ServerError';
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
@@ -55,5 +61,6 @@ export class ForbiddenError extends ApiError {
   constructor(message: string = 'Access denied.') {
     super(403, message);
     this.name = 'ForbiddenError';
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }

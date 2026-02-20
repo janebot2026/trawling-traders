@@ -1,6 +1,6 @@
 # Audit Remediation Checklist — Round 5
 
-**Total findings:** 90 | **Fixed:** 2 | **Deferred:** 0
+**Total findings:** 90 | **Fixed:** 3 | **Deferred:** 0
 
 **Previous rounds:** Rounds 1–4 fixed 186 findings (134 in Round 4, 2 deferred: CP-018 reqwest 0.12, MB-032 Expo SDK).
 
@@ -47,10 +47,11 @@
   - Test: `npx tsc --noEmit`; reasoned check — `bot.userId` no longer `undefined`
   - **Done:** Stored `fetchApi` result in `response`, return `mapBot(response)`.
 
-- [ ] **R5-INFRA-003** — Error subclasses `instanceof` broken under Babel
+- [x] **R5-INFRA-003** — Error subclasses `instanceof` broken under Babel
   - Files: `packages/api-client/src/errors.ts:1-59`
   - Fix: Add `Object.setPrototypeOf(this, new.target.prototype)` to each constructor
   - Test: `npx tsc --noEmit`; reasoned check — `instanceof` works with Babel/Metro transpilation
+  - **Done:** Added `Object.setPrototypeOf(this, new.target.prototype)` to all 7 error class constructors.
 
 - [ ] **R5-DR-001** — Redis cache never initialized
   - Files: `services/data-retrieval/src/main.rs:87-95`
