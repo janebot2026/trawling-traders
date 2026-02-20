@@ -18,6 +18,7 @@ import type { UserSettings } from '@trawling-traders/types';
 import { api } from '@trawling-traders/api-client';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { lightTheme } from '../theme';
+import { useSettingsStore } from '../store';
 const PROFILE_BG = require('../../../../assets/branding/tt-head.png');
 const HEADER_HEIGHT = 56;
 
@@ -28,6 +29,7 @@ export function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const contentTopPadding = insets.top + HEADER_HEIGHT + 10;
   const { logout } = useCedrosLogin();
+  const clearApiKeys = useSettingsStore((s) => s.clearApiKeys);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -71,6 +73,7 @@ export function ProfileScreen() {
         style: 'destructive',
         onPress: async () => {
           setIsLoggingOut(true);
+          clearApiKeys();
           try {
             await logout();
           } catch {

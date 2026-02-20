@@ -127,6 +127,7 @@ interface SettingsState {
   disabledCustodians: string[];
   setApiKey: (provider: LlmProvider, key: string) => void;
   removeApiKey: (provider: LlmProvider) => void;
+  clearApiKeys: () => void;
   setPreferredModel: (provider: LlmProvider, model: LlmModel) => void;
   toggleCustodian: (custodian: string) => void;
 }
@@ -145,6 +146,7 @@ export const useSettingsStore = create<SettingsState>()(
           delete next[provider];
           return { apiKeys: next };
         }),
+      clearApiKeys: () => set({ apiKeys: {} }),
       setPreferredModel: (provider, model) =>
         set((state) => ({ preferredModels: { ...state.preferredModels, [provider]: model } })),
       toggleCustodian: (custodian) =>
