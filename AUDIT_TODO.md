@@ -1,6 +1,6 @@
 # Audit Remediation Checklist — Round 5
 
-**Total findings:** 90 | **Fixed:** 14 | **Deferred:** 0
+**Total findings:** 90 | **Fixed:** 15 | **Deferred:** 0
 
 **Previous rounds:** Rounds 1–4 fixed 186 findings (134 in Round 4, 2 deferred: CP-018 reqwest 0.12, MB-032 Expo SDK).
 
@@ -82,10 +82,11 @@
   - Test: `cargo check`; reasoned check — timestamps reflect reality
   - **Done:** Replaced in-memory User construction with `sqlx::query_as` from users table; removed fake Utc::now() timestamps.
 
-- [ ] **R5-INFRA-004** — GitHub Actions pinned to mutable tags (supply-chain risk)
+- [x] **R5-INFRA-004** — GitHub Actions pinned to mutable tags (supply-chain risk)
   - Files: `.github/workflows/deploy.yml`
   - Fix: Pin all actions to full commit SHAs with version comments
   - Test: YAML syntax check; reasoned check
+  - **Done:** All 13 action references pinned to full 40-char SHAs with version comments. No mutable tags remain.
 
 - [x] **R5-MB-001** — Behavior config save destroys LLM API key (sends masked value)
   - Files: `apps/mobile/src/screens/BotBehaviorConfigScreen.tsx:67`
