@@ -134,13 +134,31 @@ pub async fn rate_limit_middleware(
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    // Get user ID from auth context or IP
+    // Get user ID from auth context, or fall back to client IP for anonymous requests
     let key = if let Some(auth) = request.extensions().get::<AuthContext>() {
         format!("user:{}", auth.user_id)
     } else {
-        // For non-authenticated routes, use a placeholder or IP
-        // In production, extract real IP
-        "anonymous".to_string()
+        let ip = request
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .map(|s| s.trim().to_string())
+            .or_else(|| {
+                request
+                    .headers()
+                    .get("x-real-ip")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string())
+            })
+            .or_else(|| {
+                request
+                    .extensions()
+                    .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                    .map(|ci| ci.0.ip().to_string())
+            })
+            .unwrap_or_else(|| "anonymous".to_string());
+        format!("anon:{}", ip)
     };
 
     // Check rate limit
