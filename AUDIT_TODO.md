@@ -1,6 +1,6 @@
 # Audit Remediation Checklist — Round 5
 
-**Total findings:** 90 | **Fixed:** 1 | **Deferred:** 0
+**Total findings:** 90 | **Fixed:** 2 | **Deferred:** 0
 
 **Previous rounds:** Rounds 1–4 fixed 186 findings (134 in Round 4, 2 deferred: CP-018 reqwest 0.12, MB-032 Expo SDK).
 
@@ -41,10 +41,11 @@
   - Fix: Pass via environment variable instead of `--api-key` CLI arg
   - Test: `cargo check`; reasoned check — key no longer in `/proc/[pid]/cmdline`
 
-- [ ] **R5-INFRA-002** — `createBot` returns unmapped snake_case response
+- [x] **R5-INFRA-002** — `createBot` returns unmapped snake_case response
   - Files: `packages/api-client/src/bots.ts:60-87`
   - Fix: Wrap `fetchApi` result with `mapBot(response)`
   - Test: `npx tsc --noEmit`; reasoned check — `bot.userId` no longer `undefined`
+  - **Done:** Stored `fetchApi` result in `response`, return `mapBot(response)`.
 
 - [ ] **R5-INFRA-003** — Error subclasses `instanceof` broken under Babel
   - Files: `packages/api-client/src/errors.ts:1-59`

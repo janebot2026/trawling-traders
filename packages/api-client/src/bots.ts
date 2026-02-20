@@ -58,7 +58,7 @@ export const botApi = {
 
   // Create a new bot
   async createBot(request: CreateBotRequest): Promise<Bot> {
-    return fetchApi('/bots', {
+    const response = await fetchApi('/bots', {
       method: 'POST',
       body: JSON.stringify({
         name: request.name,
@@ -84,6 +84,7 @@ export const botApi = {
         telegram_pairing_code: request.telegramPairingCode,
       }),
     });
+    return mapBot(response);
   },
 
   // Get bot details with config
