@@ -6,9 +6,11 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator, DrawerContentScrollView } from '@react-navigation/drawer';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useCedrosLogin } from '@cedros/login-react-native';
 import { lightTheme } from '../theme';
 import { AppHeader } from '../components/AppHeader';
 import { AppTabBar } from '../components/AppTabBar';
+import { useSettingsStore } from '../store';
 
 import { AuthScreen } from '../screens/AuthScreen';
 import { SubscribeScreen } from '../screens/SubscribeScreen';
@@ -290,6 +292,8 @@ function AppStack() {
 function ProfileDrawerContent(props: any) {
   const insets = useSafeAreaInsets();
   const nav = props.navigation;
+  const { logout } = useCedrosLogin();
+  const clearApiKeys = useSettingsStore((s) => s.clearApiKeys);
   const getFocusedRouteName = (state: any): string | null => {
     if (!state?.routes || typeof state.index !== 'number') {
       return null;
@@ -337,8 +341,10 @@ function ProfileDrawerContent(props: any) {
     {
       key: 'logout',
       label: 'Log out',
-      onPress: () => {
+      onPress: async () => {
         nav.closeDrawer();
+        clearApiKeys();
+        try { await logout(); } catch { /* navigation still applies below */ }
         nav.navigate('App', { screen: 'Auth' });
       },
     },
