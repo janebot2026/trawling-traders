@@ -147,7 +147,8 @@ async fn collect_report_rows(
          INNER JOIN bots b ON b.id = e.bot_id
          WHERE b.user_id = $1
            AND ($2::timestamptz IS NULL OR e.created_at >= $2)
-         ORDER BY e.created_at ASC, e.id ASC",
+         ORDER BY e.created_at ASC, e.id ASC
+         LIMIT 50000",
     )
     .bind(user_id)
     .bind(cutoff)
