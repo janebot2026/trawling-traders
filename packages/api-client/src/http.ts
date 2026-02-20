@@ -96,6 +96,11 @@ export async function fetchApi(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
+  // Forward caller-provided AbortSignal to the timeout controller
+  if (options.signal) {
+    options.signal.addEventListener('abort', () => controller.abort());
+  }
+
   let response: Response;
   try {
     response = await fetch(url, {
