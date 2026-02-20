@@ -197,6 +197,12 @@ pub async fn list_bots(
         .unwrap_or(DEFAULT_BOTS_LIMIT)
         .clamp(1, MAX_BOTS_LIMIT);
 
+    let (total,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM bots WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
     let bots = sqlx::query_as::<_, Bot>(
         "SELECT * FROM bots WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2",
     )
@@ -205,8 +211,6 @@ pub async fn list_bots(
     .fetch_all(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let total = bots.len() as i64;
 
     Ok(Json(ListBotsResponse { bots, total }))
 }
@@ -974,7 +978,7 @@ pub async fn bot_action(
     Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
     Json(req): Json<BotActionRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
     let bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
 
     let pool = state.db.clone();
@@ -1070,8 +1074,8 @@ pub async fn bot_action(
         }
         BotAction::RotateSecrets => {
             // Generate fresh token; store only the hash in the DB.
-            // The plaintext is returned to the caller (or re-provisioned via user-data).
-            let (_new_token_plain, new_token_hash) = generate_bootstrap_token();
+            // The plaintext is returned to the caller so the bot can re-authenticate.
+            let (new_token_plain, new_token_hash) = generate_bootstrap_token();
             sqlx::query(
                 "UPDATE bots SET bootstrap_token = $1, bootstrap_token_used_at = NULL, updated_at = NOW() WHERE id = $2",
             )
@@ -1082,10 +1086,14 @@ pub async fn bot_action(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
             info!("Bot {} secrets rotated", bot_id);
+
+            return Ok(axum::response::IntoResponse::into_response(
+                Json(serde_json::json!({ "bootstrap_token": new_token_plain })),
+            ));
         }
     }
 
-    Ok(StatusCode::OK)
+    Ok(axum::response::IntoResponse::into_response(StatusCode::OK))
 }
 
 /// GET /bots/:id/metrics - Get bot metrics
