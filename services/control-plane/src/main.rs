@@ -436,12 +436,8 @@ async fn build_router(
                 let method = req.method().clone();
                 let uri = req.uri().clone();
                 let has_auth = req.headers().get(axum::http::header::AUTHORIZATION).is_some();
-                let auth_preview = req.headers()
-                    .get(axum::http::header::AUTHORIZATION)
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| if s.len() > 25 { format!("{}...", &s[..25]) } else { s.to_string() });
                 tracing::info!(
-                    %method, %uri, has_auth, auth_preview = ?auth_preview,
+                    %method, %uri, has_auth, auth_header = "[REDACTED]",
                     "cedros-login request"
                 );
                 let resp = next.run(req).await;
