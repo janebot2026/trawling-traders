@@ -108,22 +108,26 @@ export function AuthScreen() {
     if (!activeOrg) return;
 
     // Non-admin member — check billing
-    api.user
-      .getBillingSummary()
-      .then((billing) => {
+    let mounted = true;
+    (async () => {
+      try {
+        const billing = await api.user.getBillingSummary();
+        if (!mounted) return;
         subscriptionCheckedRef.current = true;
         const status = String((billing as { status?: string }).status || '').toLowerCase();
         if (status !== 'active') {
           navigation.reset({ index: 0, routes: [{ name: 'Subscribe' }] });
         }
-      })
-      .catch((err) => {
+      } catch (err) {
+        if (!mounted) return;
         if (__DEV__) {
           console.warn('Subscription check failed:', err);
         }
         // Do not set subscriptionCheckedRef so the check can be retried
         // on the next render cycle when conditions change.
-      });
+      }
+    })();
+    return () => { mounted = false; };
   }, [isAuthenticated, activeOrg, navigation]);
 
   useEffect(() => {
