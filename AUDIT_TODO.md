@@ -1,6 +1,6 @@
 # Audit Remediation Checklist — Round 5
 
-**Total findings:** 90 | **Fixed:** 8 | **Deferred:** 0
+**Total findings:** 90 | **Fixed:** 9 | **Deferred:** 0
 
 **Previous rounds:** Rounds 1–4 fixed 186 findings (134 in Round 4, 2 deferred: CP-018 reqwest 0.12, MB-032 Expo SDK).
 
@@ -40,10 +40,11 @@
   - Test: `cargo check`; reasoned check — config changes take effect without restart
   - **Done:** Added `update_execution_config` to TradeExecutor; `apply_config` now updates existing executor instead of skipping.
 
-- [ ] **R5-BR-004** — Jupiter API key passed as CLI argument (visible in `ps aux`)
+- [x] **R5-BR-004** — Jupiter API key passed as CLI argument (visible in `ps aux`)
   - Files: `services/bot-runner/src/executor.rs:279-280`
   - Fix: Pass via environment variable instead of `--api-key` CLI arg
   - Test: `cargo check`; reasoned check — key no longer in `/proc/[pid]/cmdline`
+  - **Done:** Replaced `cmd.arg("--api-key").arg(api_key)` with `cmd.env("JUPITER_API_KEY", api_key)`.
 
 - [x] **R5-INFRA-002** — `createBot` returns unmapped snake_case response
   - Files: `packages/api-client/src/bots.ts:60-87`

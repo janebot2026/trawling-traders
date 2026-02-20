@@ -275,9 +275,10 @@ impl TradeExecutor {
         // Add common flags
         cmd.arg("--json");
 
-        // Add API key if available
+        // R5-BR-004: Pass Jupiter API key via env var instead of CLI arg.
+        // CLI args are visible in /proc/[pid]/cmdline and `ps aux`.
         if let Some(ref api_key) = self.jupiter_api_key {
-            cmd.arg("--api-key").arg(api_key);
+            cmd.env("JUPITER_API_KEY", api_key);
         }
 
         // Add RPC URL if confirming
