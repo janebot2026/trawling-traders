@@ -595,8 +595,10 @@ pub async fn get_bot_secrets(
     // The DB stores hex(sha256(token)); hash the incoming request the same way and
     // compare in constant time to prevent timing side-channel attacks.
     use sha2::{Digest, Sha256};
+    use subtle::ConstantTimeEq;
     let request_hash = hex::encode(Sha256::digest(request.bootstrap_token.as_bytes()));
-    if stored_token.as_str() != request_hash.as_str() {
+    let is_equal = stored_token.as_bytes().ct_eq(request_hash.as_bytes());
+    if !bool::from(is_equal) {
         warn!("Invalid bootstrap token attempt for bot {}", bot_id);
         return Err((
             StatusCode::UNAUTHORIZED,

@@ -1,6 +1,6 @@
 # Audit Remediation Checklist — Round 5
 
-**Total findings:** 90 | **Fixed:** 3 | **Deferred:** 0
+**Total findings:** 90 | **Fixed:** 4 | **Deferred:** 0
 
 **Previous rounds:** Rounds 1–4 fixed 186 findings (134 in Round 4, 2 deferred: CP-018 reqwest 0.12, MB-032 Expo SDK).
 
@@ -21,10 +21,11 @@
 
 ## High (12)
 
-- [ ] **R5-CP-001** — Bootstrap token comparison not constant-time
+- [x] **R5-CP-001** — Bootstrap token comparison not constant-time
   - Files: `services/control-plane/src/handlers/sync.rs:596-599`, `Cargo.toml`
   - Fix: Add `subtle = "2"` dep; use `ct_eq` for hash comparison
   - Test: `cargo check`; reasoned check — timing oracle eliminated
+  - **Done:** Added `subtle = "2"` dep; replaced `!=` with `ct_eq` from `subtle::ConstantTimeEq`.
 
 - [ ] **R5-BR-002** — `fetch_price_http` hardcodes SOL decimals (9) and USDC output mint
   - Files: `services/bot-runner/src/executor.rs:455-476`

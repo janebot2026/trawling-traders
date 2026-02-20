@@ -67,6 +67,9 @@ rsa = "0.9"
 # SHA256 for API key validation (matching cedros-login's hash scheme)
 sha2 = "0.10"
 
+# Constant-time comparison (prevents timing side-channel on token checks)
+subtle = "2"
+
 # DigitalOcean provisioning - SQLx 0.8 compatible
 claw-spawn = "0.1.2"
 rand = "0.8"
