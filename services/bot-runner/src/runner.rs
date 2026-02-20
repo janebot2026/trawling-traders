@@ -151,9 +151,35 @@ impl BotRunner {
         // Intent cleanup interval (5 minutes)
         let mut cleanup_interval = interval(Duration::from_secs(300));
 
-        // Initial config load
-        if let Err(e) = self.poll_config().await {
-            error!("Initial config poll error: {}", e);
+        // R5-BR-009: Retry initial config fetch so a briefly-unavailable control-plane
+        // does not leave the bot running config-less.
+        {
+            const MAX_RETRIES: u32 = 3;
+            const RETRY_DELAY: Duration = Duration::from_secs(5);
+            let mut attempt = 0u32;
+            loop {
+                attempt += 1;
+                match self.poll_config().await {
+                    Ok(()) => break,
+                    Err(e) => {
+                        if attempt >= MAX_RETRIES {
+                            error!(
+                                "Initial config poll failed after {} attempts: {}",
+                                MAX_RETRIES, e
+                            );
+                            break;
+                        }
+                        warn!(
+                            "Initial config poll attempt {}/{} failed: {}, retrying in {}s",
+                            attempt,
+                            MAX_RETRIES,
+                            e,
+                            RETRY_DELAY.as_secs()
+                        );
+                        tokio::time::sleep(RETRY_DELAY).await;
+                    }
+                }
+            }
         }
 
         // Run main loop with shutdown handling
@@ -713,37 +739,42 @@ impl BotRunner {
             };
         }
 
-        // BR-011: Check the *resulting* position size, not just the trade amount.
-        // Existing exposure for the output mint (the asset being bought) is included.
-        let max_position_value = snapshot.total_equity
-            * Decimal::from(config.risk_caps.max_position_size_percent)
-            / Decimal::from(100);
+        // R5-BR-007: Position-size check only applies to buy intents.
+        // For sells, the output is typically USDC — checking it is meaningless
+        // and could incorrectly block legitimate sell orders.
+        if intent.action != TradeAction::Sell {
+            // BR-011: Check the *resulting* position size, not just the trade amount.
+            // Existing exposure for the output mint (the asset being bought) is included.
+            let max_position_value = snapshot.total_equity
+                * Decimal::from(config.risk_caps.max_position_size_percent)
+                / Decimal::from(100);
 
-        let existing_exposure = snapshot
-            .positions
-            .iter()
-            .find(|p| p.mint == intent.output_mint)
-            .map(|p| p.market_value)
-            .unwrap_or(Decimal::ZERO);
+            let existing_exposure = snapshot
+                .positions
+                .iter()
+                .find(|p| p.mint == intent.output_mint)
+                .map(|p| p.market_value)
+                .unwrap_or(Decimal::ZERO);
 
-        // R5-BR-001: Include amounts committed by earlier intents in this tick
-        let tick_committed = committed_usd
-            .get(&intent.output_mint)
-            .copied()
-            .unwrap_or(Decimal::ZERO);
+            // R5-BR-001: Include amounts committed by earlier intents in this tick
+            let tick_committed = committed_usd
+                .get(&intent.output_mint)
+                .copied()
+                .unwrap_or(Decimal::ZERO);
 
-        let resulting_position = existing_exposure + tick_committed + intent.amount_usd;
+            let resulting_position = existing_exposure + tick_committed + intent.amount_usd;
 
-        if resulting_position > max_position_value {
-            return IntentValidation {
-                intent: intent.clone(),
-                approved: false,
-                rejection_reason: Some(format!(
-                    "Resulting position ${} exceeds max position size ${}",
-                    resulting_position, max_position_value
-                )),
-                blocked_by: Some("max_position_size_percent".to_string()),
-            };
+            if resulting_position > max_position_value {
+                return IntentValidation {
+                    intent: intent.clone(),
+                    approved: false,
+                    rejection_reason: Some(format!(
+                        "Resulting position ${} exceeds max position size ${}",
+                        resulting_position, max_position_value
+                    )),
+                    blocked_by: Some("max_position_size_percent".to_string()),
+                };
+            }
         }
 
         // Check daily loss limit
