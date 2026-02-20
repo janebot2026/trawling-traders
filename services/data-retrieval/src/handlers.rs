@@ -164,20 +164,38 @@ pub async fn get_supported_symbols(
     })
 }
 
+/// Minimum success rate below which a source is considered completely failing.
+const MIN_SOURCE_SUCCESS_RATE: f64 = 0.05;
+
 /// GET /health - Service health check
-pub async fn health_check(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
+///
+/// Returns 200 if at least one source is functional, 503 if all sources are failing.
+pub async fn health_check(
+    State(state): State<Arc<AppState>>,
+) -> (StatusCode, Json<HealthResponse>) {
     let source_health = state.price_aggregator.health_check().await;
 
     let all_healthy = source_health.iter().all(|h| h.is_healthy);
+    let all_failing = !source_health.is_empty()
+        && source_health
+            .iter()
+            .all(|h| h.success_rate < MIN_SOURCE_SUCCESS_RATE);
 
-    Json(HealthResponse {
-        status: if all_healthy {
-            "healthy".to_string()
-        } else {
-            "degraded".to_string()
-        },
-        sources: source_health,
-    })
+    let (status_code, status_label) = if all_failing {
+        (StatusCode::SERVICE_UNAVAILABLE, "unavailable")
+    } else if all_healthy {
+        (StatusCode::OK, "healthy")
+    } else {
+        (StatusCode::OK, "degraded")
+    };
+
+    (
+        status_code,
+        Json(HealthResponse {
+            status: status_label.to_string(),
+            sources: source_health,
+        }),
+    )
 }
 
 // Response types
