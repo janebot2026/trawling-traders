@@ -1,6 +1,6 @@
 # Audit Remediation Checklist — Round 5
 
-**Total findings:** 90 | **Fixed:** 4 | **Deferred:** 0
+**Total findings:** 90 | **Fixed:** 6 | **Deferred:** 0
 
 **Previous rounds:** Rounds 1–4 fixed 186 findings (134 in Round 4, 2 deferred: CP-018 reqwest 0.12, MB-032 Expo SDK).
 
@@ -14,10 +14,11 @@
   - Test: Reasoned check — verify recursive call passes incremented counter; `npx tsc --noEmit`
   - **Done:** Added `_retryCount` param (default 0); guard retry with `_retryCount < 1`; throw `NetworkError` on exhaustion.
 
-- [ ] **R5-BR-001** — Portfolio not updated after trades within tick
+- [x] **R5-BR-001** — Portfolio not updated after trades within tick
   - Files: `services/bot-runner/src/runner.rs:528-556`
   - Fix: Track committed amounts in `HashMap<String, Decimal>` within tick loop; add to existing exposure in `validate_intent`
   - Test: `cargo check`; reasoned check of position-limit enforcement across multiple intents in single tick
+  - **Done:** Added `committed_usd` HashMap tracking per-output-mint committed amounts. `validate_intent` now includes tick-committed amounts in position-size check. Also fixes R5-BR-006.
 
 ## High (12)
 
@@ -146,10 +147,11 @@
   - Fix: Single source of truth constant in `lib.rs`; reference from other modules
   - Test: `cargo check`; reasoned check
 
-- [ ] **R5-BR-006** — All intents validated against same pre-trade snapshot within tick
+- [x] **R5-BR-006** — All intents validated against same pre-trade snapshot within tick
   - Files: `services/bot-runner/src/runner.rs:486-488`
   - Fix: (Addressed together with R5-BR-001) — committed amounts tracked per tick
   - Test: `cargo check`; reasoned check
+  - **Done:** Fixed by R5-BR-001 — committed amounts tracked in tick loop.
 
 - [ ] **R5-BR-007** — Position-size check applies to sell intents (meaningless)
   - Files: `services/bot-runner/src/runner.rs:700-714`

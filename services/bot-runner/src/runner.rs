@@ -490,10 +490,16 @@ impl BotRunner {
         // BR-010: Collect all events during the tick; flush in a single HTTP call.
         let mut tick_events: Vec<EventInput> = Vec::new();
 
+        // R5-BR-001 / R5-BR-006: Track committed USD per output mint within this tick
+        // so that subsequent intents see the cumulative exposure, not just the pre-trade
+        // snapshot. Without this, N buy intents for the same asset within one tick could
+        // each individually pass position-size checks and result in N× the intended size.
+        let mut committed_usd: HashMap<String, Decimal> = HashMap::new();
+
         // Validate and execute each intent
         for intent in &plan.intents {
             // Validate against hard risk rails
-            let validation = self.validate_intent(intent, &config, &tick_snapshot);
+            let validation = self.validate_intent(intent, &config, &tick_snapshot, &committed_usd);
 
             // Write journal entry
             let journal_entry = DecisionJournalEntry {
@@ -537,9 +543,15 @@ impl BotRunner {
             });
             self.write_journal_entry(&final_entry).await.ok();
 
-            // Update trade count and state
+            // Update trade count, committed exposure, and state
             if result.stage_reached == crate::executor::TradeStage::Confirmed {
                 self.trade_count += 1;
+
+                // R5-BR-001: Track committed amount so subsequent intents in this tick
+                // see the updated exposure for position-size validation.
+                if intent.action == TradeAction::Buy {
+                    *committed_usd.entry(intent.output_mint.clone()).or_default() += intent.amount_usd;
+                }
                 self.last_trade_outcome = Some(LastTradeOutcome {
                     intent_id: intent.intent_id,
                     stage: format!("{:?}", result.stage_reached),
@@ -682,6 +694,7 @@ impl BotRunner {
         intent: &OpenClawIntent,
         config: &BotConfig,
         snapshot: &PortfolioSnapshot,
+        committed_usd: &HashMap<String, Decimal>,
     ) -> IntentValidation {
         // Check trade limit
         let max_trades = config.risk_caps.max_trades_per_day as u32;
@@ -710,7 +723,13 @@ impl BotRunner {
             .map(|p| p.market_value)
             .unwrap_or(Decimal::ZERO);
 
-        let resulting_position = existing_exposure + intent.amount_usd;
+        // R5-BR-001: Include amounts committed by earlier intents in this tick
+        let tick_committed = committed_usd
+            .get(&intent.output_mint)
+            .copied()
+            .unwrap_or(Decimal::ZERO);
+
+        let resulting_position = existing_exposure + tick_committed + intent.amount_usd;
 
         if resulting_position > max_position_value {
             return IntentValidation {
