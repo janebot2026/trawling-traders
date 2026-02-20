@@ -28,6 +28,17 @@ const PRICE_TTL_SECONDS: i64 = 300; // 5 minutes
 /// the `SupportedSymbols` public API. Add new symbols here only.
 pub const CRYPTO_SYMBOLS: &[&str] = &["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOT", "AVAX"];
 
+/// Canonical list of supported US equity symbols (single source of truth).
+pub const STOCK_SYMBOLS: &[&str] = &[
+    "AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "NVDA", "META", "NFLX",
+];
+
+/// Canonical list of supported ETF symbols (single source of truth).
+pub const ETF_SYMBOLS: &[&str] = &["SPY", "QQQ"];
+
+/// Canonical list of supported precious metal symbols (single source of truth).
+pub const METAL_SYMBOLS: &[&str] = &["XAU", "XAG"];
+
 /// Asset class for routing to appropriate data sources
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AssetClass {
@@ -47,23 +58,18 @@ impl AssetClass {
             return AssetClass::Crypto;
         }
 
-        // Stocks (using Pyth feed list)
-        if PythClient::supports_symbol(&sym)
-            && [
-                "AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "NVDA", "META", "NFLX",
-            ]
-            .contains(&sym.as_str())
-        {
+        // Stocks (using canonical list)
+        if STOCK_SYMBOLS.contains(&sym.as_str()) {
             return AssetClass::Stock;
         }
 
         // ETFs
-        if ["SPY", "QQQ"].contains(&sym.as_str()) {
+        if ETF_SYMBOLS.contains(&sym.as_str()) {
             return AssetClass::Etf;
         }
 
         // Metals
-        if ["XAU", "XAG"].contains(&sym.as_str()) {
+        if METAL_SYMBOLS.contains(&sym.as_str()) {
             return AssetClass::Metal;
         }
 
@@ -455,9 +461,9 @@ impl PriceAggregator {
     pub fn get_supported_symbols(&self) -> SupportedSymbols {
         SupportedSymbols {
             crypto: CRYPTO_SYMBOLS.to_vec(),
-            stocks: PythClient::supported_stocks(),
-            etfs: PythClient::supported_etfs(),
-            metals: PythClient::supported_metals(),
+            stocks: STOCK_SYMBOLS.to_vec(),
+            etfs: ETF_SYMBOLS.to_vec(),
+            metals: METAL_SYMBOLS.to_vec(),
         }
     }
 }

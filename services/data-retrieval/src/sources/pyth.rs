@@ -290,21 +290,19 @@ impl PythClient {
         PYTH_FEED_IDS.contains_key(symbol)
     }
 
-    /// Get list of supported stock symbols
+    /// Get list of supported stock symbols (delegates to canonical constant).
     pub fn supported_stocks() -> Vec<&'static str> {
-        vec![
-            "AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "NVDA", "META", "NFLX",
-        ]
+        crate::STOCK_SYMBOLS.to_vec()
     }
 
-    /// Get list of supported ETF symbols
+    /// Get list of supported ETF symbols (delegates to canonical constant).
     pub fn supported_etfs() -> Vec<&'static str> {
-        vec!["SPY", "QQQ"]
+        crate::ETF_SYMBOLS.to_vec()
     }
 
-    /// Get list of supported metal symbols
+    /// Get list of supported metal symbols (delegates to canonical constant).
     pub fn supported_metals() -> Vec<&'static str> {
-        vec!["XAU", "XAG"]
+        crate::METAL_SYMBOLS.to_vec()
     }
 }
 
