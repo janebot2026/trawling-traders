@@ -355,6 +355,22 @@ pub async fn post_bot_chat_message(
 ) -> Result<Json<PostBotChatMessageResponse>, (StatusCode, String)> {
     let bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
 
+    // Rate limit: max 30 LLM chat requests per bot per hour
+    let recent_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM bot_chat_messages WHERE bot_id = $1 AND role = 'user' AND created_at > NOW() - INTERVAL '1 hour'",
+    )
+    .bind(bot_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if recent_count.0 >= 30 {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            "Rate limit exceeded: max 30 chat messages per bot per hour".to_string(),
+        ));
+    }
+
     let content = req.content.trim();
     if content.is_empty() {
         return Err((
