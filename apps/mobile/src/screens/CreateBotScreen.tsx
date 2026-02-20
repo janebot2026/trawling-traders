@@ -485,6 +485,8 @@ export function CreateBotScreen() {
         llmApiKey: llmApiKey.trim(),
         telegramEnabled,
         telegramBotToken: telegramEnabled ? telegramBotToken.trim() : undefined,
+        telegramUserId: telegramEnabled ? telegramUserId.trim() : undefined,
+        telegramPairingCode: telegramEnabled ? telegramPairingCode.trim() : undefined,
         riskCaps: {
           maxPositionSizePercent: position.value,
           maxDailyLossUsd: dailyLoss.value,
