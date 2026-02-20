@@ -851,6 +851,11 @@ impl TradeExecutor {
     pub fn execution_config(&self) -> &ExecutionConfig {
         &self.execution_config
     }
+
+    /// Update execution config (e.g., when user changes risk params at runtime).
+    pub fn update_execution_config(&mut self, config: ExecutionConfig) {
+        self.execution_config = config;
+    }
 }
 
 // ==================== DATA STRUCTURES ====================

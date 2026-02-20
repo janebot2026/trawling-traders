@@ -283,8 +283,11 @@ impl BotRunner {
 
     /// Apply new configuration
     async fn apply_config(&mut self, config: BotConfig) -> anyhow::Result<()> {
-        // Initialize executor if not already done
-        if self.executor.is_none() {
+        // R5-BR-003: Update existing executor's config on subsequent calls,
+        // or initialize a new one on first call.
+        if let Some(executor) = &mut self.executor {
+            executor.update_execution_config(config.execution.clone());
+        } else {
             match TradeExecutor::new(
                 &self.config.data_retrieval_url,
                 &self.config.solana_rpc_url,
