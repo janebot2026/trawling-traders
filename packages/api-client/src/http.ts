@@ -178,7 +178,11 @@ export async function fetchApi(
  * @param init - standard fetch RequestInit options
  * @returns parsed JSON body
  */
-export async function fetchDataApi(url: string, init: RequestInit = {}): Promise<any> {
+export async function fetchDataApi(
+  url: string,
+  init: RequestInit = {},
+  _retryCount: number = 0,
+): Promise<any> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
@@ -191,9 +195,12 @@ export async function fetchDataApi(url: string, init: RequestInit = {}): Promise
     if (err.name === 'AbortError') {
       throw new TimeoutError(`Data API request to ${url} timed out after ${DEFAULT_TIMEOUT_MS}ms`);
     }
-    // Single retry on network error
-    await sleep(INITIAL_RETRY_DELAY_MS);
-    return fetchDataApi(url, init);
+    // Single retry on network error (bounded to prevent infinite recursion)
+    if (_retryCount < 1) {
+      await sleep(INITIAL_RETRY_DELAY_MS);
+      return fetchDataApi(url, init, _retryCount + 1);
+    }
+    throw new NetworkError(`Data API request to ${url} failed`);
   } finally {
     clearTimeout(timeoutId);
   }
