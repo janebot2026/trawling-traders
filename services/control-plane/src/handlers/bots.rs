@@ -5,7 +5,6 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use chrono::Utc;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -1147,18 +1146,26 @@ use validator::Validate;
 
 /// GET /me - Get current user from JWT
 pub async fn get_current_user(
+    State(state): State<Arc<AppState>>,
     Extension(auth): Extension<AuthContext>,
 ) -> Result<Json<User>, (StatusCode, String)> {
     let user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
 
-    let user = User {
-        id: user_id,
-        email: auth.email.clone(),
-        is_admin: auth.is_admin,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-    };
+    let user = sqlx::query_as::<_, User>(
+        "SELECT id, email, is_system_admin AS is_admin, created_at, updated_at \
+         FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "User not found".to_string()),
+        _ => {
+            error!(user_id = %user_id, error = %e, "Failed to fetch current user");
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch user".to_string())
+        }
+    })?;
 
     Ok(Json(user))
 }

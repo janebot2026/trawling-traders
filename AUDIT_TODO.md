@@ -76,10 +76,11 @@
   - Test: `cargo check`; reasoned check — large token amounts don't overflow
   - **Done:** Changed `diff_raw` field type to `i128`; casts use `as i128` for full u64 range.
 
-- [ ] **R5-CP-003** — `get_current_user` fabricates `created_at`/`updated_at` with `Utc::now()`
+- [x] **R5-CP-003** — `get_current_user` fabricates `created_at`/`updated_at` with `Utc::now()`
   - Files: `services/control-plane/src/handlers/bots.rs:1149-1164`
   - Fix: Read actual user record timestamps from DB
   - Test: `cargo check`; reasoned check — timestamps reflect reality
+  - **Done:** Replaced in-memory User construction with `sqlx::query_as` from users table; removed fake Utc::now() timestamps.
 
 - [ ] **R5-INFRA-004** — GitHub Actions pinned to mutable tags (supply-chain risk)
   - Files: `.github/workflows/deploy.yml`
