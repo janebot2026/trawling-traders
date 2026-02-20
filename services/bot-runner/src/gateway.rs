@@ -277,22 +277,26 @@ impl GatewayManager {
     /// Restart the OpenClaw gateway
     ///
     /// Runs: `openclaw gateway restart`
-    /// Waits up to 30 seconds for gateway to become healthy.
+    /// R5-BR-012: Wrapped with 30s timeout. Waits up to 30 seconds for gateway to become healthy.
     pub async fn restart_gateway(&self) -> Result<()> {
         info!("Restarting OpenClaw gateway...");
 
-        let output = Command::new(&self.openclaw_bin)
-            .args(["gateway", "restart"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to execute gateway restart command: {}",
-                    self.openclaw_bin.display()
-                )
-            })?;
+        let output = tokio::time::timeout(
+            Duration::from_secs(30),
+            Command::new(&self.openclaw_bin)
+                .args(["gateway", "restart"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output(),
+        )
+        .await
+        .map_err(|_| anyhow!("Gateway restart timed out after 30s"))?
+        .with_context(|| {
+            format!(
+                "Failed to execute gateway restart command: {}",
+                self.openclaw_bin.display()
+            )
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -310,21 +314,26 @@ impl GatewayManager {
     /// Reload gateway configuration without full restart
     ///
     /// Runs: `openclaw gateway reload`
+    /// R5-BR-012: Wrapped with 30s timeout.
     pub async fn reload_gateway(&self) -> Result<()> {
         info!("Reloading OpenClaw gateway configuration...");
 
-        let output = Command::new(&self.openclaw_bin)
-            .args(["gateway", "reload"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to execute gateway reload command: {}",
-                    self.openclaw_bin.display()
-                )
-            })?;
+        let output = tokio::time::timeout(
+            Duration::from_secs(30),
+            Command::new(&self.openclaw_bin)
+                .args(["gateway", "reload"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output(),
+        )
+        .await
+        .map_err(|_| anyhow!("Gateway reload timed out after 30s"))?
+        .with_context(|| {
+            format!(
+                "Failed to execute gateway reload command: {}",
+                self.openclaw_bin.display()
+            )
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -363,13 +372,19 @@ impl GatewayManager {
     }
 
     /// Check if gateway is healthy via CLI
+    ///
+    /// R5-BR-011: Wrapped with a 10s timeout to prevent hanging on unresponsive gateway.
     async fn check_gateway_health(&self) -> Result<bool> {
-        let output = Command::new(&self.openclaw_bin)
-            .args(["gateway", "health"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await?;
+        let output = tokio::time::timeout(
+            Duration::from_secs(10),
+            Command::new(&self.openclaw_bin)
+                .args(["gateway", "health"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output(),
+        )
+        .await
+        .map_err(|_| anyhow!("Gateway health check timed out after 10s"))??;
 
         Ok(output.status.success())
     }
