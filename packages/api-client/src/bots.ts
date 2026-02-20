@@ -101,10 +101,11 @@ export const botApi = {
     botId: string,
     request: UpdateBotConfigRequest
   ): Promise<BotConfig> {
-    return fetchApi(`/bots/${botId}/config`, {
+    const response = await fetchApi(`/bots/${botId}/config`, {
       method: 'PATCH',
       body: JSON.stringify(request),
     });
+    return mapBotConfig(response)!;
   },
 
   // Perform action on bot (pause/resume/redeploy/destroy)
