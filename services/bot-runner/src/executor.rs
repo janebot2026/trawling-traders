@@ -250,7 +250,10 @@ impl TradeExecutor {
         Ok(Self {
             data_retrieval_url: data_retrieval_url.to_string(),
             solana_rpc_url: solana_rpc_url.to_string(),
-            http_client: reqwest::Client::new(),
+            // R5-BR-013: Set a default timeout so no HTTP request hangs indefinitely.
+            http_client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()?,
             claw_trader_path,
             keypair_path,
             jupiter_api_key: std::env::var("JUPITER_API_KEY").ok(),
@@ -659,8 +662,10 @@ impl TradeExecutor {
             price_quote.price_impact_pct
         );
 
-        // Simulate small slippage based on configured max
-        let slippage_factor = 1.0 - (self.execution_config.max_slippage_bps as f64 / 10000.0);
+        // R5-BR-008: Use half the max slippage to approximate average real-world slippage.
+        // Applying the full max makes paper results systematically worse than live.
+        let half_slippage_bps = self.execution_config.max_slippage_bps / 2;
+        let slippage_factor = 1.0 - (half_slippage_bps as f64 / 10000.0);
         let simulated_out = (price_quote.out_amount as f64 * slippage_factor) as u64;
 
         // Calculate fee
@@ -676,7 +681,7 @@ impl TradeExecutor {
             } else {
                 Decimal::ZERO
             },
-            slippage_bps_estimate: Some(self.execution_config.max_slippage_bps),
+            slippage_bps_estimate: Some(half_slippage_bps),
         };
     }
 
