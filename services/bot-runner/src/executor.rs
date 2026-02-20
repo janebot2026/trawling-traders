@@ -442,7 +442,7 @@ impl TradeExecutor {
     async fn fetch_price_http(
         &self,
         input_mint: &str,
-        _output_mint: &str,
+        output_mint: &str,
         amount: u64,
     ) -> anyhow::Result<ClawTraderPrice> {
         // Try data-retrieval service first
@@ -457,14 +457,20 @@ impl TradeExecutor {
             let data: PriceResponse = response.json().await?;
             let price: f64 = data.price.parse()?;
 
-            // BR-021: Use the actual trade amount instead of the hardcoded 1 SOL sentinel.
-            // The out_amount is scaled proportionally: (amount / 1e9) * price * 1e6.
-            let in_amount_sol = amount as f64 / 1_000_000_000.0;
-            let out_amount = (in_amount_sol * price * 1_000_000.0) as u64;
+            // R5-BR-002: Use actual token decimals instead of hardcoded 9 (SOL).
+            let in_decimals = crate::amount::get_token_info(input_mint)
+                .map(|t| t.decimals)
+                .unwrap_or(9);
+            let out_decimals = crate::amount::get_token_info(output_mint)
+                .map(|t| t.decimals)
+                .unwrap_or(6); // USDC default
+
+            let in_amount_ui = amount as f64 / 10f64.powi(in_decimals as i32);
+            let out_amount = (in_amount_ui * price * 10f64.powi(out_decimals as i32)) as u64;
 
             return Ok(ClawTraderPrice {
                 input_mint: input_mint.to_string(),
-                output_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(), // USDC
+                output_mint: output_mint.to_string(),
                 in_amount: amount,
                 out_amount,
                 price_impact_pct: 0.0,

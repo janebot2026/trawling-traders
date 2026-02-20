@@ -1,6 +1,6 @@
 # Audit Remediation Checklist — Round 5
 
-**Total findings:** 90 | **Fixed:** 6 | **Deferred:** 0
+**Total findings:** 90 | **Fixed:** 7 | **Deferred:** 0
 
 **Previous rounds:** Rounds 1–4 fixed 186 findings (134 in Round 4, 2 deferred: CP-018 reqwest 0.12, MB-032 Expo SDK).
 
@@ -28,10 +28,11 @@
   - Test: `cargo check`; reasoned check — timing oracle eliminated
   - **Done:** Added `subtle = "2"` dep; replaced `!=` with `ct_eq` from `subtle::ConstantTimeEq`.
 
-- [ ] **R5-BR-002** — `fetch_price_http` hardcodes SOL decimals (9) and USDC output mint
+- [x] **R5-BR-002** — `fetch_price_http` hardcodes SOL decimals (9) and USDC output mint
   - Files: `services/bot-runner/src/executor.rs:455-476`
   - Fix: Look up token decimals from `amount::get_token_info`; use actual `output_mint` parameter
   - Test: `cargo check`; reasoned check — non-SOL tokens get correct decimal scaling
+  - **Done:** Uses `get_token_info` for both input/output decimals; uses actual `output_mint` param instead of hardcoded USDC.
 
 - [ ] **R5-BR-003** — Executor config never refreshed after creation
   - Files: `services/bot-runner/src/runner.rs:280-310`
