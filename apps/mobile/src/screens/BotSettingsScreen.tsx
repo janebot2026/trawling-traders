@@ -144,7 +144,7 @@ export function BotSettingsScreen() {
           },
           tradingMode,
           llmProvider,
-          llmApiKey: llmApiKeyDirty ? llmApiKey.trim() : undefined,
+          llmApiKey: llmApiKeyDirty && llmApiKey.trim() ? llmApiKey.trim() : undefined,
           signalKnobs: {
             volumeConfirmation,
             volatilityBrake,
