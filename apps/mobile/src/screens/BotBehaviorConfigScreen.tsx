@@ -64,7 +64,8 @@ export function BotBehaviorConfigScreen() {
           strictness: config.strictness,
           tradingMode: config.tradingMode,
           llmProvider: config.llmProvider,
-          llmApiKey: config.llmApiKey,
+          // R5-MB-001: Don't send llmApiKey — the server returns a masked value
+          // (e.g., "sk-...a1b2") which would overwrite the real key.
           signalKnobs: config.signalKnobs,
           riskCaps: config.riskCaps,
         },

@@ -1,6 +1,6 @@
 # Audit Remediation Checklist — Round 5
 
-**Total findings:** 90 | **Fixed:** 13 | **Deferred:** 0
+**Total findings:** 90 | **Fixed:** 14 | **Deferred:** 0
 
 **Previous rounds:** Rounds 1–4 fixed 186 findings (134 in Round 4, 2 deferred: CP-018 reqwest 0.12, MB-032 Expo SDK).
 
@@ -87,10 +87,11 @@
   - Fix: Pin all actions to full commit SHAs with version comments
   - Test: YAML syntax check; reasoned check
 
-- [ ] **R5-MB-001** — Behavior config save destroys LLM API key (sends masked value)
+- [x] **R5-MB-001** — Behavior config save destroys LLM API key (sends masked value)
   - Files: `apps/mobile/src/screens/BotBehaviorConfigScreen.tsx:67`
-  - Fix: Exclude `llmApiKey` from update payload (set to `undefined`)
+  - Fix: Exclude `llmApiKey` from update payload
   - Test: `npx tsc --noEmit`; reasoned check — masked value never sent to server
+  - **Done:** Removed `llmApiKey` from the update payload; the server-returned masked value no longer overwrites the real key.
 
 ## Medium (35)
 
