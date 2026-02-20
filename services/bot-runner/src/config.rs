@@ -62,7 +62,7 @@ impl Config {
 }
 
 /// Bot trading configuration
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct BotConfig {
     pub version_id: Uuid,
     pub version: i32,
@@ -91,6 +91,30 @@ pub struct BotConfig {
 
 fn default_strategy_preset() -> String {
     "conservative".to_string()
+}
+
+/// R5-BR-010: Manual Debug impl that redacts secret fields to prevent
+/// accidental leakage via `{:?}` logging.
+impl std::fmt::Debug for BotConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BotConfig")
+            .field("version_id", &self.version_id)
+            .field("version", &self.version)
+            .field("name", &self.name)
+            .field("persona", &self.persona)
+            .field("asset_focus", &self.asset_focus)
+            .field("trading_mode", &self.trading_mode)
+            .field("risk_caps", &self.risk_caps)
+            .field("execution", &self.execution)
+            .field("llm_provider", &self.llm_provider)
+            .field("llm_model", &self.llm_model)
+            .field("llm_api_key", &"[REDACTED]")
+            .field("telegram_bot_token", &"[REDACTED]")
+            .field("strategy_preset", &self.strategy_preset)
+            .field("strategy_params", &self.strategy_params)
+            .field("asset_universe", &self.asset_universe)
+            .finish()
+    }
 }
 
 /// Asset specification for trading universe
