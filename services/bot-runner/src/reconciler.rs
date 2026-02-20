@@ -39,7 +39,7 @@ pub struct BalanceDiscrepancy {
     pub symbol: String,
     pub internal_raw: u64,
     pub on_chain_raw: u64,
-    pub diff_raw: i64,
+    pub diff_raw: i128,
 }
 
 #[derive(Debug, Clone)]
@@ -204,7 +204,7 @@ impl HoldingsReconciler {
                         symbol: pos.symbol.clone(),
                         internal_raw: pos.quantity_raw,
                         on_chain_raw: on_chain_amount,
-                        diff_raw: on_chain_amount as i64 - pos.quantity_raw as i64,
+                        diff_raw: on_chain_amount as i128 - pos.quantity_raw as i128,
                     });
                 }
             } else {

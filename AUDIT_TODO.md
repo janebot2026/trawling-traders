@@ -69,10 +69,11 @@
   - Fix: Allow GET requests (read-only) through; only block mutating operations (POST/PUT/PATCH/DELETE)
   - Test: `cargo check`; reasoned check — free-tier users can still read their data
 
-- [ ] **R5-BR-005** — Integer overflow in reconciler: `on_chain_amount as i64 - pos.quantity_raw as i64`
+- [x] **R5-BR-005** — Integer overflow in reconciler: `on_chain_amount as i64 - pos.quantity_raw as i64`
   - Files: `services/bot-runner/src/reconciler.rs:207`
-  - Fix: Use `i128` or `checked_sub` for the difference calculation
+  - Fix: Use `i128` for the difference calculation
   - Test: `cargo check`; reasoned check — large token amounts don't overflow
+  - **Done:** Changed `diff_raw` field type to `i128`; casts use `as i128` for full u64 range.
 
 - [ ] **R5-CP-003** — `get_current_user` fabricates `created_at`/`updated_at` with `Utc::now()`
   - Files: `services/control-plane/src/handlers/bots.rs:1149-1164`
