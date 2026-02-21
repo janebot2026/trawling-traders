@@ -1,3 +1,9 @@
+// TODO(CI-003): Raw interfaces and mapper functions use a dual camelCase/snake_case
+// fallback pattern (e.g. `asset.tokenAddress ?? asset.token_address`) for backwards
+// compatibility — the Rust API returns snake_case, but some legacy or cached responses
+// may use camelCase. Removing the fallback requires standardizing the API response
+// format and coordinating a migration across all consumers. Until then, keep both.
+
 import type {
   Bot,
   BotChatMessage,
