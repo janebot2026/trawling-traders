@@ -570,7 +570,29 @@ pub struct BotConfigInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlgorithmFactorInput {
     pub factor: String,
+    /// Factor weight in [-100, 100]. Must be finite (not NaN or Infinity).
     pub weight: f64,
+}
+
+impl AlgorithmFactorInput {
+    /// Validate that `weight` is finite and within [-100, 100] (CP-007).
+    ///
+    /// Returns `Err` with a human-readable message on invalid input.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.weight.is_finite() {
+            return Err(format!(
+                "algorithm factor '{}' weight must be finite, got {}",
+                self.factor, self.weight
+            ));
+        }
+        if self.weight < -100.0 || self.weight > 100.0 {
+            return Err(format!(
+                "algorithm factor '{}' weight must be in [-100, 100], got {}",
+                self.factor, self.weight
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]

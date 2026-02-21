@@ -419,6 +419,13 @@ pub async fn create_bot(
         .map(serde_json::to_value)
         .transpose()
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid custom_assets payload: {}", e)))?;
+    // Validate each algorithm factor weight (CP-007): must be finite and in [-100, 100].
+    if let Some(factors) = &req.algorithm_factors {
+        for f in factors {
+            f.validate()
+                .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+        }
+    }
     let algorithm_factors_json = req
         .algorithm_factors
         .as_ref()
@@ -922,6 +929,13 @@ pub async fn update_bot_config(
         .map(serde_json::to_value)
         .transpose()
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid custom_assets payload: {}", e)))?;
+    // Validate each algorithm factor weight (CP-007): must be finite and in [-100, 100].
+    if let Some(factors) = &req.config.algorithm_factors {
+        for f in factors {
+            f.validate()
+                .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+        }
+    }
     let algorithm_factors_json = req
         .config
         .algorithm_factors
