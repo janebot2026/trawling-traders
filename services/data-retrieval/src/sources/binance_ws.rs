@@ -5,6 +5,7 @@ use rust_decimal::Decimal;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -35,6 +36,8 @@ pub struct BinanceWebSocketClient {
     /// Handle to the running message-handler task.
     /// Stored so reconnect can abort the old task before spawning a new one (DR-003).
     handler_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Atomic counter for unique subscription request IDs
+    next_sub_id: Arc<AtomicU64>,
 }
 
 impl BinanceWebSocketClient {
@@ -64,6 +67,7 @@ impl BinanceWebSocketClient {
             subscriptions: Arc::new(RwLock::new(HashMap::new())),
             connected: Arc::new(RwLock::new(true)),
             handler_task: Arc::new(Mutex::new(None)),
+            next_sub_id: Arc::new(AtomicU64::new(1)),
         };
 
         // Spawn message handler and store the handle
@@ -91,6 +95,7 @@ impl BinanceWebSocketClient {
             subscriptions: Arc::clone(&self.subscriptions),
             connected: Arc::clone(&self.connected),
             handler_task: Arc::clone(&self.handler_task),
+            next_sub_id: Arc::clone(&self.next_sub_id),
         }
     }
 
@@ -105,10 +110,11 @@ impl BinanceWebSocketClient {
             }
         }
 
+        let sub_id = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
         let subscribe_msg = serde_json::json!({
             "method": "SUBSCRIBE",
             "params": [&stream_name],
-            "id": 1,
+            "id": sub_id,
         });
 
         let msg = Message::Text(subscribe_msg.to_string());
@@ -321,10 +327,11 @@ impl BinanceWebSocketClient {
 
         for (_symbol, stream) in subs {
             // Re-subscribe using write half
+            let sub_id = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
             let subscribe_msg = serde_json::json!({
                 "method": "SUBSCRIBE",
                 "params": [&stream],
-                "id": 1,
+                "id": sub_id,
             });
 
             let msg = Message::Text(subscribe_msg.to_string());
