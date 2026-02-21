@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import type { Bot, User, BotConfig, LlmProvider, LlmModel } from '@trawling-traders/types';
+import type { User, LlmProvider, LlmModel } from '@trawling-traders/types';
 
 /** Zustand-compatible storage backed by expo-secure-store (encrypted at rest). */
 const secureStorage: StateStorage = {
@@ -16,52 +16,6 @@ const secureStorage: StateStorage = {
     await SecureStore.deleteItemAsync(name);
   },
 };
-
-interface BotsState {
-  bots: Bot[];
-  selectedBotId: string | null;
-  isLoading: boolean;
-  error: string | null;
-  setBots: (bots: Bot[]) => void;
-  addBot: (bot: Bot) => void;
-  updateBot: (botId: string, updates: Partial<Bot>) => void;
-  removeBot: (botId: string) => void;
-  selectBot: (botId: string | null) => void;
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
-}
-
-export const useBotsStore = create<BotsState>()(
-  persist(
-    (set) => ({
-      bots: [],
-      selectedBotId: null,
-      isLoading: false,
-      error: null,
-      setBots: (bots) => set({ bots }),
-      addBot: (bot) => set((state) => ({ bots: [...state.bots, bot] })),
-      updateBot: (botId, updates) =>
-        set((state) => ({
-          bots: state.bots.map((b) =>
-            b.id === botId ? { ...b, ...updates } : b
-          ),
-        })),
-      removeBot: (botId) =>
-        set((state) => ({
-          bots: state.bots.filter((b) => b.id !== botId),
-          selectedBotId: state.selectedBotId === botId ? null : state.selectedBotId,
-        })),
-      selectBot: (botId) => set({ selectedBotId: botId }),
-      setLoading: (isLoading) => set({ isLoading }),
-      setError: (error) => set({ error }),
-    }),
-    {
-      name: 'bots-storage',
-      storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => ({ bots: state.bots, selectedBotId: state.selectedBotId }),
-    }
-  )
-);
 
 interface UserState {
   user: User | null;
@@ -94,32 +48,6 @@ export const useUserStore = create<UserState>()(
     }
   )
 );
-
-interface PricesState {
-  prices: Record<string, { price: string; timestamp: string; source: string }>;
-  lastUpdated: Record<string, number>;
-  setPrice: (symbol: string, data: { price: string; timestamp: string; source: string }) => void;
-  getPrice: (symbol: string) => { price: string; timestamp: string; source: string } | undefined;
-  isStale: (symbol: string, maxAgeMs?: number) => boolean;
-}
-
-const PRICE_STALE_THRESHOLD = 60000; // 60 seconds
-
-export const usePricesStore = create<PricesState>()((set, get) => ({
-  prices: {},
-  lastUpdated: {},
-  setPrice: (symbol, data) =>
-    set((state) => ({
-      prices: { ...state.prices, [symbol]: data },
-      lastUpdated: { ...state.lastUpdated, [symbol]: Date.now() },
-    })),
-  getPrice: (symbol) => get().prices[symbol],
-  isStale: (symbol, maxAgeMs = PRICE_STALE_THRESHOLD) => {
-    const lastUpdate = get().lastUpdated[symbol];
-    if (!lastUpdate) return true;
-    return Date.now() - lastUpdate > maxAgeMs;
-  },
-}));
 
 interface SettingsState {
   apiKeys: Partial<Record<LlmProvider, string>>;
