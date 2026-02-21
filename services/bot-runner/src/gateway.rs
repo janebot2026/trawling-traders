@@ -346,37 +346,49 @@ impl GatewayManager {
         Ok(())
     }
 
-    /// Wait for gateway to report healthy status
+    /// Wait for gateway to report healthy status.
+    ///
+    /// # BR-005 — fail fast to unblock apply_config()
+    ///
+    /// Limited to 2 attempts with a 2-second sleep between them so that a
+    /// down gateway does not block config application for more than ~6 seconds
+    /// (2 × 2s sleep + per-check timeout overhead). If neither attempt
+    /// succeeds the caller logs a warning and continues; the bot is not
+    /// prevented from receiving its configuration.
     async fn wait_for_healthy(&self) -> Result<()> {
-        let timeout = Duration::from_secs(GATEWAY_RESTART_TIMEOUT_SECS);
-        let start = std::time::Instant::now();
+        const MAX_HEALTH_ATTEMPTS: u32 = 2;
         let check_interval = Duration::from_secs(2);
 
-        while start.elapsed() < timeout {
+        for attempt in 1..=MAX_HEALTH_ATTEMPTS {
             match self.check_gateway_health().await {
                 Ok(true) => return Ok(()),
                 Ok(false) => {
-                    debug!("Gateway not yet healthy, waiting...");
+                    debug!("Gateway not yet healthy (attempt {}/{})", attempt, MAX_HEALTH_ATTEMPTS);
                 }
                 Err(e) => {
-                    debug!("Health check error: {}", e);
+                    debug!("Health check error (attempt {}/{}): {}", attempt, MAX_HEALTH_ATTEMPTS, e);
                 }
             }
-            tokio::time::sleep(check_interval).await;
+            if attempt < MAX_HEALTH_ATTEMPTS {
+                tokio::time::sleep(check_interval).await;
+            }
         }
 
         Err(anyhow!(
-            "Gateway did not become healthy within {}s",
-            GATEWAY_RESTART_TIMEOUT_SECS
+            "Gateway did not become healthy after {} attempts",
+            MAX_HEALTH_ATTEMPTS
         ))
     }
 
-    /// Check if gateway is healthy via CLI
+    /// Check if gateway is healthy via CLI.
     ///
-    /// R5-BR-011: Wrapped with a 10s timeout to prevent hanging on unresponsive gateway.
+    /// R5-BR-011: Wrapped with a 3s timeout (reduced from 10s for BR-005) so
+    /// that a single health probe cannot stall the loop for longer than 3
+    /// seconds. The caller (`wait_for_healthy`) caps the number of attempts to
+    /// 2, bounding total wait time to ~8s worst-case.
     async fn check_gateway_health(&self) -> Result<bool> {
         let output = tokio::time::timeout(
-            Duration::from_secs(10),
+            Duration::from_secs(3),
             Command::new(&self.openclaw_bin)
                 .args(["gateway", "health"])
                 .stdout(Stdio::piped())
@@ -384,7 +396,7 @@ impl GatewayManager {
                 .output(),
         )
         .await
-        .map_err(|_| anyhow!("Gateway health check timed out after 10s"))??;
+        .map_err(|_| anyhow!("Gateway health check timed out after 3s"))??;
 
         Ok(output.status.success())
     }
