@@ -42,6 +42,38 @@ pub static PYTH_FEED_IDS: phf::Map<&str, &str> = phf::phf_map! {
     "SOL" => "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
 };
 
+/// Compute the confidence ratio from a `PriceData` entry.
+///
+/// Returns `Some(ratio)` where ratio = conf / price expressed as a fraction
+/// (e.g. 0.001 means 0.1% uncertainty).  Returns `None` if either integer
+/// fails to parse, and `Some(0.0)` when the price itself is zero (division
+/// not meaningful).
+fn compute_confidence(price_data: &PriceData) -> Option<f64> {
+    let price_int: i64 = price_data.price.parse().ok()?;
+    let confidence_int: u64 = price_data.conf.parse().ok()?;
+    let expo = price_data.expo.clamp(-38, 38);
+
+    let price_decimal = if expo >= 0 {
+        Decimal::from(price_int) * Decimal::from(10i64.pow(expo as u32))
+    } else {
+        Decimal::from(price_int) / Decimal::from(10i64.pow((-expo) as u32))
+    };
+
+    let confidence_decimal = if expo >= 0 {
+        Decimal::from(confidence_int) * Decimal::from(10i64.pow(expo as u32))
+    } else {
+        Decimal::from(confidence_int) / Decimal::from(10i64.pow((-expo) as u32))
+    };
+
+    let ratio = if price_decimal > Decimal::ZERO {
+        confidence_decimal / price_decimal
+    } else {
+        Decimal::ZERO
+    };
+
+    ratio.to_string().parse::<f64>().ok()
+}
+
 /// Pyth price update response
 #[derive(Debug, Deserialize)]
 pub struct PythPriceUpdate {
@@ -151,10 +183,6 @@ impl PythClient {
             .price
             .parse()
             .context("Failed to parse Pyth price")?;
-        let confidence_int: u64 = price_data
-            .conf
-            .parse()
-            .context("Failed to parse Pyth confidence")?;
 
         // Clamp exponent to safe range to prevent overflow on extreme values
         let expo = price_data.expo.clamp(-38, 38);
@@ -164,40 +192,25 @@ impl PythClient {
             Decimal::from(price_int) / Decimal::from(10i64.pow((-expo) as u32))
         };
 
-        let confidence_decimal = if expo >= 0 {
-            Decimal::from(confidence_int) * Decimal::from(10i64.pow(expo as u32))
-        } else {
-            Decimal::from(confidence_int) / Decimal::from(10i64.pow((-expo) as u32))
-        };
+        let confidence = compute_confidence(&price_data);
 
         let timestamp =
             DateTime::from_timestamp(price_data.publish_time, 0).unwrap_or_else(Utc::now);
 
         info!(
-            "Pyth price for {}: ${} (confidence: ${})",
-            symbol, price_decimal, confidence_decimal
+            "Pyth price for {}: ${} (confidence: {:?})",
+            symbol, price_decimal, confidence
         );
 
         self.health_tracker
             .record_success(start.elapsed().as_millis() as u64);
-
-        let confidence_ratio = if price_decimal > Decimal::ZERO {
-            confidence_decimal / price_decimal
-        } else {
-            Decimal::ZERO
-        };
 
         Ok(PricePoint {
             symbol: symbol.to_string(),
             price: price_decimal,
             source: "pyth".to_string(),
             timestamp,
-            confidence: Some(
-                confidence_ratio
-                    .to_string()
-                    .parse::<f64>()
-                    .unwrap_or(0.0),
-            ),
+            confidence,
         })
     }
 
@@ -264,6 +277,8 @@ impl PythClient {
                     Decimal::from(price_int) / Decimal::from(10i64.pow((-expo) as u32))
                 };
 
+                let confidence = compute_confidence(&parsed.price);
+
                 let timestamp =
                     DateTime::from_timestamp(parsed.price.publish_time, 0).unwrap_or_else(Utc::now);
 
@@ -274,7 +289,7 @@ impl PythClient {
                         price: price_decimal,
                         source: "pyth".to_string(),
                         timestamp,
-                        confidence: None,
+                        confidence,
                     },
                 );
             }
