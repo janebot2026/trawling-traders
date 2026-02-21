@@ -50,6 +50,8 @@ pub struct PositionSnapshot {
     pub current_price: Decimal,
     pub market_value: Decimal,
     pub unrealized_pnl: Decimal,
+    /// False when current price is unknown — market_value and unrealized_pnl are zero.
+    pub price_available: bool,
 }
 
 impl Portfolio {
@@ -177,18 +179,23 @@ impl Portfolio {
         let position_snapshots: Vec<PositionSnapshot> = self
             .positions
             .values()
-            .filter_map(|pos| {
+            .map(|pos| {
                 let decimals = crate::amount::get_token_info(&pos.mint)
                     .map(|t| t.decimals)
                     .unwrap_or(6);
 
                 let qty = crate::amount::from_raw_amount(pos.quantity_raw, decimals);
-                let current_price = pos.current_price_usdc?;
-                let market_value = qty * current_price;
-                let cost_basis = qty * pos.avg_entry_price_usdc;
-                let unrealized = market_value - cost_basis;
+                let (current_price, market_value, unrealized, price_available) =
+                    match pos.current_price_usdc {
+                        Some(price) => {
+                            let mv = qty * price;
+                            let cb = qty * pos.avg_entry_price_usdc;
+                            (price, mv, mv - cb, true)
+                        }
+                        None => (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, false),
+                    };
 
-                Some(PositionSnapshot {
+                PositionSnapshot {
                     symbol: pos.symbol.clone(),
                     mint: pos.mint.clone(),
                     quantity: qty,
@@ -196,7 +203,8 @@ impl Portfolio {
                     current_price,
                     market_value,
                     unrealized_pnl: unrealized,
-                })
+                    price_available,
+                }
             })
             .collect();
 
@@ -274,5 +282,37 @@ mod tests {
         let snapshot = portfolio.snapshot();
         assert_eq!(snapshot.positions.len(), 1);
         assert_eq!(snapshot.positions[0].unrealized_pnl, Decimal::from(20)); // $20 gain
+        assert!(snapshot.positions[0].price_available);
+    }
+
+    #[test]
+    fn test_snapshot_includes_unpriced_positions() {
+        let mut portfolio = Portfolio::new(Decimal::from(10000));
+
+        // Add SOL position then clear its current price to simulate unpriced state
+        portfolio.update_position(
+            "So11111111111111111111111111111111111111112",
+            "SOL",
+            2_000_000_000,      // 2 SOL
+            Decimal::from(150), // $150 entry
+            9,
+        );
+        portfolio
+            .positions
+            .get_mut("So11111111111111111111111111111111111111112")
+            .unwrap()
+            .current_price_usdc = None;
+
+        let snapshot = portfolio.snapshot();
+
+        // Position must be included even without current price
+        assert_eq!(snapshot.positions.len(), 1);
+        let pos = &snapshot.positions[0];
+        assert!(!pos.price_available);
+        assert_eq!(pos.quantity, Decimal::from(2));
+        assert_eq!(pos.avg_entry, Decimal::from(150));
+        assert_eq!(pos.current_price, Decimal::ZERO);
+        assert_eq!(pos.market_value, Decimal::ZERO);
+        assert_eq!(pos.unrealized_pnl, Decimal::ZERO);
     }
 }

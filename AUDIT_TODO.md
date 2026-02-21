@@ -42,10 +42,11 @@ Generated from `docs/audit-report.md` on 2026-02-20. Items ordered by severity.
   - Fix: Add max 50 items, max 255 chars per item validation
   - Test: Test with 1000+ items; test with 300-char strings
 
-- [ ] **BR-002** Portfolio snapshot filters out unpriced positions
+- [x] **BR-002** Portfolio snapshot filters out unpriced positions
   - Files: `services/bot-runner/src/portfolio.rs`
-  - Fix: Include positions with unknown prices as zero-value with `price_missing` flag
-  - Test: Snapshot with mix of priced/unpriced positions
+  - Fix: Changed `filter_map` to `map`; unpriced positions included with zero market_value and `price_available: false`
+  - Test: `test_snapshot_includes_unpriced_positions` — verifies unpriced position appears in snapshot with correct fields
+  - Verified: `cargo test` — 57/57 pass
 
 - [ ] **BR-003** Daily PnL reset uses UTC — bypassable near midnight
   - Files: `services/bot-runner/src/runner.rs`
