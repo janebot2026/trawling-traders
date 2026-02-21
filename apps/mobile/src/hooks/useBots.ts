@@ -14,7 +14,11 @@ export function useBots(options: UseBotsOptions = {}) {
 
   const fetchBots = useCallback(async () => {
     try {
-      setLoading(true);
+      // Only show loading spinner on initial fetch to avoid flicker on refresh
+      setBots((prev) => {
+        if (prev.length === 0) setLoading(true);
+        return prev;
+      });
       const response = await botApi.listBots();
       setBots(response.bots);
       setError(null);
