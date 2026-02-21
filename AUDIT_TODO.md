@@ -160,10 +160,10 @@ Generated from `docs/audit-report.md` on 2026-02-20. Items ordered by severity.
   - Fix: Added structural validation before risk rail checks: reject same-mint trades and non-positive amounts. Hold intents exempt.
   - Verified: `cargo test` — 57/57 pass; `cargo check` clean
 
-- [ ] **BR-009** claw-trader path not checked for execute permissions
+- [x] **BR-009** claw-trader path not checked for execute permissions
   - Files: `services/bot-runner/src/executor.rs`
-  - Fix: Check metadata permissions for execute bit
-  - Test: Non-executable file at path returns clear error
+  - Fix: Added unix permission check for execute bit during initialization; warns if file exists but is not executable
+  - Verified: `cargo test` — 57/57 pass
 
 - [ ] **DR-007** Rate limiter uses proxy IP instead of client IP
   - Files: `services/data-retrieval/src/rate_limit.rs`

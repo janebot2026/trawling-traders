@@ -256,12 +256,26 @@ impl TradeExecutor {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("/usr/local/bin/claw-trader"));
 
-        // Verify claw-trader exists
+        // Verify claw-trader exists and is executable
         if !claw_trader_path.exists() {
             warn!(
                 "claw-trader not found at {:?}, trades will be simulated",
                 claw_trader_path
             );
+        } else {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = std::fs::metadata(&claw_trader_path) {
+                    if meta.permissions().mode() & 0o111 == 0 {
+                        warn!(
+                            "claw-trader at {:?} is not executable (mode {:o})",
+                            claw_trader_path,
+                            meta.permissions().mode()
+                        );
+                    }
+                }
+            }
         }
 
         Ok(Self {
