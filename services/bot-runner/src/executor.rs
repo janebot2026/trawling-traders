@@ -698,11 +698,10 @@ impl TradeExecutor {
         result.signature = Some("paper_trade_simulated".to_string());
         result.execution = ExecutionData {
             out_amount_raw: simulated_out,
-            realized_price: if amount > 0 {
-                Decimal::from(simulated_out) / Decimal::from(amount)
-            } else {
-                Decimal::ZERO
-            },
+            realized_price: compute_realized_price(
+                simulated_out, output_mint,
+                amount, input_mint,
+            ),
             slippage_bps_estimate: Some(half_slippage_bps),
         };
     }
@@ -845,11 +844,10 @@ impl TradeExecutor {
             result.signature = Some(tx_hash);
             result.execution = ExecutionData {
                 out_amount_raw: out_amount,
-                realized_price: if in_amount > 0 {
-                    Decimal::from(out_amount) / Decimal::from(in_amount)
-                } else {
-                    Decimal::ZERO
-                },
+                realized_price: compute_realized_price(
+                    out_amount, &result.output_mint,
+                    in_amount, &result.input_mint,
+                ),
                 slippage_bps_estimate: Some(slippage_bps),
             };
         } else {
@@ -883,6 +881,40 @@ impl TradeExecutor {
     /// Update execution config (e.g., when user changes risk params at runtime).
     pub fn update_execution_config(&mut self, config: ExecutionConfig) {
         self.execution_config = config;
+    }
+}
+
+// ==================== HELPERS ====================
+
+/// Compute realized price as (out_ui / in_ui) by normalizing raw token amounts
+/// through their respective decimal scales.
+///
+/// Returns USDC-per-token when out_mint is USDC and in_mint is a token (sell),
+/// or tokens-per-USDC when buying. The caller's PnL formula relies on this being
+/// correctly scaled.
+pub fn compute_realized_price(
+    out_amount_raw: u64,
+    out_mint: &str,
+    in_amount_raw: u64,
+    in_mint: &str,
+) -> Decimal {
+    if in_amount_raw == 0 {
+        return Decimal::ZERO;
+    }
+    let in_decimals = crate::amount::get_token_info(in_mint)
+        .map(|t| t.decimals)
+        .unwrap_or(9);
+    let out_decimals = crate::amount::get_token_info(out_mint)
+        .map(|t| t.decimals)
+        .unwrap_or(6);
+
+    let normalized_in = crate::amount::from_raw_amount(in_amount_raw, in_decimals);
+    let normalized_out = crate::amount::from_raw_amount(out_amount_raw, out_decimals);
+
+    if normalized_in > Decimal::ZERO {
+        normalized_out / normalized_in
+    } else {
+        Decimal::ZERO
     }
 }
 
@@ -935,3 +967,52 @@ pub enum TradeSide {
 // functions have been removed. Trading decisions now come from OpenClaw gateway.
 // See runner.rs decision_tick() for the new flow.
 // Token utilities live in amount.rs.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SOL_MINT: &str = "So11111111111111111111111111111111111111112";
+    const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+    #[test]
+    fn realized_price_sell_normalizes_decimals() {
+        // Sell 5 SOL (9 dec) and receive 1000 USDC (6 dec) => 200 USDC/SOL
+        let price = compute_realized_price(
+            1_000_000_000, USDC_MINT, // 1000 USDC
+            5_000_000_000, SOL_MINT,  // 5 SOL
+        );
+        assert_eq!(price, Decimal::from(200));
+    }
+
+    #[test]
+    fn realized_price_buy_normalizes_decimals() {
+        // Buy 2 SOL (out) with 400 USDC (in) => price = 2 / 400 = 0.005 SOL/USDC
+        let price = compute_realized_price(
+            2_000_000_000, SOL_MINT,  // 2 SOL out
+            400_000_000,   USDC_MINT, // 400 USDC in
+        );
+        // out/in = 2 SOL / 400 USDC = 0.005
+        assert_eq!(price.to_string(), "0.005");
+    }
+
+    #[test]
+    fn realized_price_zero_in_amount() {
+        let price = compute_realized_price(1_000_000, USDC_MINT, 0, SOL_MINT);
+        assert_eq!(price, Decimal::ZERO);
+    }
+
+    #[test]
+    fn pnl_formula_with_normalized_price() {
+        // Bought 5 SOL at $150, sell at $200 => PnL = (200-150)*5 = $250
+        let avg_entry = Decimal::from(150);
+        let exec_price = Decimal::from(200);
+        let usdc_received = Decimal::from(1000); // 5 SOL × $200
+
+        let cost_basis = usdc_received * avg_entry / exec_price;
+        let pnl = usdc_received - cost_basis;
+
+        assert_eq!(cost_basis, Decimal::from(750));
+        assert_eq!(pnl, Decimal::from(250));
+    }
+}
