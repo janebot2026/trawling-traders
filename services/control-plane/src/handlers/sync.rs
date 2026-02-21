@@ -667,7 +667,17 @@ pub async fn get_bot_secrets(
                 state
                     .secrets
                     .decrypt(&cfg.encrypted_llm_api_key)
-                    .unwrap_or_default()
+                    .map_err(|e| {
+                        tracing::error!(
+                            bot_id = %bot_id,
+                            "Failed to decrypt LLM API key in secrets endpoint: {}",
+                            e
+                        );
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decrypt LLM API key".to_string(),
+                        )
+                    })?
             } else {
                 String::new()
             };
@@ -701,7 +711,17 @@ pub async fn get_bot_secrets(
                     let decrypted_key = state
                         .secrets
                         .decrypt(&cv.encrypted_llm_api_key)
-                        .unwrap_or_default();
+                        .map_err(|e| {
+                            tracing::error!(
+                                bot_id = %bot_id,
+                                "Failed to decrypt legacy LLM API key in secrets endpoint: {}",
+                                e
+                            );
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to decrypt LLM API key".to_string(),
+                            )
+                        })?;
                     (cv.llm_provider, String::new(), decrypted_key, None)
                 }
                 None => (String::new(), String::new(), String::new(), None),
