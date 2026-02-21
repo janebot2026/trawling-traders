@@ -398,13 +398,7 @@ async fn build_router(
                 let auth = headers
                     .get(axum::http::header::AUTHORIZATION)
                     .and_then(|v| v.to_str().ok())
-                    .map(|s| {
-                        if s.len() > 20 {
-                            format!("{}...({} chars)", &s[..20], s.len())
-                        } else {
-                            s.to_string()
-                        }
-                    });
+                    .map(|s| format!("[REDACTED] ({} chars)", s.len()));
                 let origin = headers
                     .get(axum::http::header::ORIGIN)
                     .and_then(|v| v.to_str().ok())
