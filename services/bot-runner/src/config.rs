@@ -146,6 +146,14 @@ impl BotConfig {
             anyhow::anyhow!("Invalid version_id: {}", e)
         })?;
 
+        let risk_caps = RiskCaps {
+            max_position_size_percent: config.agent_config.max_position_size_percent,
+            max_daily_loss_usd: config.agent_config.max_daily_loss_usd,
+            max_drawdown_percent: config.agent_config.max_drawdown_percent,
+            max_trades_per_day: config.agent_config.max_trades_per_day,
+        };
+        risk_caps.validate()?;
+
         Ok(Self {
             version_id,
             version: resp.version,
@@ -153,12 +161,7 @@ impl BotConfig {
             persona: config.agent_config.persona,
             asset_focus: config.trading_params.asset_focus,
             trading_mode: config.trading_params.trading_mode,
-            risk_caps: RiskCaps {
-                max_position_size_percent: config.agent_config.max_position_size_percent,
-                max_daily_loss_usd: config.agent_config.max_daily_loss_usd,
-                max_drawdown_percent: config.agent_config.max_drawdown_percent,
-                max_trades_per_day: config.agent_config.max_trades_per_day,
-            },
+            risk_caps,
             execution: config.execution.unwrap_or_default(),
             llm_provider: config.llm_config.provider,
             llm_model: config.llm_config.model,
@@ -288,6 +291,37 @@ pub struct RiskCaps {
     pub max_daily_loss_usd: i32,
     pub max_drawdown_percent: i32,
     pub max_trades_per_day: i32,
+}
+
+impl RiskCaps {
+    /// Validate that all risk cap values are within sane bounds.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if self.max_position_size_percent < 1 || self.max_position_size_percent > 100 {
+            anyhow::bail!(
+                "max_position_size_percent must be 1-100, got {}",
+                self.max_position_size_percent
+            );
+        }
+        if self.max_daily_loss_usd <= 0 {
+            anyhow::bail!(
+                "max_daily_loss_usd must be positive, got {}",
+                self.max_daily_loss_usd
+            );
+        }
+        if self.max_drawdown_percent < 1 || self.max_drawdown_percent > 100 {
+            anyhow::bail!(
+                "max_drawdown_percent must be 1-100, got {}",
+                self.max_drawdown_percent
+            );
+        }
+        if self.max_trades_per_day <= 0 {
+            anyhow::bail!(
+                "max_trades_per_day must be positive, got {}",
+                self.max_trades_per_day
+            );
+        }
+        Ok(())
+    }
 }
 
 /// Execution configuration (impact, slippage, timeouts)

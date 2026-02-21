@@ -232,10 +232,10 @@ Generated from `docs/audit-report.md` on 2026-02-20. Items ordered by severity.
   - Fix: Standardize on `Result<Json<T>>` with error response type
   - Test: cargo check passes
 
-- [ ] **BR-010** Risk caps deserialized without bounds validation
+- [x] **BR-010** Risk caps deserialized without bounds validation
   - Files: `services/bot-runner/src/config.rs`
-  - Fix: Validate 0-100% range, positive values
-  - Test: Out-of-range values return error
+  - Fix: Added `RiskCaps::validate()` method: position_size 1-100%, drawdown 1-100%, positive daily_loss and trades_per_day. Called in `from_response`.
+  - Verified: `cargo test` — 57/57 pass
 
 - [x] **BR-011** Clippy warnings: redundant import, clone on Copy
   - Files: `services/bot-runner/src/intent.rs`, `services/bot-runner/src/runner.rs`
