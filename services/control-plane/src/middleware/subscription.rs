@@ -102,10 +102,13 @@ pub async fn subscription_middleware(
         cache.get(&user_id).cloned()
     };
 
-    let (tier, expires_at, bot_count) = if let Some((product_id, is_active, exp, count, _cached_at)) =
-        cached.filter(|(_, _, _, _, cached_at)| cached_at.elapsed() < SUBSCRIPTION_CACHE_TTL)
+    let (tier, expires_at, bot_count) = if let Some((product_id, exp, count, _cached_at)) =
+        cached.filter(|(_, _, _, cached_at)| cached_at.elapsed() < SUBSCRIPTION_CACHE_TTL)
     {
-        let tier = if is_active {
+        // Derive is_active from expires_at at serve time rather than trusting the cached boolean,
+        // so an expired subscription is never served as active (CP-003).
+        let still_active = exp.map(|e| e > chrono::Utc::now()).unwrap_or(false);
+        let tier = if still_active {
             if product_id.contains("enterprise") {
                 SubscriptionTier::Enterprise
             } else {
@@ -137,7 +140,7 @@ pub async fn subscription_middleware(
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
 
-        let (tier, expires_at, bot_count, product_id_key, is_active) = match subscription {
+        let (tier, expires_at, bot_count, product_id_key) = match subscription {
             Some((status, product_id, period_end, count)) => {
                 let active = status == "active";
                 let tier = if active {
@@ -149,21 +152,22 @@ pub async fn subscription_middleware(
                 } else {
                     SubscriptionTier::Free
                 };
-                (tier, Some(period_end), count as i32, product_id, active)
+                (tier, Some(period_end), count as i32, product_id)
             }
             None => {
                 // No subscription found - treat as free tier
-                (SubscriptionTier::Free, None, 0, String::new(), false)
+                (SubscriptionTier::Free, None, 0, String::new())
             }
         };
 
-        // Populate cache for next request
+        // Populate cache for next request.
+        // is_active is intentionally NOT cached; it is derived from expires_at at serve time
+        // to prevent a stale boolean from granting access to an expired subscription (CP-003).
         if let Ok(mut cache) = state.subscription_cache.write() {
             cache.insert(
                 user_id,
                 (
                     product_id_key,
-                    is_active,
                     expires_at,
                     bot_count,
                     std::time::Instant::now(),

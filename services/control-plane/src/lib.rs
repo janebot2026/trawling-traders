@@ -40,10 +40,13 @@ pub use observability::{Logger, MetricsCollector};
 pub use secrets::SecretsManager;
 pub use webhook::{WebhookConfig, WebhookNotifier};
 
-/// Cached subscription entry: (tier_string, is_active, expires_at, bot_count, cached_at)
+/// Cached subscription entry: (product_id, expires_at, bot_count, cached_at)
+///
+/// `is_active` is NOT stored; it is derived from `expires_at > now()` at serve
+/// time so that a subscription that expires while still within the cache TTL
+/// window is immediately rejected rather than granted access (CP-003).
 type SubscriptionCacheEntry = (
     String,
-    bool,
     Option<chrono::DateTime<chrono::Utc>>,
     i32,
     Instant,
