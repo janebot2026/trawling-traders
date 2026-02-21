@@ -252,6 +252,9 @@ pub async fn list_ai_assistant_options(
     Ok(Json(ListAIAssistantOptionsResponse { options }))
 }
 
+const MAX_CUSTOM_ASSETS: usize = 50;
+const MAX_CUSTOM_ASSET_LEN: usize = 255;
+
 async fn validate_selected_assets(
     db: &sqlx::PgPool,
     asset_focus: AssetFocus,
@@ -260,6 +263,31 @@ async fn validate_selected_assets(
     let Some(selected_assets) = selected_assets else {
         return Ok(());
     };
+
+    if selected_assets.len() > MAX_CUSTOM_ASSETS {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "custom_assets exceeds maximum of {} items (got {})",
+                MAX_CUSTOM_ASSETS,
+                selected_assets.len()
+            ),
+        ));
+    }
+
+    if let Some(item) = selected_assets
+        .iter()
+        .find(|s| s.len() > MAX_CUSTOM_ASSET_LEN)
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "custom_assets item exceeds maximum length of {} characters: '{}'",
+                MAX_CUSTOM_ASSET_LEN,
+                &item[..item.len().min(64)]
+            ),
+        ));
+    }
 
     if selected_assets.is_empty() {
         return Err((
