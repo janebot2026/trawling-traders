@@ -1,0 +1,471 @@
+//! Decision-tick logic for BotRunner.
+//!
+//! Contains the per-tick trading loop, risk-rail validation, intent execution,
+//! and event collection helpers. The entry point is `decision_tick`.
+
+use std::collections::HashMap;
+
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
+use tracing::{debug, info, warn};
+
+use crate::client::EventInput;
+use crate::config::BotConfig;
+use crate::executor::{NormalizedTradeResult, TradeSide};
+use crate::portfolio::PortfolioSnapshot;
+use crate::runner::BotRunner;
+use crate::types::{
+    DecisionContext, DecisionJournalEntry, ExecutionOutcome, Holding, IntentValidation,
+    LastTradeOutcome, OpenClawIntent, PortfolioSnapshot as OcPortfolioSnapshot, PriceQuote,
+    RiskRails, TradeAction, TradeEvent,
+};
+
+impl BotRunner {
+    /// Run one decision tick: request a plan from OpenClaw, validate each
+    /// intent against risk rails, execute approved intents, and flush all
+    /// events in a single HTTP batch.
+    pub(crate) async fn decision_tick(&mut self) -> anyhow::Result<()> {
+        // Reset daily tracking counters if UTC date has changed.
+        self.maybe_reset_daily_pnl();
+
+        let config = match &self.current_config {
+            Some(c) => c.clone(),
+            None => {
+                debug!("No config yet, skipping decision tick");
+                return Ok(());
+            }
+        };
+
+        // Check daily trade limit.
+        let max_trades = config.risk_caps.max_trades_per_day as u32;
+        if self.trade_count >= max_trades {
+            debug!(
+                "Daily trade limit reached ({}/{}), skipping decision tick",
+                self.trade_count, max_trades
+            );
+            return Ok(());
+        }
+
+        if self.executor.is_none() {
+            warn!("No executor initialized");
+            return Ok(());
+        }
+
+        // Check if OpenClaw gateway is available.
+        if !self.openclaw_client.is_available().await {
+            debug!("OpenClaw gateway not available, skipping tick");
+            return Ok(());
+        }
+
+        // BR-004: Compute a single portfolio snapshot for the whole tick.
+        let tick_snapshot = self.portfolio.snapshot();
+
+        self.status = crate::types::RunnerStatus::Deciding;
+        self.write_state_file(Some(&tick_snapshot)).await.ok();
+
+        let context = self.build_decision_context(&config, &tick_snapshot).await?;
+        self.write_context_file(&context).await.ok();
+
+        let plan = match self.openclaw_client.tick(&context).await {
+            Ok(plan) => plan,
+            Err(e) => {
+                warn!("OpenClaw decision request failed: {}", e);
+                self.status = crate::types::RunnerStatus::Idle;
+                self.write_state_file(Some(&tick_snapshot)).await.ok();
+                return Ok(());
+            }
+        };
+
+        info!(
+            "Received decision plan: plan_id={}, intents={}",
+            plan.plan_id,
+            plan.intents.len()
+        );
+
+        self.last_plan_id = Some(plan.plan_id);
+        self.last_plan_time = Some(chrono::Utc::now());
+
+        self.status = crate::types::RunnerStatus::Executing;
+        self.write_state_file(Some(&tick_snapshot)).await.ok();
+
+        // BR-010: Collect all events during the tick; flush in one HTTP call.
+        let mut tick_events: Vec<EventInput> = Vec::new();
+
+        // R5-BR-001 / R5-BR-006: Track committed USD per output mint within this
+        // tick so subsequent intents see cumulative exposure.
+        let mut committed_usd: HashMap<String, Decimal> = HashMap::new();
+
+        for intent in &plan.intents {
+            // BR-008: Reject structurally invalid intents before risk validation.
+            if intent.action != TradeAction::Hold {
+                if intent.input_mint == intent.output_mint {
+                    warn!(
+                        "Intent {} rejected: input_mint == output_mint ({})",
+                        intent.intent_id, intent.input_mint
+                    );
+                    continue;
+                }
+                if intent.amount_usd <= Decimal::ZERO {
+                    warn!(
+                        "Intent {} rejected: amount_usd must be positive, got {}",
+                        intent.intent_id, intent.amount_usd
+                    );
+                    continue;
+                }
+            }
+
+            let validation =
+                self.validate_intent(intent, &config, &tick_snapshot, &committed_usd);
+
+            let journal_entry = DecisionJournalEntry {
+                intent_id: intent.intent_id,
+                plan_id: plan.plan_id,
+                plan_hash: plan.plan_hash.clone(),
+                intent: intent.clone(),
+                validation: validation.clone(),
+                execution: None,
+                timestamp: chrono::Utc::now(),
+            };
+
+            if !validation.approved {
+                info!(
+                    "Intent {} blocked: {:?}",
+                    intent.intent_id, validation.rejection_reason
+                );
+                self.write_journal_entry(&journal_entry).await.ok();
+                self.collect_intent_blocked_events(intent, &validation, &mut tick_events);
+                continue;
+            }
+
+            // Hold intents require no execution.
+            if intent.action == TradeAction::Hold {
+                self.write_journal_entry(&journal_entry).await.ok();
+                continue;
+            }
+
+            let result = self.execute_openclaw_intent(intent, &config).await;
+
+            let mut final_entry = journal_entry;
+            final_entry.execution = Some(ExecutionOutcome {
+                stage: format!("{:?}", result.stage_reached),
+                signature: result.signature.clone(),
+                out_amount: Some(result.execution.out_amount_raw),
+                error: result.error.as_ref().map(|e| e.message.clone()),
+            });
+            self.write_journal_entry(&final_entry).await.ok();
+
+            if result.stage_reached == crate::executor::TradeStage::Confirmed {
+                self.trade_count += 1;
+
+                if intent.action == TradeAction::Buy {
+                    *committed_usd
+                        .entry(intent.output_mint.clone())
+                        .or_default() += intent.amount_usd;
+                }
+
+                self.last_trade_outcome = Some(LastTradeOutcome {
+                    intent_id: intent.intent_id,
+                    stage: format!("{:?}", result.stage_reached),
+                    symbol: self
+                        .get_symbol_for_mint(&intent.output_mint)
+                        .unwrap_or_default(),
+                    side: format!("{:?}", intent.action),
+                    amount_usd: intent.amount_usd,
+                    timestamp: chrono::Utc::now(),
+                });
+
+                if result.side == crate::executor::TradeSide::Sell {
+                    self.accumulate_realized_pnl(intent, &result);
+                }
+            }
+
+            self.collect_openclaw_trade_events(intent, &result, &config, &mut tick_events);
+        }
+
+        // BR-010: Flush all buffered events in a single HTTP call.
+        if !tick_events.is_empty() {
+            if let Err(e) = self.client.send_events(tick_events).await {
+                warn!("Failed to send tick events batch: {}", e);
+            }
+        }
+
+        self.status = crate::types::RunnerStatus::Idle;
+        self.write_state_file(Some(&tick_snapshot)).await.ok();
+
+        Ok(())
+    }
+
+    /// Build the decision context that is sent to OpenClaw each tick.
+    ///
+    /// Accepts a pre-computed `snapshot` so callers can share a single
+    /// `portfolio.snapshot()` call across the full tick (BR-004).
+    pub(crate) async fn build_decision_context(
+        &self,
+        config: &BotConfig,
+        snapshot: &PortfolioSnapshot,
+    ) -> anyhow::Result<DecisionContext> {
+        let portfolio = OcPortfolioSnapshot {
+            equity_usd: snapshot.total_equity,
+            cash_usd: snapshot.cash_usdc,
+            positions_count: snapshot.positions.len(),
+            unrealized_pnl_usd: snapshot.unrealized_pnl,
+            realized_pnl_today_usd: self.realized_pnl_today,
+            trades_today: self.trade_count as i32,
+        };
+
+        let holdings: Vec<Holding> = snapshot
+            .positions
+            .iter()
+            .map(|pos| Holding {
+                mint: pos.mint.clone(),
+                symbol: pos.symbol.clone(),
+                quantity: pos.quantity,
+                value_usd: pos.market_value,
+                avg_entry_price: Some(pos.avg_entry),
+            })
+            .collect();
+
+        let recent_prices = self.get_recent_prices().await;
+
+        let risk_rails = RiskRails {
+            max_position_size_percent: config.risk_caps.max_position_size_percent,
+            max_daily_loss_usd: config.risk_caps.max_daily_loss_usd,
+            max_drawdown_percent: config.risk_caps.max_drawdown_percent,
+            max_trades_per_day: config.risk_caps.max_trades_per_day,
+            governor_paused: false, // TODO: Check governor state
+        };
+
+        let recent_events = self.get_recent_events();
+
+        Ok(DecisionContext {
+            bot_id: self.config.bot_id,
+            timestamp: chrono::Utc::now(),
+            portfolio,
+            holdings,
+            recent_prices,
+            risk_rails,
+            recent_events,
+            config_version: config.version_id.to_string(),
+        })
+    }
+
+    /// Reset daily PnL and trade count if the UTC calendar date has changed.
+    ///
+    /// # Design note — UTC reset boundary (BR-003)
+    ///
+    /// The reset compares calendar *dates* in UTC. This gives a single,
+    /// unambiguous reset point independent of deployment timezone.
+    pub(crate) fn maybe_reset_daily_pnl(&mut self) {
+        let today = chrono::Utc::now().date_naive();
+        if today != self.pnl_reset_date {
+            info!(
+                "Daily PnL reset: {} -> {} (was {}, trades: {})",
+                self.pnl_reset_date, today, self.realized_pnl_today, self.trade_count
+            );
+            self.realized_pnl_today = Decimal::ZERO;
+            self.trade_count = 0;
+            self.pnl_reset_date = today;
+        }
+    }
+
+    /// Accumulate realized PnL from a confirmed sell trade.
+    pub(crate) fn accumulate_realized_pnl(
+        &mut self,
+        intent: &OpenClawIntent,
+        result: &NormalizedTradeResult,
+    ) {
+        let exec_price = result.execution.realized_price;
+        if exec_price <= Decimal::ZERO {
+            return;
+        }
+
+        let avg_entry = match self.portfolio.positions.get(&intent.input_mint) {
+            Some(pos) if pos.avg_entry_price_usdc > Decimal::ZERO => pos.avg_entry_price_usdc,
+            _ => return,
+        };
+
+        let usdc_received =
+            Decimal::from(result.execution.out_amount_raw) / Decimal::from(1_000_000u64);
+        let cost_basis = usdc_received * avg_entry / exec_price;
+        let pnl = usdc_received - cost_basis;
+
+        self.realized_pnl_today += pnl;
+        info!(
+            "Realized PnL: {} (received: {}, cost_basis: {}, total today: {})",
+            pnl, usdc_received, cost_basis, self.realized_pnl_today
+        );
+    }
+
+    /// Validate an intent against hard risk rails.
+    ///
+    /// `snapshot` must be pre-computed by the caller (BR-015).
+    pub(crate) fn validate_intent(
+        &self,
+        intent: &OpenClawIntent,
+        config: &BotConfig,
+        snapshot: &PortfolioSnapshot,
+        committed_usd: &HashMap<String, Decimal>,
+    ) -> IntentValidation {
+        let max_trades = config.risk_caps.max_trades_per_day as u32;
+        if self.trade_count >= max_trades {
+            return IntentValidation {
+                intent: intent.clone(),
+                approved: false,
+                rejection_reason: Some(format!(
+                    "Daily trade limit reached ({}/{})",
+                    self.trade_count, max_trades
+                )),
+                blocked_by: Some("max_trades_per_day".to_string()),
+            };
+        }
+
+        // R5-BR-007: Position-size check only applies to buy intents.
+        if intent.action != TradeAction::Sell {
+            // BR-011: Check resulting position size, not just the trade amount.
+            let max_position_value = snapshot.total_equity
+                * Decimal::from(config.risk_caps.max_position_size_percent)
+                / Decimal::from(100);
+
+            let existing_exposure = snapshot
+                .positions
+                .iter()
+                .find(|p| p.mint == intent.output_mint)
+                .map(|p| p.market_value)
+                .unwrap_or(Decimal::ZERO);
+
+            // R5-BR-001: Include amounts committed by earlier intents in this tick.
+            let tick_committed = committed_usd
+                .get(&intent.output_mint)
+                .copied()
+                .unwrap_or(Decimal::ZERO);
+
+            let resulting_position = existing_exposure + tick_committed + intent.amount_usd;
+
+            if resulting_position > max_position_value {
+                return IntentValidation {
+                    intent: intent.clone(),
+                    approved: false,
+                    rejection_reason: Some(format!(
+                        "Resulting position ${} exceeds max position size ${}",
+                        resulting_position, max_position_value
+                    )),
+                    blocked_by: Some("max_position_size_percent".to_string()),
+                };
+            }
+        }
+
+        let max_daily_loss = Decimal::from(config.risk_caps.max_daily_loss_usd);
+        if self.realized_pnl_today < -max_daily_loss {
+            return IntentValidation {
+                intent: intent.clone(),
+                approved: false,
+                rejection_reason: Some(format!(
+                    "Daily loss limit exceeded: ${} loss vs ${} max",
+                    -self.realized_pnl_today, max_daily_loss
+                )),
+                blocked_by: Some("max_daily_loss_usd".to_string()),
+            };
+        }
+
+        IntentValidation {
+            intent: intent.clone(),
+            approved: true,
+            rejection_reason: None,
+            blocked_by: None,
+        }
+    }
+
+    /// Execute a single approved OpenClaw intent.
+    pub(crate) async fn execute_openclaw_intent(
+        &mut self,
+        intent: &OpenClawIntent,
+        config: &BotConfig,
+    ) -> NormalizedTradeResult {
+        // BR-020: executor may be None if apply_config has not completed yet.
+        let executor = match self.executor.as_ref() {
+            Some(e) => e,
+            None => {
+                warn!(
+                    "execute_openclaw_intent called with no executor (intent {})",
+                    intent.intent_id
+                );
+                return NormalizedTradeResult::default();
+            }
+        };
+
+        let side = match intent.action {
+            TradeAction::Buy => TradeSide::Buy,
+            TradeAction::Sell => TradeSide::Sell,
+            TradeAction::Hold => return NormalizedTradeResult::default(),
+        };
+
+        let usdc_decimals = 6u8;
+        let raw = intent.amount_usd * Decimal::from(10u64.pow(usdc_decimals as u32));
+        let in_amount = match raw.to_u64() {
+            Some(v) if v > 0 => v,
+            _ => {
+                warn!(
+                    "Trade amount rounds to zero or overflows: {} USD -> {} raw",
+                    intent.amount_usd, raw
+                );
+                return NormalizedTradeResult::default();
+            }
+        };
+
+        executor
+            .execute_trade(
+                &intent.intent_id.to_string(),
+                &intent.input_mint,
+                &intent.output_mint,
+                in_amount,
+                side,
+                config.trading_mode,
+            )
+            .await
+    }
+
+    /// Return recent prices for configured assets (from executor cache or as
+    /// stubs that OpenClaw will fill in on its side).
+    pub(crate) async fn get_recent_prices(&self) -> HashMap<String, PriceQuote> {
+        let mut prices = HashMap::new();
+
+        if let Some(config) = &self.current_config {
+            for asset in &config.asset_universe {
+                if !asset.enabled {
+                    continue;
+                }
+                prices.insert(
+                    asset.mint.clone(),
+                    PriceQuote {
+                        mint: asset.mint.clone(),
+                        symbol: asset.symbol.clone(),
+                        price_usd: Decimal::ZERO,
+                        change_24h_pct: None,
+                        timestamp: chrono::Utc::now(),
+                        source: "pending".to_string(),
+                    },
+                );
+            }
+        }
+
+        prices
+    }
+
+    /// Return recent trade events for the decision context.
+    pub(crate) fn get_recent_events(&self) -> Vec<TradeEvent> {
+        Vec::new()
+    }
+
+    /// Look up the asset symbol for a mint address from the current config.
+    pub(crate) fn get_symbol_for_mint(&self, mint: &str) -> Option<String> {
+        if let Some(config) = &self.current_config {
+            for asset in &config.asset_universe {
+                if asset.mint == mint {
+                    return Some(asset.symbol.clone());
+                }
+            }
+        }
+        None
+    }
+
+}

@@ -17,6 +17,7 @@
 pub mod amount;
 pub mod client;
 pub mod config;
+pub mod decision;
 pub mod executor;
 pub mod gateway;
 pub mod intent;
@@ -24,6 +25,7 @@ pub mod openclaw;
 pub mod portfolio;
 pub mod reconciler;
 pub mod runner;
+pub mod state;
 pub mod types;
 
 // Re-export main types for convenience

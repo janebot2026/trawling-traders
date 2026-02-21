@@ -14,6 +14,7 @@ use tracing::{info, warn};
 mod amount;
 mod client;
 mod config;
+mod decision;
 mod executor;
 mod gateway;
 mod intent;
@@ -21,6 +22,7 @@ mod openclaw;
 mod portfolio;
 mod reconciler;
 mod runner;
+mod state;
 mod types;
 
 pub use client::ControlPlaneClient;

@@ -1,10 +1,18 @@
 //! Bot Runner - Main orchestration loop
 //!
 //! Executes trading decisions from OpenClaw gateway and enforces risk rails.
-use rust_decimal::prelude::ToPrimitive;
+//!
+//! ## Module layout
+//!
+//! - `runner`   — `BotRunner` struct, `new()`, main run loop, config management
+//! - `decision` — decision tick, risk-rail validation, intent execution, event helpers
+//! - `state`    — state-file and journal-entry writers
+//!
+//! `decision` and `state` are declared as top-level crate modules in `lib.rs`
+//! and contain additional `impl BotRunner` blocks.
+
 use rust_decimal::Decimal;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,19 +22,15 @@ use tracing::{debug, error, info, warn};
 
 use crate::client::{ControlPlaneClient, EventInput, MetricInput};
 use crate::config::{BotConfig, Config, TradingMode};
-use crate::executor::{NormalizedTradeResult, TradeExecutor, TradeSide};
+use crate::executor::TradeExecutor;
 use crate::gateway::GatewayManager;
 use crate::intent::IntentRegistry;
 use crate::openclaw::OpenClawClient;
 use crate::portfolio::{Portfolio, PortfolioSnapshot};
 use crate::reconciler::HoldingsReconciler;
-use crate::types::{
-    DecisionContext, DecisionJournalEntry, ExecutionOutcome, Holding, IntentValidation,
-    LastTradeOutcome, OpenClawIntent, PortfolioSnapshot as OcPortfolioSnapshot, PriceQuote,
-    RiskRails, RunnerState, RunnerStatus, TradeAction, TradeEvent,
-};
+use crate::types::{LastTradeOutcome, RunnerStatus};
 
-/// SIGTERM signal receiver for cross-platform graceful shutdown
+/// SIGTERM signal receiver for cross-platform graceful shutdown.
 struct SigtermReceiver {
     #[cfg(unix)]
     inner: signal::unix::Signal,
@@ -53,62 +57,58 @@ fn create_sigterm_future() -> SigtermReceiver {
     }
 }
 
-/// State directory for runner files
+/// State directory for runner files.
 const DEFAULT_STATE_DIR: &str = "/opt/bot-runner/state";
 
-/// Main bot runner that manages the trading loop
+/// Main bot runner that manages the trading loop.
 pub struct BotRunner {
-    client: Arc<ControlPlaneClient>,
-    config: Config,
-    current_config: Option<BotConfig>,
-    executor: Option<TradeExecutor>,
-    intent_registry: IntentRegistry,
-    portfolio: Portfolio,
-    reconciler: Option<HoldingsReconciler>,
-    trade_count: u32,
-    /// OpenClaw gateway HTTP client
-    openclaw_client: OpenClawClient,
-    /// Gateway configuration manager
-    gateway_manager: GatewayManager,
-    /// State directory for runner files (now.json, journal/)
-    state_dir: PathBuf,
-    /// Current runner status
-    status: RunnerStatus,
-    /// Last decision plan ID
-    last_plan_id: Option<uuid::Uuid>,
-    /// Timestamp when the last plan was received from OpenClaw
-    last_plan_time: Option<chrono::DateTime<chrono::Utc>>,
-    /// Last trade outcome for state tracking
-    last_trade_outcome: Option<LastTradeOutcome>,
-    /// Daily realized PnL tracking
-    realized_pnl_today: Decimal,
-    /// Date of last PnL reset (for daily reset)
-    pnl_reset_date: chrono::NaiveDate,
+    pub(crate) client: Arc<ControlPlaneClient>,
+    pub(crate) config: Config,
+    pub(crate) current_config: Option<BotConfig>,
+    pub(crate) executor: Option<TradeExecutor>,
+    pub(crate) intent_registry: IntentRegistry,
+    pub(crate) portfolio: Portfolio,
+    pub(crate) reconciler: Option<HoldingsReconciler>,
+    pub(crate) trade_count: u32,
+    /// OpenClaw gateway HTTP client.
+    pub(crate) openclaw_client: OpenClawClient,
+    /// Gateway configuration manager.
+    pub(crate) gateway_manager: GatewayManager,
+    /// State directory for runner files (now.json, journal/).
+    pub(crate) state_dir: PathBuf,
+    /// Current runner status.
+    pub(crate) status: RunnerStatus,
+    /// Last decision plan ID.
+    pub(crate) last_plan_id: Option<uuid::Uuid>,
+    /// Timestamp when the last plan was received from OpenClaw.
+    pub(crate) last_plan_time: Option<chrono::DateTime<chrono::Utc>>,
+    /// Last trade outcome for state tracking.
+    pub(crate) last_trade_outcome: Option<LastTradeOutcome>,
+    /// Daily realized PnL tracking.
+    pub(crate) realized_pnl_today: Decimal,
+    /// Date of last PnL reset (for daily reset).
+    pub(crate) pnl_reset_date: chrono::NaiveDate,
     /// BR-007: version_id of the last successfully applied config.
     ///
     /// Tracked independently of `current_config` so that if `ack_config` fails
     /// (network blip, 5xx), the runner does not re-apply the same config on the
     /// next poll cycle. Applied before the ack attempt; survives ack failures.
-    last_applied_version_id: Option<uuid::Uuid>,
+    pub(crate) last_applied_version_id: Option<uuid::Uuid>,
 }
 
 impl BotRunner {
-    /// Create new bot runner
+    /// Create a new bot runner.
     pub fn new(client: Arc<ControlPlaneClient>, config: Config) -> Self {
-        // Initialize portfolio with starting cash
         let portfolio = Portfolio::new(Decimal::from(10000));
 
-        // Initialize OpenClaw components
         let openclaw_client = OpenClawClient::new()
             .unwrap_or_else(|e| panic!("Failed to initialize OpenClaw client: {}", e));
         let gateway_manager = GatewayManager::new();
 
-        // State directory from env or default
         let state_dir = std::env::var("BOT_STATE_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from(DEFAULT_STATE_DIR));
 
-        // Ensure state directories exist
         if let Err(e) = std::fs::create_dir_all(&state_dir) {
             warn!("Failed to create state dir: {}", e);
         }
@@ -138,29 +138,20 @@ impl BotRunner {
         }
     }
 
-    /// Run the main bot loop with graceful shutdown handling
+    /// Run the main bot loop with graceful shutdown handling.
     pub async fn run(mut self) -> anyhow::Result<()> {
         info!("Bot runner starting main loop...");
         info!("Keypair path: {:?}", self.config.keypair_path);
         info!("Wallet address: {}", self.config.wallet_address);
 
-        // Config polling interval (30 seconds)
         let mut config_interval = interval(Duration::from_secs(30));
-
-        // Heartbeat interval (30 seconds)
         let mut heartbeat_interval = interval(Duration::from_secs(30));
-
-        // Trading interval (60 seconds - check for signals every minute)
         let mut trading_interval = interval(Duration::from_secs(60));
-
-        // Reconciliation interval (5 minutes)
         let mut reconcile_interval = interval(Duration::from_secs(300));
-
-        // Intent cleanup interval (5 minutes)
         let mut cleanup_interval = interval(Duration::from_secs(300));
 
-        // R5-BR-009: Retry initial config fetch so a briefly-unavailable control-plane
-        // does not leave the bot running config-less.
+        // R5-BR-009: Retry initial config fetch so a briefly-unavailable
+        // control-plane does not leave the bot running config-less.
         {
             const MAX_RETRIES: u32 = 3;
             const RETRY_DELAY: Duration = Duration::from_secs(5);
@@ -190,7 +181,6 @@ impl BotRunner {
             }
         }
 
-        // Run main loop with shutdown handling
         let shutdown_reason = self
             .run_main_loop(
                 &mut config_interval,
@@ -203,11 +193,10 @@ impl BotRunner {
 
         info!("Shutdown triggered: {}", shutdown_reason);
 
-        // Graceful shutdown: send final events and cleanup
         self.graceful_shutdown(&shutdown_reason).await
     }
 
-    /// Main loop separated for cleaner shutdown handling
+    /// Main loop separated for cleaner shutdown handling.
     async fn run_main_loop(
         &mut self,
         config_interval: &mut tokio::time::Interval,
@@ -220,12 +209,10 @@ impl BotRunner {
 
         loop {
             tokio::select! {
-                // Handle SIGINT (Ctrl+C)
                 _ = signal::ctrl_c() => {
                     info!("Received SIGINT, initiating graceful shutdown...");
                     return "SIGINT".to_string();
                 }
-                // Handle SIGTERM (Docker/K8s stop)
                 _ = sigterm.recv() => {
                     info!("Received SIGTERM, initiating graceful shutdown...");
                     return "SIGTERM".to_string();
@@ -257,12 +244,11 @@ impl BotRunner {
         }
     }
 
-    /// Perform graceful shutdown: send final events and cleanup
+    /// Perform graceful shutdown: send final events and cleanup.
     async fn graceful_shutdown(&self, reason: &str) -> anyhow::Result<()> {
         info!("Performing graceful shutdown...");
 
-        // Send shutdown event to control plane
-        let event = crate::client::EventInput {
+        let event = EventInput {
             event_type: "bot_shutdown".to_string(),
             message: "Bot shutting down gracefully".to_string(),
             metadata: Some(serde_json::json!({
@@ -276,7 +262,6 @@ impl BotRunner {
             warn!("Failed to send shutdown event: {}", e);
         }
 
-        // Send final heartbeat
         if let Err(e) = self.send_heartbeat().await {
             warn!("Failed to send final heartbeat: {}", e);
         }
@@ -285,15 +270,13 @@ impl BotRunner {
         Ok(())
     }
 
-    /// Poll for config updates
+    /// Poll for config updates from the control plane.
     async fn poll_config(&mut self) -> anyhow::Result<()> {
         match self.client.get_config().await? {
             Some(config) => {
                 // BR-007: Compare against `last_applied_version_id` rather than
-                // `current_config.version_id`. This field is set immediately after a
-                // successful apply, *before* the ack attempt. If the ack fails the
-                // version is still recorded here, so the runner will not re-apply the
-                // same config on the next poll cycle.
+                // `current_config.version_id`. This field is set immediately after
+                // a successful apply, *before* the ack attempt.
                 let already_applied = self
                     .last_applied_version_id
                     .map(|id| id == config.version_id)
@@ -312,15 +295,10 @@ impl BotRunner {
                     config.version, config.version_id
                 );
 
-                // Apply first, then record the applied version, then ack.
-                // Recording before the ack means a failed ack will not cause
-                // re-application on the next poll.
                 let version_id = config.version_id;
                 self.apply_config(config).await?;
                 self.last_applied_version_id = Some(version_id);
 
-                // Ack failure is non-fatal: the control plane may retry later.
-                // We log it but do not propagate — the config is correctly applied.
                 if let Err(e) = self.client.ack_config(version_id).await {
                     warn!(
                         "Config ack failed for version {} (will retry next poll): {}",
@@ -335,7 +313,8 @@ impl BotRunner {
         Ok(())
     }
 
-    /// Apply new configuration
+    /// Apply a new configuration: initialize or update the executor, render
+    /// gateway config, and send a `config_applied` event.
     async fn apply_config(&mut self, config: BotConfig) -> anyhow::Result<()> {
         // R5-BR-003: Update existing executor's config on subsequent calls,
         // or initialize a new one on first call.
@@ -346,15 +325,13 @@ impl BotRunner {
                 &self.config.data_retrieval_url,
                 &self.config.solana_rpc_url,
                 self.config.keypair_path.clone(),
-                config.execution, // Pass execution config
+                config.execution,
             ) {
                 Ok(executor) => {
-                    // Initialize reconciler with same executor
                     let reconciler = HoldingsReconciler::new(
                         executor.clone(),
                         self.config.wallet_address.clone(),
                     );
-
                     self.executor = Some(executor);
                     self.reconciler = Some(reconciler);
                 }
@@ -365,33 +342,25 @@ impl BotRunner {
             }
         }
 
-        // Render OpenClaw configuration files
         if let Err(e) = self.gateway_manager.render_config(&config) {
             error!("Failed to render OpenClaw config: {}", e);
-            // Continue anyway - gateway might work with existing config
-        } else {
-            // Reload gateway with new config
-            if self.gateway_manager.is_installed() {
-                if let Err(e) = self.gateway_manager.reload_gateway().await {
-                    warn!("Failed to reload gateway: {}", e);
-                }
+        } else if self.gateway_manager.is_installed() {
+            if let Err(e) = self.gateway_manager.reload_gateway().await {
+                warn!("Failed to reload gateway: {}", e);
             }
         }
 
-        // Log mode
         match config.trading_mode {
             TradingMode::Paper => {
-                info!("📝 Running in PAPER TRADING mode");
+                info!("Running in PAPER TRADING mode");
             }
             TradingMode::Live => {
-                warn!("💰 Running in LIVE TRADING mode - REAL MONEY AT RISK");
+                warn!("Running in LIVE TRADING mode - REAL MONEY AT RISK");
             }
         }
 
-        // Get gateway version for event metadata
         let gateway_version = self.gateway_manager.gateway_version().await.unwrap_or_default();
 
-        // Send event
         let event = EventInput {
             event_type: "config_applied".to_string(),
             message: format!("Config version {} applied", config.version),
@@ -413,19 +382,16 @@ impl BotRunner {
         Ok(())
     }
 
-    /// Reconcile holdings with on-chain state
+    /// Reconcile portfolio holdings against on-chain state.
     async fn reconcile_holdings(&mut self) -> anyhow::Result<()> {
-        // Take ownership of reconciler temporarily to avoid borrow issues
         if let Some(mut reconciler) = self.reconciler.take() {
             info!("Running holdings reconciliation...");
 
             match reconciler.reconcile(&self.portfolio).await {
                 Ok(result) => {
-                    // Send portfolio snapshot
                     let snapshot = self.portfolio.snapshot();
                     self.send_portfolio_snapshot(&snapshot).await;
 
-                    // Apply corrections if significant discrepancies
                     if !result.discrepancies.is_empty() || !result.missing_on_chain.is_empty() {
                         info!(
                             "Applying {} corrections to portfolio",
@@ -439,13 +405,12 @@ impl BotRunner {
                 }
             }
 
-            // Put reconciler back
             self.reconciler = Some(reconciler);
         }
         Ok(())
     }
 
-    /// Send portfolio snapshot to control plane
+    /// Send a portfolio snapshot event to the control plane.
     async fn send_portfolio_snapshot(&self, snapshot: &PortfolioSnapshot) {
         let metadata = serde_json::json!({
             "cash_usdc": snapshot.cash_usdc.to_string(),
@@ -471,715 +436,7 @@ impl BotRunner {
         }
     }
 
-    /// Run one decision tick - request decision from OpenClaw and execute
-    async fn decision_tick(&mut self) -> anyhow::Result<()> {
-        // Reset daily tracking counters if UTC date has changed
-        self.maybe_reset_daily_pnl();
-
-        // Check if we have config and executor
-        let config = match &self.current_config {
-            Some(c) => c.clone(),
-            None => {
-                debug!("No config yet, skipping decision tick");
-                return Ok(());
-            }
-        };
-
-        // Check daily trade limit
-        let max_trades = config.risk_caps.max_trades_per_day as u32;
-        if self.trade_count >= max_trades {
-            debug!(
-                "Daily trade limit reached ({}/{}), skipping decision tick",
-                self.trade_count, max_trades
-            );
-            return Ok(());
-        }
-
-        if self.executor.is_none() {
-            warn!("No executor initialized");
-            return Ok(());
-        }
-
-        // Check if OpenClaw gateway is available
-        if !self.openclaw_client.is_available().await {
-            debug!("OpenClaw gateway not available, skipping tick");
-            return Ok(());
-        }
-
-        // BR-004: Compute a single portfolio snapshot for the whole tick. This
-        // snapshot is reused by build_decision_context, write_state_file, and
-        // validate_intent, eliminating 3+ redundant snapshot() calls per tick.
-        let tick_snapshot = self.portfolio.snapshot();
-
-        // Update status
-        self.status = RunnerStatus::Deciding;
-        self.write_state_file(Some(&tick_snapshot)).await.ok();
-
-        // Build decision context
-        let context = self.build_decision_context(&config, &tick_snapshot).await?;
-
-        // Write context to file for debugging
-        self.write_context_file(&context).await.ok();
-
-        // Request decision plan from OpenClaw
-        let plan = match self.openclaw_client.tick(&context).await {
-            Ok(plan) => plan,
-            Err(e) => {
-                warn!("OpenClaw decision request failed: {}", e);
-                self.status = RunnerStatus::Idle;
-                self.write_state_file(Some(&tick_snapshot)).await.ok();
-                return Ok(());
-            }
-        };
-
-        info!(
-            "Received decision plan: plan_id={}, intents={}",
-            plan.plan_id,
-            plan.intents.len()
-        );
-
-        self.last_plan_id = Some(plan.plan_id);
-        self.last_plan_time = Some(chrono::Utc::now());
-
-        // Update status
-        self.status = RunnerStatus::Executing;
-        self.write_state_file(Some(&tick_snapshot)).await.ok();
-
-        // BR-010: Collect all events during the tick; flush in a single HTTP call.
-        let mut tick_events: Vec<EventInput> = Vec::new();
-
-        // R5-BR-001 / R5-BR-006: Track committed USD per output mint within this tick
-        // so that subsequent intents see the cumulative exposure, not just the pre-trade
-        // snapshot. Without this, N buy intents for the same asset within one tick could
-        // each individually pass position-size checks and result in N× the intended size.
-        let mut committed_usd: HashMap<String, Decimal> = HashMap::new();
-
-        // Validate and execute each intent
-        for intent in &plan.intents {
-            // BR-008: Reject structurally invalid intents before risk validation
-            if intent.action != TradeAction::Hold {
-                if intent.input_mint == intent.output_mint {
-                    warn!(
-                        "Intent {} rejected: input_mint == output_mint ({})",
-                        intent.intent_id, intent.input_mint
-                    );
-                    continue;
-                }
-                if intent.amount_usd <= Decimal::ZERO {
-                    warn!(
-                        "Intent {} rejected: amount_usd must be positive, got {}",
-                        intent.intent_id, intent.amount_usd
-                    );
-                    continue;
-                }
-                // rust_decimal::Decimal cannot represent NaN/Inf, so no finiteness check needed
-            }
-
-            // Validate against hard risk rails
-            let validation = self.validate_intent(intent, &config, &tick_snapshot, &committed_usd);
-
-            // Write journal entry
-            let journal_entry = DecisionJournalEntry {
-                intent_id: intent.intent_id,
-                plan_id: plan.plan_id,
-                plan_hash: plan.plan_hash.clone(),
-                intent: intent.clone(),
-                validation: validation.clone(),
-                execution: None,
-                timestamp: chrono::Utc::now(),
-            };
-
-            if !validation.approved {
-                info!(
-                    "Intent {} blocked: {:?}",
-                    intent.intent_id, validation.rejection_reason
-                );
-                self.write_journal_entry(&journal_entry).await.ok();
-
-                // Buffer blocked event instead of sending immediately.
-                self.collect_intent_blocked_events(intent, &validation, &mut tick_events);
-                continue;
-            }
-
-            // Hold intents require no execution or event emission.
-            if intent.action == TradeAction::Hold {
-                self.write_journal_entry(&journal_entry).await.ok();
-                continue;
-            }
-
-            // Execute approved intent
-            let result = self.execute_openclaw_intent(intent, &config).await;
-
-            // Update journal with execution result
-            let mut final_entry = journal_entry;
-            final_entry.execution = Some(ExecutionOutcome {
-                stage: format!("{:?}", result.stage_reached),
-                signature: result.signature.clone(),
-                out_amount: Some(result.execution.out_amount_raw),
-                error: result.error.as_ref().map(|e| e.message.clone()),
-            });
-            self.write_journal_entry(&final_entry).await.ok();
-
-            // Update trade count, committed exposure, and state
-            if result.stage_reached == crate::executor::TradeStage::Confirmed {
-                self.trade_count += 1;
-
-                // R5-BR-001: Track committed amount so subsequent intents in this tick
-                // see the updated exposure for position-size validation.
-                if intent.action == TradeAction::Buy {
-                    *committed_usd.entry(intent.output_mint.clone()).or_default() += intent.amount_usd;
-                }
-                self.last_trade_outcome = Some(LastTradeOutcome {
-                    intent_id: intent.intent_id,
-                    stage: format!("{:?}", result.stage_reached),
-                    symbol: self.get_symbol_for_mint(&intent.output_mint).unwrap_or_default(),
-                    side: format!("{:?}", intent.action),
-                    amount_usd: intent.amount_usd,
-                    timestamp: chrono::Utc::now(),
-                });
-
-                // Accumulate realized PnL for sell trades (daily loss tracking)
-                if result.side == crate::executor::TradeSide::Sell {
-                    self.accumulate_realized_pnl(intent, &result);
-                }
-            }
-
-            // Buffer trade events instead of sending per-intent.
-            self.collect_openclaw_trade_events(intent, &result, &config, &mut tick_events);
-        }
-
-        // BR-010: Flush all buffered events in a single HTTP call.
-        if !tick_events.is_empty() {
-            if let Err(e) = self.client.send_events(tick_events).await {
-                warn!("Failed to send tick events batch: {}", e);
-            }
-        }
-
-        // Update status back to idle
-        self.status = RunnerStatus::Idle;
-        self.write_state_file(Some(&tick_snapshot)).await.ok();
-
-        Ok(())
-    }
-
-    /// Build decision context to send to OpenClaw.
-    ///
-    /// Accepts a pre-computed `snapshot` so that callers can share a single
-    /// `portfolio.snapshot()` call across the full tick (BR-004).
-    async fn build_decision_context(
-        &self,
-        config: &BotConfig,
-        snapshot: &PortfolioSnapshot,
-    ) -> anyhow::Result<DecisionContext> {
-        // Build portfolio snapshot for OpenClaw
-        let portfolio = OcPortfolioSnapshot {
-            equity_usd: snapshot.total_equity,
-            cash_usd: snapshot.cash_usdc,
-            positions_count: snapshot.positions.len(),
-            unrealized_pnl_usd: snapshot.unrealized_pnl,
-            realized_pnl_today_usd: self.realized_pnl_today,
-            trades_today: self.trade_count as i32,
-        };
-
-        // Build holdings list from position snapshots
-        let holdings: Vec<Holding> = snapshot
-            .positions
-            .iter()
-            .map(|pos| Holding {
-                mint: pos.mint.clone(),
-                symbol: pos.symbol.clone(),
-                quantity: pos.quantity,
-                value_usd: pos.market_value,
-                avg_entry_price: Some(pos.avg_entry),
-            })
-            .collect();
-
-        // Build recent prices from executor cache (if available)
-        let recent_prices = self.get_recent_prices().await;
-
-        // Build risk rails
-        let risk_rails = RiskRails {
-            max_position_size_percent: config.risk_caps.max_position_size_percent,
-            max_daily_loss_usd: config.risk_caps.max_daily_loss_usd,
-            max_drawdown_percent: config.risk_caps.max_drawdown_percent,
-            max_trades_per_day: config.risk_caps.max_trades_per_day,
-            governor_paused: false, // TODO: Check governor state
-        };
-
-        // Get recent events (last 10)
-        let recent_events = self.get_recent_events();
-
-        Ok(DecisionContext {
-            bot_id: self.config.bot_id,
-            timestamp: chrono::Utc::now(),
-            portfolio,
-            holdings,
-            recent_prices,
-            risk_rails,
-            recent_events,
-            config_version: config.version_id.to_string(),
-        })
-    }
-
-    /// Reset daily PnL and trade count if the UTC calendar date has changed.
-    ///
-    /// # Design note — UTC reset boundary (BR-003)
-    ///
-    /// The reset compares calendar *dates* in UTC, not local or trader time.
-    /// This means the boundary always falls at 00:00 UTC regardless of the
-    /// operator's timezone. This is intentional: the system has a single,
-    /// consistent, unambiguous reset point that is independent of where the
-    /// bot is deployed.
-    ///
-    /// The tradeoff: a trader who knows the bot resets at UTC midnight could
-    /// exploit the boundary (e.g. take a loss just before midnight and
-    /// immediately resume trading). Mitigations in place:
-    ///
-    /// - The reset time is determined server-side by the bot process clock,
-    ///   not by any value supplied by the trader or OpenClaw.
-    /// - `max_daily_loss_usd` and `max_trades_per_day` apply independently
-    ///   per reset window, limiting the magnitude of any single-window damage.
-    ///
-    /// If per-trader timezone offsets are required in future, add a
-    /// `pnl_reset_timezone_offset_hours: i8` field to `RiskCaps`, default 0,
-    /// and apply it here via `chrono::FixedOffset`.
-    fn maybe_reset_daily_pnl(&mut self) {
-        let today = chrono::Utc::now().date_naive();
-        if today != self.pnl_reset_date {
-            info!(
-                "Daily PnL reset: {} -> {} (was {}, trades: {})",
-                self.pnl_reset_date, today, self.realized_pnl_today, self.trade_count
-            );
-            self.realized_pnl_today = Decimal::ZERO;
-            self.trade_count = 0;
-            self.pnl_reset_date = today;
-        }
-    }
-
-    /// Accumulate realized PnL from a confirmed sell trade
-    fn accumulate_realized_pnl(
-        &mut self,
-        intent: &OpenClawIntent,
-        result: &NormalizedTradeResult,
-    ) {
-        let exec_price = result.execution.realized_price;
-        if exec_price <= Decimal::ZERO {
-            return;
-        }
-
-        // Look up average entry price from portfolio
-        let avg_entry = match self.portfolio.positions.get(&intent.input_mint) {
-            Some(pos) if pos.avg_entry_price_usdc > Decimal::ZERO => pos.avg_entry_price_usdc,
-            _ => return, // No position or unknown entry price — can't compute PnL
-        };
-
-        // USDC received from the sell (raw amount / 10^6)
-        let usdc_received = Decimal::from(result.execution.out_amount_raw)
-            / Decimal::from(1_000_000u64);
-
-        // Cost basis = tokens_sold × avg_entry = (usdc_received / exec_price) × avg_entry
-        let cost_basis = usdc_received * avg_entry / exec_price;
-        let pnl = usdc_received - cost_basis;
-
-        self.realized_pnl_today += pnl;
-        info!(
-            "Realized PnL: {} (received: {}, cost_basis: {}, total today: {})",
-            pnl, usdc_received, cost_basis, self.realized_pnl_today
-        );
-    }
-
-    /// Validate intent against hard risk rails.
-    ///
-    /// `snapshot` must be pre-computed by the caller so that `portfolio.snapshot()` is
-    /// not called once per intent inside the tick loop (BR-015).
-    fn validate_intent(
-        &self,
-        intent: &OpenClawIntent,
-        config: &BotConfig,
-        snapshot: &PortfolioSnapshot,
-        committed_usd: &HashMap<String, Decimal>,
-    ) -> IntentValidation {
-        // Check trade limit
-        let max_trades = config.risk_caps.max_trades_per_day as u32;
-        if self.trade_count >= max_trades {
-            return IntentValidation {
-                intent: intent.clone(),
-                approved: false,
-                rejection_reason: Some(format!(
-                    "Daily trade limit reached ({}/{})",
-                    self.trade_count, max_trades
-                )),
-                blocked_by: Some("max_trades_per_day".to_string()),
-            };
-        }
-
-        // R5-BR-007: Position-size check only applies to buy intents.
-        // For sells, the output is typically USDC — checking it is meaningless
-        // and could incorrectly block legitimate sell orders.
-        if intent.action != TradeAction::Sell {
-            // BR-011: Check the *resulting* position size, not just the trade amount.
-            // Existing exposure for the output mint (the asset being bought) is included.
-            let max_position_value = snapshot.total_equity
-                * Decimal::from(config.risk_caps.max_position_size_percent)
-                / Decimal::from(100);
-
-            let existing_exposure = snapshot
-                .positions
-                .iter()
-                .find(|p| p.mint == intent.output_mint)
-                .map(|p| p.market_value)
-                .unwrap_or(Decimal::ZERO);
-
-            // R5-BR-001: Include amounts committed by earlier intents in this tick
-            let tick_committed = committed_usd
-                .get(&intent.output_mint)
-                .copied()
-                .unwrap_or(Decimal::ZERO);
-
-            let resulting_position = existing_exposure + tick_committed + intent.amount_usd;
-
-            if resulting_position > max_position_value {
-                return IntentValidation {
-                    intent: intent.clone(),
-                    approved: false,
-                    rejection_reason: Some(format!(
-                        "Resulting position ${} exceeds max position size ${}",
-                        resulting_position, max_position_value
-                    )),
-                    blocked_by: Some("max_position_size_percent".to_string()),
-                };
-            }
-        }
-
-        // Check daily loss limit
-        let max_daily_loss = Decimal::from(config.risk_caps.max_daily_loss_usd);
-        if self.realized_pnl_today < -max_daily_loss {
-            return IntentValidation {
-                intent: intent.clone(),
-                approved: false,
-                rejection_reason: Some(format!(
-                    "Daily loss limit exceeded: ${} loss vs ${} max",
-                    -self.realized_pnl_today, max_daily_loss
-                )),
-                blocked_by: Some("max_daily_loss_usd".to_string()),
-            };
-        }
-
-        // All checks passed
-        IntentValidation {
-            intent: intent.clone(),
-            approved: true,
-            rejection_reason: None,
-            blocked_by: None,
-        }
-    }
-
-    /// Execute an OpenClaw intent
-    async fn execute_openclaw_intent(
-        &mut self,
-        intent: &OpenClawIntent,
-        config: &BotConfig,
-    ) -> NormalizedTradeResult {
-        // BR-020: executor may be None if apply_config has not completed yet.
-        let executor = match self.executor.as_ref() {
-            Some(e) => e,
-            None => {
-                warn!(
-                    "execute_openclaw_intent called with no executor (intent {})",
-                    intent.intent_id
-                );
-                return NormalizedTradeResult::default();
-            }
-        };
-
-        // Determine trade side from action
-        let side = match intent.action {
-            TradeAction::Buy => TradeSide::Buy,
-            TradeAction::Sell => TradeSide::Sell,
-            TradeAction::Hold => {
-                // Hold means no trade - return empty result
-                return NormalizedTradeResult::default();
-            }
-        };
-
-        // Convert USD amount to raw amount (USDC has 6 decimals)
-        let usdc_decimals = 6u8;
-        let raw = intent.amount_usd * Decimal::from(10u64.pow(usdc_decimals as u32));
-        let in_amount = match raw.to_u64() {
-            Some(v) if v > 0 => v,
-            _ => {
-                warn!(
-                    "Trade amount rounds to zero or overflows: {} USD -> {} raw",
-                    intent.amount_usd, raw
-                );
-                return NormalizedTradeResult::default();
-            }
-        };
-
-        // Execute trade
-        executor
-            .execute_trade(
-                &intent.intent_id.to_string(),
-                &intent.input_mint,
-                &intent.output_mint,
-                in_amount,
-                side,
-                config.trading_mode,
-            )
-            .await
-    }
-
-    /// Get recent prices for assets (from executor cache or fresh fetch)
-    async fn get_recent_prices(&self) -> HashMap<String, PriceQuote> {
-        let mut prices = HashMap::new();
-
-        // Get prices for configured asset universe
-        if let Some(config) = &self.current_config {
-            for asset in &config.asset_universe {
-                if !asset.enabled {
-                    continue;
-                }
-
-                // Try to get cached price from executor
-                // For now, return empty - executor will fetch on demand
-                prices.insert(
-                    asset.mint.clone(),
-                    PriceQuote {
-                        mint: asset.mint.clone(),
-                        symbol: asset.symbol.clone(),
-                        price_usd: Decimal::ZERO, // Will be fetched by OpenClaw
-                        change_24h_pct: None,
-                        timestamp: chrono::Utc::now(),
-                        source: "pending".to_string(),
-                    },
-                );
-            }
-        }
-
-        prices
-    }
-
-    /// Get recent trade events for context
-    fn get_recent_events(&self) -> Vec<TradeEvent> {
-        // Return empty for now - events are stored in control plane
-        // Could be populated from local event cache
-        Vec::new()
-    }
-
-    /// Get symbol for a mint address
-    fn get_symbol_for_mint(&self, mint: &str) -> Option<String> {
-        if let Some(config) = &self.current_config {
-            for asset in &config.asset_universe {
-                if asset.mint == mint {
-                    return Some(asset.symbol.clone());
-                }
-            }
-        }
-        None
-    }
-
-    /// Write current state to now.json.
-    ///
-    /// Accepts an optional pre-computed `snapshot` so that callers inside
-    /// `decision_tick` can share a single `portfolio.snapshot()` call (BR-004).
-    /// When `None` is passed (e.g. from `graceful_shutdown`), a fresh snapshot
-    /// is computed.
-    async fn write_state_file(&self, snapshot: Option<&PortfolioSnapshot>) -> anyhow::Result<()> {
-        let owned;
-        let snapshot = match snapshot {
-            Some(s) => s,
-            None => {
-                owned = self.portfolio.snapshot();
-                &owned
-            }
-        };
-
-        let state = RunnerState {
-            status: self.status,
-            last_plan_id: self.last_plan_id,
-            last_plan_time: self.last_plan_time,
-            last_trade_outcome: self.last_trade_outcome.clone(),
-            portfolio_equity_usd: snapshot.total_equity,
-            positions_count: snapshot.positions.len(),
-            updated_at: chrono::Utc::now(),
-        };
-
-        let path = self.state_dir.join("now.json");
-        let content = serde_json::to_string_pretty(&state)?;
-        tokio::fs::write(path, content).await?;
-
-        Ok(())
-    }
-
-    /// Write decision context to file
-    async fn write_context_file(&self, context: &DecisionContext) -> anyhow::Result<()> {
-        let path = self.state_dir.join("decision_context.json");
-        let content = serde_json::to_string_pretty(context)?;
-        tokio::fs::write(path, content).await?;
-        Ok(())
-    }
-
-    /// Write journal entry for decision
-    async fn write_journal_entry(&self, entry: &DecisionJournalEntry) -> anyhow::Result<()> {
-        let path = self
-            .state_dir
-            .join("journal/decisions")
-            .join(format!("{}.json", entry.intent_id));
-        let content = serde_json::to_string_pretty(entry)?;
-        tokio::fs::write(path, content).await?;
-        Ok(())
-    }
-
-    /// Collect event when intent is blocked into the tick-level event buffer.
-    fn collect_intent_blocked_events(
-        &self,
-        intent: &OpenClawIntent,
-        validation: &IntentValidation,
-        events: &mut Vec<EventInput>,
-    ) {
-        events.push(EventInput {
-            event_type: "trade_blocked".to_string(),
-            message: validation
-                .rejection_reason
-                .clone()
-                .unwrap_or_else(|| "Intent blocked by risk rails".to_string()),
-            metadata: Some(serde_json::json!({
-                "intent_id": intent.intent_id.to_string(),
-                "action": format!("{:?}", intent.action),
-                "input_mint": intent.input_mint,
-                "output_mint": intent.output_mint,
-                "amount_usd": intent.amount_usd.to_string(),
-                "blocked_by": validation.blocked_by,
-                "rationale": intent.rationale,
-            })),
-            timestamp: chrono::Utc::now(),
-        });
-    }
-
-    /// Collect trade events for an OpenClaw intent execution into the tick-level event buffer.
-    ///
-    /// All events for a tick are flushed in a single HTTP call at the end of
-    /// `decision_tick`, replacing per-event HTTP sends that blocked the tick loop.
-    fn collect_openclaw_trade_events(
-        &self,
-        intent: &OpenClawIntent,
-        result: &NormalizedTradeResult,
-        config: &BotConfig,
-        events: &mut Vec<EventInput>,
-    ) {
-        use crate::executor::TradeStage;
-
-        // Always collect trade_intent_created first
-        events.push(EventInput {
-            event_type: "trade_intent_created".to_string(),
-            message: format!("Trade intent from OpenClaw: {}", intent.intent_id),
-            metadata: Some(serde_json::json!({
-                "intent_id": intent.intent_id.to_string(),
-                "bot_id": self.config.bot_id.to_string(),
-                "input_mint": intent.input_mint,
-                "output_mint": intent.output_mint,
-                "amount_usd": intent.amount_usd.to_string(),
-                "action": format!("{:?}", intent.action),
-                "mode": format!("{:?}", config.trading_mode),
-                "confidence": intent.confidence,
-                "rationale": intent.rationale,
-                "source": "openclaw",
-            })),
-            timestamp: chrono::Utc::now(),
-        });
-
-        // Collect stage-specific event
-        match result.stage_reached {
-            TradeStage::Blocked => {
-                let error = result.error.as_ref();
-                let reason_code = error
-                    .map(|e| e.code.clone())
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                events.push(EventInput {
-                    event_type: "trade_blocked".to_string(),
-                    message: error
-                        .map(|e| e.message.clone())
-                        .unwrap_or_else(|| "Trade blocked".to_string()),
-                    metadata: Some(serde_json::json!({
-                        "intent_id": intent.intent_id.to_string(),
-                        "reason_code": reason_code,
-                        "input_mint": result.input_mint,
-                        "output_mint": result.output_mint,
-                        "in_amount": result.quote.in_amount,
-                        "price_impact_pct": result.quote.price_impact_pct,
-                        "shield_verdict": result.shield_result.as_ref().map(|s| format!("{:?}", s.verdict)),
-                    })),
-                    timestamp: chrono::Utc::now(),
-                });
-            }
-
-            TradeStage::Submitted => {
-                events.push(EventInput {
-                    event_type: "trade_submitted".to_string(),
-                    message: format!("Trade submitted: {:?}", result.signature),
-                    metadata: Some(serde_json::json!({
-                        "intent_id": intent.intent_id.to_string(),
-                        "signature": result.signature,
-                        "input_mint": result.input_mint,
-                        "output_mint": result.output_mint,
-                        "in_amount": result.quote.in_amount,
-                        "expected_out": result.quote.expected_out,
-                        "price_impact_pct": result.quote.price_impact_pct,
-                    })),
-                    timestamp: chrono::Utc::now(),
-                });
-            }
-
-            TradeStage::Confirmed => {
-                events.push(EventInput {
-                    event_type: "trade_confirmed".to_string(),
-                    message: format!("Trade confirmed: {:?}", result.signature),
-                    metadata: Some(serde_json::json!({
-                        "intent_id": intent.intent_id.to_string(),
-                        "signature": result.signature,
-                        "input_mint": result.input_mint,
-                        "output_mint": result.output_mint,
-                        "in_amount": result.quote.in_amount,
-                        "out_amount": result.execution.out_amount_raw,
-                        "executed_price": result.execution.realized_price.to_string(),
-                        "price_impact_pct": result.quote.price_impact_pct,
-                        "slippage_bps": result.execution.slippage_bps_estimate,
-                        "mode": format!("{:?}", config.trading_mode),
-                    })),
-                    timestamp: chrono::Utc::now(),
-                });
-            }
-
-            TradeStage::Failed => {
-                let error = result.error.as_ref();
-                let stage = error
-                    .map(|e| e.stage.clone())
-                    .unwrap_or_else(|| "unknown".to_string());
-                let code = error
-                    .map(|e| e.code.clone())
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                events.push(EventInput {
-                    event_type: "trade_failed".to_string(),
-                    message: error
-                        .map(|e| e.message.clone())
-                        .unwrap_or_else(|| "Trade failed".to_string()),
-                    metadata: Some(serde_json::json!({
-                        "intent_id": intent.intent_id.to_string(),
-                        "stage": stage,
-                        "error_code": code,
-                        "input_mint": result.input_mint,
-                        "output_mint": result.output_mint,
-                        "in_amount": result.quote.in_amount,
-                    })),
-                    timestamp: chrono::Utc::now(),
-                });
-            }
-        }
-    }
-
-    /// Send heartbeat with metrics
+    /// Send a heartbeat with current metrics to the control plane.
     async fn send_heartbeat(&self) -> anyhow::Result<()> {
         let status = if self.current_config.is_some() {
             "online"
@@ -1187,10 +444,8 @@ impl BotRunner {
             "configuring"
         };
 
-        // Get portfolio snapshot for metrics
         let snapshot = self.portfolio.snapshot();
 
-        // Build metrics
         let metrics = Some(vec![MetricInput {
             timestamp: chrono::Utc::now(),
             equity: snapshot.total_equity,
