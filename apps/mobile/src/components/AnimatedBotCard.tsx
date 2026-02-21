@@ -18,6 +18,8 @@ interface AnimatedBotCardProps {
 
 function StatusBadge({ status }: { status: Bot['status'] }) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  // Guard against stacking animation loops on rapid re-renders
+  const isAnimatingRef = useRef(false);
 
   const statusColors: Record<Bot['status'], { bg: string; text: string }> = {
     provisioning: { bg: lightTheme.colors.accent, text: '#fff' },
@@ -33,6 +35,10 @@ function StatusBadge({ status }: { status: Bot['status'] }) {
   // Pulse animation for provisioning/loading states
   useEffect(() => {
     if (status === 'provisioning' || status === 'destroying') {
+      // Skip if a loop is already running to prevent stacking on rapid re-renders
+      if (isAnimatingRef.current) return;
+      isAnimatingRef.current = true;
+
       const pulse = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
@@ -48,7 +54,14 @@ function StatusBadge({ status }: { status: Bot['status'] }) {
         ])
       );
       pulse.start();
-      return () => pulse.stop();
+      return () => {
+        pulse.stop();
+        isAnimatingRef.current = false;
+      };
+    } else {
+      // Reset scale when transitioning away from animated states
+      isAnimatingRef.current = false;
+      pulseAnim.setValue(1);
     }
   }, [status, pulseAnim]);
 
@@ -90,9 +103,10 @@ export function AnimatedBotCard({ bot, onPress, index = 0 }: AnimatedBotCardProp
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(20)).current;
 
-  // Entrance animation
+  // Entrance animation — stopped on unmount to prevent updates on an
+  // unmounted component when the list re-renders rapidly.
   useEffect(() => {
-    Animated.parallel([
+    const entrance = Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 300,
@@ -106,7 +120,9 @@ export function AnimatedBotCard({ bot, onPress, index = 0 }: AnimatedBotCardProp
         useNativeDriver: true,
         easing: (x) => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2,
       }),
-    ]).start();
+    ]);
+    entrance.start();
+    return () => entrance.stop();
   }, [index, fadeAnim, translateY]);
 
   const handlePressIn = () => {
