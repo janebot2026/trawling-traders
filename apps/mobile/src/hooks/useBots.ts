@@ -54,8 +54,11 @@ export function useBot(options: UseBotOptions) {
   const [error, setError] = useState<Error | null>(null);
 
   const fetchBot = useCallback(async () => {
-    if (!botId) return;
-    
+    if (!botId) {
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       const response = await botApi.getBot(botId);
@@ -187,7 +190,7 @@ export function useCreateBot() {
       setError(null);
       return bot;
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('Failed to create boat'));
+      setError(err instanceof Error ? err : new Error('Failed to create bot'));
       throw err;
     } finally {
       setLoading(false);
