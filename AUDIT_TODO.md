@@ -265,5 +265,5 @@ Generated from `docs/audit-report.md` on 2026-02-20. Items ordered by severity.
 
 ---
 
-**Total items: 48**
-**Progress: 48/48 complete**
+**Total items: 50**
+**Progress: 50/50 complete**

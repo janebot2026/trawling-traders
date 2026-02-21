@@ -4,18 +4,18 @@ Completed: 2026-02-21
 
 ## Overview
 
-48 findings from `docs/audit-report.md` were addressed across 5 service areas.
-All items in `AUDIT_TODO.md` are now marked complete (48/48).
+50 findings from `docs/audit-report.md` were addressed across 5 service areas.
+All items in `AUDIT_TODO.md` are now marked complete (50/50).
 
 ## Breakdown by Severity
 
 | Severity | Total | Fixed | Documented/Deferred |
 |----------|-------|-------|---------------------|
 | Critical | 4     | 4     | 0                   |
-| High     | 14    | 14    | 0                   |
-| Medium   | 22    | 22    | 0                   |
+| High     | 15    | 15    | 0                   |
+| Medium   | 23    | 23    | 0                   |
 | Low      | 8     | 8     | 0                   |
-| **Total**| **48**| **48**| **0**               |
+| **Total**| **50**| **50**| **0**               |
 
 ## Breakdown by Area
 
