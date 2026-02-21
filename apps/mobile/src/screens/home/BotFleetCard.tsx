@@ -9,10 +9,11 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { DrawerNavigationProp } from '@react-navigation/drawer';
 import type { Bot } from '@trawling-traders/types';
 import { lightTheme, colors, spacing, shadows } from '../../theme';
 import { pressScale } from '../../utils/animations';
-import type { RootStackParamList } from '../../navigation/AppNavigator';
+import type { RootStackParamList, MainDrawerParamList } from '../../navigation/AppNavigator';
 
 const LOB_AVATAR = require('../../../assets/lob-avatar.png');
 
@@ -44,6 +45,7 @@ function relativeTime(dateStr?: string): string {
 
 export function BotFleetCard({ bot, index, onPauseResume }: BotFleetCardProps) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const drawerNav = useNavigation<DrawerNavigationProp<MainDrawerParamList>>();
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(20)).current;
@@ -122,7 +124,7 @@ export function BotFleetCard({ bot, index, onPauseResume }: BotFleetCardProps) {
         <View style={styles.actions}>
           <TouchableOpacity
             style={styles.actionBtn}
-            onPress={() => navigation.navigate('Chat' as never)}
+            onPress={() => drawerNav.navigate('Chat')}
           >
             <Text style={styles.actionIcon}>💬</Text>
             <Text style={styles.actionLabel}>Chat</Text>
