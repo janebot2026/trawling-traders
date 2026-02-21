@@ -3,7 +3,7 @@
 use reqwest::{Client, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::config::BotConfig;
@@ -164,9 +164,33 @@ impl ControlPlaneClient {
 
         match response.status() {
             StatusCode::OK => {
-                let config: BotConfigResponse = response.json().await?;
-                debug!("Received config version: {}", config.version);
-                Ok(Some(BotConfig::from_response(config)?))
+                // BR-006: Isolate JSON parse failures so a malformed response body
+                // does not abort the entire tick. Log the raw body for diagnosis and
+                // return Ok(None) so the runner continues with its current config.
+                let body = response.text().await.unwrap_or_default();
+                match serde_json::from_str::<BotConfigResponse>(&body) {
+                    Ok(config) => {
+                        debug!("Received config version: {}", config.version);
+                        match BotConfig::from_response(config) {
+                            Ok(parsed) => Ok(Some(parsed)),
+                            Err(e) => {
+                                error!(
+                                    "Config response failed schema validation, skipping tick: {}",
+                                    e
+                                );
+                                Ok(None)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Malformed JSON in config response, skipping tick: {} | body_len={}",
+                            e,
+                            body.len()
+                        );
+                        Ok(None)
+                    }
+                }
             }
             StatusCode::NOT_MODIFIED => {
                 debug!("Config unchanged");
