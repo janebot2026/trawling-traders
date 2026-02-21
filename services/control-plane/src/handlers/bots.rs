@@ -302,11 +302,7 @@ async fn validate_selected_assets(
 }
 
 fn derive_default_persona(user_id: Uuid) -> Persona {
-    match user_id.as_bytes()[15] % 3 {
-        0 => Persona::Beginner,
-        1 => Persona::Tweaker,
-        _ => Persona::QuantLite,
-    }
+    super::helpers::derive_default_persona(user_id)
 }
 
 /// POST /bots - Create a new bot

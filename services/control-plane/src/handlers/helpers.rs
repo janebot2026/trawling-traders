@@ -4,7 +4,18 @@ use axum::http::StatusCode;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::models::Bot;
+use crate::models::{Bot, Persona};
+
+/// Derive a deterministic default persona from a user's UUID.
+///
+/// Uses the last byte of the UUID to bucket into one of three personas.
+pub fn derive_default_persona(user_id: Uuid) -> Persona {
+    match user_id.as_bytes()[15] % 3 {
+        0 => Persona::Beginner,
+        1 => Persona::Tweaker,
+        _ => Persona::QuantLite,
+    }
+}
 
 /// Fetch a bot and verify that it belongs to `user_id`.
 ///

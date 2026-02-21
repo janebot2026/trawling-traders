@@ -74,12 +74,7 @@ fn to_response(row: UserSettingsRow) -> UserSettingsResponse {
 }
 
 fn derive_default_persona(user_id: Uuid) -> crate::models::Persona {
-    let bucket = (user_id.as_bytes()[15] % 3) as i32;
-    match bucket {
-        0 => crate::models::Persona::Beginner,
-        1 => crate::models::Persona::Tweaker,
-        _ => crate::models::Persona::QuantLite,
-    }
+    super::helpers::derive_default_persona(user_id)
 }
 
 async fn ensure_default_persona(
