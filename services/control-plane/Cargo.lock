@@ -1605,8 +1605,6 @@ dependencies = [
  "async-trait",
  "axum 0.7.9",
  "chrono",
- "config",
- "dotenvy",
  "futures",
  "phf",
  "redis",
@@ -1620,7 +1618,6 @@ dependencies = [
  "tower-http 0.5.2",
  "tracing",
  "tracing-subscriber",
- "url",
 ]
 
 [[package]]

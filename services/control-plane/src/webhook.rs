@@ -2,7 +2,6 @@
 
 use crate::alerting::{AlertSeverity, AlertType};
 use reqwest::Client;
-use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 /// Webhook configuration
@@ -31,18 +30,11 @@ pub struct WebhookNotifier {
 }
 
 impl WebhookNotifier {
-    pub fn new(config: WebhookConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .build()
-            .unwrap_or_else(|e| {
-                warn!(
-                    "Failed to build webhook HTTP client with timeout ({}), falling back to default client",
-                    e
-                );
-                Client::new()
-            });
-
+    /// Create a new WebhookNotifier using a shared HTTP client.
+    ///
+    /// The caller should provide a pre-configured `reqwest::Client` (e.g. from `AppState`)
+    /// to avoid creating redundant connection pools.
+    pub fn new(config: WebhookConfig, client: Client) -> Self {
         Self { config, client }
     }
 

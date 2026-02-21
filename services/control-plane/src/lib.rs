@@ -75,7 +75,7 @@ impl AppState {
             bot_rate_limiter: middleware::rate_limit::RateLimiter::new(60, 120),
             droplet_semaphore: Arc::new(Semaphore::new(max_concurrent)),
             alerts: AlertManager::new(AlertConfig::default()),
-            webhooks: WebhookNotifier::new(WebhookConfig::default()),
+            webhooks: WebhookNotifier::new(WebhookConfig::default(), http_client.clone()),
             jwt_service: None,
             provision_cb: provisioning::create_provision_circuit_breaker(),
             http_client,
