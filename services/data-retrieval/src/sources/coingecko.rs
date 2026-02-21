@@ -12,6 +12,14 @@ use tokio::sync::RwLock;
 /// TTL for dynamic coin ID lookups (24 hours).
 const COIN_ID_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// Default quote currency used when querying CoinGecko price endpoints.
+///
+/// CoinGecko always returns currency codes in lowercase in the JSON response
+/// (e.g. `{"bitcoin": {"usd": 60000}}`), so this constant is also lowercase.
+/// Use it as the map key when extracting prices from the API response to avoid
+/// case-sensitivity bugs.
+const COINGECKO_QUOTE_CURRENCY: &str = "usd";
+
 /// CoinGecko API client
 pub struct CoinGeckoClient {
     client: Client,
@@ -241,8 +249,11 @@ impl CoinGeckoClient {
         // Note: CoinGecko API returns JSON numbers (not strings), so f64 intermediate
         // is unavoidable - precision loss inherent to JSON numeric representation.
         // For higher precision, use Binance WebSocket which provides string prices.
+        //
+        // CoinGecko always uses lowercase currency keys (see COINGECKO_QUOTE_CURRENCY).
+        // Try the canonical lowercase key first, then fall back to vs_currency.
         let price = data
-            .get("usd")
+            .get(COINGECKO_QUOTE_CURRENCY)
             .or_else(|| data.get(&vs_currency))
             .and_then(|v| v.as_f64())
             .ok_or_else(|| DataRetrievalError::InvalidResponse("Missing price data".to_string()))?;
