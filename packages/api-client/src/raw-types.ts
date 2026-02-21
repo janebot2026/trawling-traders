@@ -178,12 +178,12 @@ export function mapTradeableAsset(asset: RawTradeableAsset): TradeableAsset {
     assetFocus: (asset.assetFocus ?? asset.asset_focus) as AssetFocus,
     symbol: asset.symbol,
     name: asset.name,
-    tokenAddress: asset.tokenAddress ?? asset.token_address,
+    tokenAddress: asset.tokenAddress ?? asset.token_address ?? '',
     decimals: Number(asset.decimals),
-    custodian: asset.custodian,
+    custodian: asset.custodian ?? '',
     isActive: Boolean(asset.isActive ?? asset.is_active),
-    createdAt: asset.createdAt ?? asset.created_at,
-    updatedAt: asset.updatedAt ?? asset.updated_at,
+    createdAt: asset.createdAt ?? asset.created_at ?? '',
+    updatedAt: asset.updatedAt ?? asset.updated_at ?? '',
   };
 }
 
@@ -191,11 +191,11 @@ export function mapAssistantOption(option: RawAssistantOption): AIAssistantOptio
   return {
     id: option.id,
     assistantStyle: (option.assistantStyle ?? option.assistant_style) as Persona,
-    captainName: option.captainName ?? option.captain_name,
+    captainName: option.captainName ?? option.captain_name ?? '',
     personalityDescription:
-      option.personalityDescription ?? option.personality_description,
-    imageKey: option.imageKey ?? option.image_key,
-    imagePath: option.imagePath ?? option.image_path,
+      option.personalityDescription ?? option.personality_description ?? '',
+    imageKey: option.imageKey ?? option.image_key ?? '',
+    imagePath: option.imagePath ?? option.image_path ?? '',
     sortOrder: Number(option.sortOrder ?? option.sort_order ?? 0),
     isActive: Boolean(option.isActive ?? option.is_active),
   };
