@@ -154,6 +154,11 @@ impl PriceAggregator {
                 const STABLE_CONNECTION_SECS: u64 = 30;
                 let mut last_successful_connect_time: Option<std::time::Instant> = None;
 
+                // DR-001: Subscribe once and reuse the receiver across the entire loop.
+                // The broadcast channel is never replaced on reconnect, so this receiver
+                // stays valid and delivers messages without any consumer-side change.
+                let mut price_rx = source.subscribe();
+
                 loop {
                     // Check connection status and attempt reconnect if needed
                     if !source.is_connected().await {
@@ -202,7 +207,7 @@ impl PriceAggregator {
                         }
                     }
 
-                    if let Some(price) = source.next_price().await {
+                    if let Ok(price) = price_rx.recv().await {
                         // Use the symbol field directly
                         let key = price.symbol.clone();
                         let mut p = prices.write().await;
@@ -238,8 +243,10 @@ impl PriceAggregator {
                             }
                         }
                     } else {
-                        // Channel returned None - likely disconnected
-                        // Short sleep before checking connection status again
+                        // broadcast::recv() returns Err when the channel is closed
+                        // (sender dropped) or when this receiver has lagged behind.
+                        // Neither is fatal — the reconnect loop above will handle
+                        // disconnects; lag just means we missed some updates.
                         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     }
                 }

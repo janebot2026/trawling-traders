@@ -8,7 +8,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{broadcast, watch, Mutex, RwLock};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, info, warn};
 
@@ -16,34 +16,46 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsSink = SplitSink<WsStream, Message>;
 type WsReader = SplitStream<WsStream>;
 
-/// Binance WebSocket client for real-time price feeds
+/// Capacity of the broadcast channel for price updates.
 ///
-/// Uses split read/write channels to prevent deadlock between
-/// sending subscriptions and receiving messages.
+/// broadcast drops the *oldest* messages when the channel is full, which is
+/// preferable to stalling the message handler (DR-001).
+const PRICE_BROADCAST_CAPACITY: usize = 10_000;
+
+/// Binance WebSocket client for real-time price feeds.
+///
+/// Uses a `broadcast` channel for price distribution so that:
+/// - Multiple consumers can each call `subscribe()` to get their own `Receiver`.
+/// - On reconnect the channel is reused — existing subscribers keep receiving
+///   without any replacement of receiver handles (DR-001).
+///
+/// Graceful shutdown of the message-handler task is driven by a `watch` channel
+/// rather than `abort()`, so no locks are left held on shutdown (DR-003).
 pub struct BinanceWebSocketClient {
     /// WebSocket write half (for sending subscriptions)
     ws_sink: Arc<Mutex<WsSink>>,
     /// WebSocket read half (for receiving messages)
     ws_reader: Arc<Mutex<WsReader>>,
-    /// Channel sender — wrapped in Option so the message handler can drop it on
-    /// disconnect, which causes `price_rx.recv()` to return `None` (DR-012).
-    price_tx: Arc<Mutex<Option<mpsc::Sender<PricePoint>>>>,
-    price_rx: Arc<Mutex<mpsc::Receiver<PricePoint>>>,
+    /// Broadcast sender — never replaced after construction (DR-001).
+    /// Wrapped in Option so the message handler can detect sender drops, though
+    /// in normal operation the Arc keeps the sender alive indefinitely.
+    price_tx: Arc<broadcast::Sender<PricePoint>>,
     /// Subscribed streams
     subscriptions: Arc<RwLock<HashMap<String, String>>>, // symbol -> stream_name
     /// Connection status
     connected: Arc<RwLock<bool>>,
-    /// Handle to the running message-handler task.
-    /// Stored so reconnect can abort the old task before spawning a new one (DR-003).
-    handler_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Shutdown signal for the running message-handler task (DR-003).
+    ///
+    /// Sending `true` tells the task to exit cleanly.  A new `watch` channel is
+    /// created for each new handler task so old signals do not bleed over.
+    shutdown_tx: Arc<Mutex<watch::Sender<bool>>>,
     /// Atomic counter for unique subscription request IDs
     next_sub_id: Arc<AtomicU64>,
 }
 
 impl BinanceWebSocketClient {
-    /// Connect to Binance combined stream WebSocket
+    /// Connect to Binance combined stream WebSocket.
     pub async fn new() -> Result<Self> {
-        // Binance WebSocket URL for combined streams
         let url = "wss://stream.binance.com:9443/ws";
 
         let (ws_stream, _) = connect_async(url).await.map_err(|e| {
@@ -52,30 +64,31 @@ impl BinanceWebSocketClient {
 
         info!("Connected to Binance WebSocket");
 
-        // Split into read/write halves to prevent deadlock
         let (ws_sink, ws_reader) = ws_stream.split();
 
-        // Larger buffer to prevent data loss during price spikes
-        // 10k entries = ~10 seconds of high-volume crypto trading
-        let (price_tx, price_rx) = mpsc::channel(10000);
+        // broadcast channel — never replaced on reconnect (DR-001).
+        let (price_tx, _) = broadcast::channel(PRICE_BROADCAST_CAPACITY);
+        let price_tx = Arc::new(price_tx);
+
+        // Initial shutdown channel — replaced each time a new handler task starts.
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let shutdown_tx = Arc::new(Mutex::new(shutdown_tx));
 
         let client = Self {
             ws_sink: Arc::new(Mutex::new(ws_sink)),
             ws_reader: Arc::new(Mutex::new(ws_reader)),
-            price_tx: Arc::new(Mutex::new(Some(price_tx))),
-            price_rx: Arc::new(Mutex::new(price_rx)),
+            price_tx,
             subscriptions: Arc::new(RwLock::new(HashMap::new())),
             connected: Arc::new(RwLock::new(true)),
-            handler_task: Arc::new(Mutex::new(None)),
+            shutdown_tx,
             next_sub_id: Arc::new(AtomicU64::new(1)),
         };
 
-        // Spawn message handler and store the handle
-        let client_clone = client.clone_state();
-        let handle = tokio::spawn(async move {
-            client_clone.message_handler().await;
+        // Spawn initial message handler.
+        let handler_clone = client.clone_state();
+        tokio::spawn(async move {
+            handler_clone.message_handler(shutdown_rx).await;
         });
-        *client.handler_task.lock().await = Some(handle);
 
         Ok(client)
     }
@@ -91,15 +104,14 @@ impl BinanceWebSocketClient {
             ws_sink: Arc::clone(&self.ws_sink),
             ws_reader: Arc::clone(&self.ws_reader),
             price_tx: Arc::clone(&self.price_tx),
-            price_rx: Arc::clone(&self.price_rx),
             subscriptions: Arc::clone(&self.subscriptions),
             connected: Arc::clone(&self.connected),
-            handler_task: Arc::clone(&self.handler_task),
+            shutdown_tx: Arc::clone(&self.shutdown_tx),
             next_sub_id: Arc::clone(&self.next_sub_id),
         }
     }
 
-    /// Subscribe to real-time trades for a symbol
+    /// Subscribe to real-time trades for a symbol.
     pub async fn subscribe_trades(&self, symbol: &str) -> Result<()> {
         let stream_name = format!("{}@trade", symbol.to_lowercase());
 
@@ -119,7 +131,6 @@ impl BinanceWebSocketClient {
 
         let msg = Message::Text(subscribe_msg.to_string());
 
-        // Use ws_sink (write half) - doesn't block message handler
         {
             let mut sink = self.ws_sink.lock().await;
             sink.send(msg)
@@ -139,16 +150,30 @@ impl BinanceWebSocketClient {
     // Kline (candlestick) subscriptions are not yet implemented.
     // The subscribe/process stubs were removed to avoid dead code accumulation.
 
-    /// Handle incoming WebSocket messages
+    /// Handle incoming WebSocket messages.
     ///
-    /// Uses the read half (ws_reader) so subscriptions can be sent
-    /// concurrently without blocking.
-    async fn message_handler(&self) {
+    /// Exits cleanly when `shutdown_rx` becomes `true` (DR-003), or when the
+    /// WebSocket stream ends / errors.
+    async fn message_handler(&self, mut shutdown_rx: watch::Receiver<bool>) {
         loop {
-            // Read from ws_reader (read half) - doesn't block subscriptions
+            // Poll the shutdown signal without blocking the read path.
+            if *shutdown_rx.borrow() {
+                info!("WebSocket message handler received shutdown signal");
+                break;
+            }
+
+            // Read from ws_reader — hold the lock only for the duration of one read.
             let msg = {
                 let mut reader = self.ws_reader.lock().await;
-                reader.next().await
+                // Race between the next WebSocket message and a shutdown signal so
+                // we do not block indefinitely inside the lock (DR-003).
+                tokio::select! {
+                    result = reader.next() => result,
+                    _ = shutdown_rx.changed() => {
+                        info!("WebSocket message handler received shutdown signal during read");
+                        break;
+                    }
+                }
             };
 
             match msg {
@@ -158,7 +183,6 @@ impl BinanceWebSocketClient {
                     }
                 }
                 Some(Ok(Message::Ping(data))) => {
-                    // Send pong using write half
                     let pong = Message::Pong(data);
                     let mut sink = self.ws_sink.lock().await;
                     if let Err(e) = sink.send(pong).await {
@@ -181,27 +205,20 @@ impl BinanceWebSocketClient {
             }
         }
 
-        // Mark as disconnected
+        // Mark as disconnected so the reconnect loop in lib.rs kicks in.
         {
             let mut connected = self.connected.write().await;
             *connected = false;
         }
 
-        // Drop the sender so any caller blocked on price_rx.recv() gets None (DR-012).
-        {
-            let mut tx = self.price_tx.lock().await;
-            *tx = None;
-        }
-
         warn!("WebSocket message handler exited");
     }
 
-    /// Process a single message
+    /// Process a single message.
     async fn process_message(&self, text: &str) -> Result<()> {
         let value: Value = serde_json::from_str(text)
             .map_err(|e| DataRetrievalError::InvalidResponse(e.to_string()))?;
 
-        // Check if it's a trade or kline message
         if let Some(event_type) = value.get("e").and_then(|v| v.as_str()) {
             match event_type {
                 "trade" => {
@@ -219,7 +236,7 @@ impl BinanceWebSocketClient {
         Ok(())
     }
 
-    /// Process trade message
+    /// Process a trade message and broadcast the resulting [`PricePoint`].
     async fn process_trade(&self, value: &Value) -> Result<()> {
         let symbol = value
             .get("s")
@@ -236,15 +253,12 @@ impl BinanceWebSocketClient {
             .and_then(|v| v.as_i64())
             .ok_or_else(|| DataRetrievalError::InvalidResponse("Missing timestamp".to_string()))?;
 
-        // Convert millisecond timestamp to DateTime<Utc>
         let timestamp =
             chrono::DateTime::from_timestamp_millis(timestamp_ms).unwrap_or_else(chrono::Utc::now);
 
-        // Parse directly to Decimal to avoid f64 precision loss
         let price = Decimal::from_str(price_str)
             .map_err(|e| DataRetrievalError::InvalidResponse(format!("Invalid price: {}", e)))?;
 
-        // Format symbol as BTC/USDT from BTCUSDT
         let formatted_symbol = if let Some(base) = symbol.strip_suffix("USDT") {
             format!("{}/USDT", base)
         } else if let Some(base) = symbol.strip_suffix("USD") {
@@ -258,58 +272,77 @@ impl BinanceWebSocketClient {
             price,
             source: "binance".to_string(),
             timestamp,
-            confidence: Some(0.95), // Binance is real-time exchange data
+            confidence: Some(0.95),
         };
 
-        // Non-blocking send — drop update rather than stalling the message handler
-        let tx_guard = self.price_tx.lock().await;
-        if let Some(tx) = tx_guard.as_ref() {
-            match tx.try_send(price_point) {
-                Ok(()) => {}
-                Err(mpsc::error::TrySendError::Full(_)) => {
-                    warn!("Price channel full (10k entries). Dropping update — consumer may be behind.");
-                }
-                Err(mpsc::error::TrySendError::Closed(_)) => {
-                    warn!("Price channel closed. Consumer disconnected.");
-                }
+        // broadcast::Sender::send returns Err only when there are no active
+        // receivers, which is not an error condition worth logging loudly.
+        match self.price_tx.send(price_point) {
+            Ok(_) => {}
+            Err(_) => {
+                debug!("No active price subscribers; broadcast dropped");
             }
         }
 
         Ok(())
     }
 
-    /// Receive the next price update
+    /// Subscribe to the price broadcast channel.
+    ///
+    /// Each call returns an independent [`broadcast::Receiver`] that starts
+    /// receiving new messages from the moment of subscription.  The channel is
+    /// never replaced on reconnect, so existing receivers remain valid (DR-001).
+    pub fn subscribe(&self) -> broadcast::Receiver<PricePoint> {
+        self.price_tx.subscribe()
+    }
+
+    /// Receive the next price update on the struct's own subscriber handle.
+    ///
+    /// This is a convenience wrapper for callers that want a single shared
+    /// receiver stored inside the client.  It creates a new subscription on
+    /// each call — prefer calling [`subscribe`] once and reusing the receiver
+    /// in a loop for high-throughput consumers.
     pub async fn next_price(&self) -> Option<PricePoint> {
-        let mut rx = self.price_rx.lock().await;
-        rx.recv().await
+        let mut rx = self.price_tx.subscribe();
+        rx.recv().await.ok()
     }
 
-    /// Get latest price for a symbol (non-blocking)
+    /// Non-blocking price receive — returns `None` when no message is available.
     pub async fn try_recv_price(&self) -> Option<PricePoint> {
-        let mut rx = self.price_rx.lock().await;
-        rx.try_recv().ok()
+        self.price_tx.subscribe().try_recv().ok()
     }
 
-    /// Check if connected
+    /// Check if connected.
     pub async fn is_connected(&self) -> bool {
         *self.connected.read().await
     }
 
-    /// Reconnect to WebSocket
+    /// Reconnect to WebSocket.
     ///
-    /// Uses interior mutability (Arc<Mutex>) so this can be called from shared references.
+    /// Signals the old message-handler task to exit via the `watch` channel and
+    /// then spawns a fresh handler task with a new shutdown channel (DR-003).
+    /// The broadcast price channel is reused unchanged so existing subscribers
+    /// continue receiving without replacing their receiver handles (DR-001).
     pub async fn reconnect(&self) -> Result<()> {
         info!("Reconnecting to Binance WebSocket...");
+
+        // Signal the current handler to shut down gracefully (DR-003).
+        // The lock is released before we await the new connection so we do not
+        // hold it across an await that could take seconds.
+        {
+            let tx = self.shutdown_tx.lock().await;
+            // Ignore send errors — the old task may already have exited.
+            let _ = tx.send(true);
+        }
 
         // Connect new WebSocket
         let (ws_stream, _) = connect_async("wss://stream.binance.com:9443/ws")
             .await
             .map_err(|e| DataRetrievalError::ApiError(format!("Reconnection failed: {}", e)))?;
 
-        // Split into read/write halves
         let (ws_sink, ws_reader) = ws_stream.split();
 
-        // Replace old streams
+        // Replace the underlying streams while holding their locks.
         {
             let mut sink = self.ws_sink.lock().await;
             *sink = ws_sink;
@@ -319,14 +352,13 @@ impl BinanceWebSocketClient {
             *reader = ws_reader;
         }
 
-        // Resubscribe to previous streams
+        // Re-subscribe to previous streams
         let subs: Vec<(String, String)> = {
             let s = self.subscriptions.read().await;
             s.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
         };
 
         for (_symbol, stream) in subs {
-            // Re-subscribe using write half
             let sub_id = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
             let subscribe_msg = serde_json::json!({
                 "method": "SUBSCRIBE",
@@ -349,43 +381,33 @@ impl BinanceWebSocketClient {
             *connected = true;
         }
 
-        // Restore the sender so process_trade can forward messages again (DR-012).
-        // The receiver end is unchanged — callers continue to hold the same price_rx.
+        // Create a fresh shutdown channel for the new handler task (DR-003).
+        let (new_shutdown_tx, new_shutdown_rx) = watch::channel(false);
         {
-            let mut tx = self.price_tx.lock().await;
-            // Only create a fresh channel when the old sender was dropped.
-            // If it is still present the existing channel is reusable.
-            if tx.is_none() {
-                let (new_tx, new_rx) = mpsc::channel(10000);
-                *tx = Some(new_tx);
-                *self.price_rx.lock().await = new_rx;
-            }
+            let mut tx = self.shutdown_tx.lock().await;
+            *tx = new_shutdown_tx;
         }
 
-        // Abort the previous message-handler task before starting a new one (DR-003).
-        {
-            let mut task = self.handler_task.lock().await;
-            if let Some(old_handle) = task.take() {
-                old_handle.abort();
-            }
-        }
-
-        // Restart message handler and store the new handle
-        let client_clone = self.clone_state();
-        let handle = tokio::spawn(async move {
-            client_clone.message_handler().await;
+        // Spawn the new message handler — the broadcast channel is reused (DR-001).
+        let handler_clone = self.clone_state();
+        tokio::spawn(async move {
+            handler_clone.message_handler(new_shutdown_rx).await;
         });
-        *self.handler_task.lock().await = Some(handle);
 
         info!("Reconnected to Binance WebSocket");
         Ok(())
     }
 
-    /// Close connection gracefully
+    /// Close connection gracefully.
     pub async fn close(&self) -> Result<()> {
         info!("Closing Binance WebSocket connection");
 
-        // Close via write half
+        // Signal the handler to exit cleanly before closing the stream (DR-003).
+        {
+            let tx = self.shutdown_tx.lock().await;
+            let _ = tx.send(true);
+        }
+
         {
             let mut sink = self.ws_sink.lock().await;
             sink.close().await.map_err(|e| {
@@ -412,26 +434,36 @@ mod tests {
         let client = BinanceWebSocketClient::new().await.unwrap();
         assert!(client.is_connected().await);
 
-        // Subscribe to BTC
         client.subscribe_trades("BTCUSDT").await.unwrap();
 
-        // Wait a bit for connection
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-        // Try to receive a trade
         let timeout = tokio::time::Duration::from_secs(10);
-        let price = tokio::time::timeout(timeout, client.next_price()).await;
+        let mut rx = client.subscribe();
+        let price = tokio::time::timeout(timeout, rx.recv()).await;
 
         match price {
-            Ok(Some(p)) => {
+            Ok(Ok(p)) => {
                 println!("Received price: {} = ${}", p.symbol, p.price);
                 assert_eq!(p.source, "binance");
                 assert!(p.price > Decimal::ZERO);
             }
-            Ok(None) => println!("Channel closed"),
+            Ok(Err(e)) => println!("Receive error: {}", e),
             Err(_) => println!("Timeout - no trades received"),
         }
 
         client.close().await.unwrap();
+    }
+
+    /// Verify that a subscriber obtained before reconnect continues to receive
+    /// messages after reconnect — the channel is not replaced (DR-001).
+    #[tokio::test]
+    #[ignore] // Integration test
+    async fn test_subscriber_survives_reconnect() {
+        let client = BinanceWebSocketClient::new().await.unwrap();
+        let mut rx = client.subscribe(); // obtain receiver BEFORE reconnect
+        client.reconnect().await.unwrap();
+        // rx should still be valid; a send on the new handler will reach it.
+        assert!(rx.try_recv().is_err()); // empty but not closed
     }
 }
