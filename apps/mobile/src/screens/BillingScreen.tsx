@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ImageBackground,
+  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -69,11 +69,7 @@ export function BillingScreen() {
   };
 
   const openCheckout = () => {
-    Alert.alert(
-      'Manage Subscription',
-      `Open checkout/manage flow at ${API_URL}/paywall/v1/shop in web/admin tooling.`,
-      [{ text: 'OK' }]
-    );
+    Linking.openURL(`${API_URL}/paywall/v1/shop`);
   };
 
   if (isLoading) {
