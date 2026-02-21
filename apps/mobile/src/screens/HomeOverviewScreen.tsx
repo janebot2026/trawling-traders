@@ -217,6 +217,8 @@ export function HomeOverviewScreen() {
         ListFooterComponent={<AlertsPanel events={allEvents} />}
         contentContainerStyle={[styles.content, { paddingTop: contentTopPadding + spacing.md }]}
         showsVerticalScrollIndicator={false}
+        maxToRenderPerBatch={10}
+        updateCellsBatchingPeriod={50}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
