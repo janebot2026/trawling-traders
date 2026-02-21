@@ -4,9 +4,9 @@ use chrono::{DateTime, Utc};
 use reqwest::Client;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
-use std::sync::LazyLock;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 /// TTL for dynamic coin ID lookups (24 hours).
@@ -31,6 +31,13 @@ pub struct CoinGeckoClient {
     health_tracker: HealthTracker,
     /// In-memory cache for dynamic coin ID lookups (symbol -> (id, fetched_at))
     coin_id_cache: RwLock<HashMap<String, (String, Instant)>>,
+    /// Shared retry-after deadline (Unix epoch seconds).
+    ///
+    /// When any request receives a 429, it stores the epoch-second at which
+    /// it is safe to retry again.  All concurrent callers check this before
+    /// sending a request so they share a single backoff window instead of each
+    /// independently sleeping and hammering the API ("thundering herd").
+    retry_after_deadline: Arc<AtomicU64>,
 }
 
 impl CoinGeckoClient {
@@ -55,6 +62,7 @@ impl CoinGeckoClient {
             last_request: tokio::sync::Mutex::new(Instant::now() - Duration::from_secs(10)),
             health_tracker: HealthTracker::new(),
             coin_id_cache: RwLock::new(HashMap::new()),
+            retry_after_deadline: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -73,7 +81,13 @@ impl CoinGeckoClient {
     /// Per-request timeout (10 seconds for individual API calls)
     const REQUEST_TIMEOUT_SECS: u64 = 10;
 
-    /// Rate-limited request wrapper with per-request timeout and retry on 429
+    /// Rate-limited request wrapper with per-request timeout and retry on 429.
+    ///
+    /// A shared `retry_after_deadline` (Unix epoch seconds stored in an
+    /// `AtomicU64`) is checked before every attempt.  When *any* concurrent
+    /// request receives a 429 it writes the deadline so that all other callers
+    /// wait for the same window rather than each sleeping independently
+    /// (thundering-herd prevention).
     async fn rate_limited_request<T: serde::de::DeserializeOwned>(
         &self,
         endpoint: &str,
@@ -82,6 +96,25 @@ impl CoinGeckoClient {
 
         // Try up to 2 times (initial + 1 retry on rate limit)
         for attempt in 0..2 {
+            // Before acquiring the semaphore, honour any shared retry-after
+            // deadline set by a previous 429 response (this or another task).
+            let deadline_epoch = self.retry_after_deadline.load(Ordering::Acquire);
+            if deadline_epoch > 0 {
+                let now_epoch = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                if now_epoch < deadline_epoch {
+                    let wait_secs = deadline_epoch - now_epoch;
+                    tracing::warn!(
+                        wait_secs,
+                        "CoinGecko shared backoff active, waiting before attempt {}",
+                        attempt
+                    );
+                    tokio::time::sleep(Duration::from_secs(wait_secs)).await;
+                }
+            }
+
             let _permit = self.rate_limiter.acquire().await.map_err(|e| {
                 self.health_tracker.record_failure();
                 DataRetrievalError::ApiError(e.to_string())
@@ -129,12 +162,32 @@ impl CoinGeckoClient {
                     .and_then(|v| v.to_str().ok())
                     .and_then(|v| v.parse::<u64>().ok());
 
+                // Compute and publish the shared retry-after deadline so that
+                // all concurrent callers share a single backoff window.
+                let wait_secs = retry_after.unwrap_or(60).min(120); // Cap at 2 minutes
+                let new_deadline = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    .saturating_add(wait_secs);
+                // Only advance the deadline, never move it backwards.
+                let _ = self.retry_after_deadline.fetch_update(
+                    Ordering::Release,
+                    Ordering::Acquire,
+                    |current| {
+                        if new_deadline > current {
+                            Some(new_deadline)
+                        } else {
+                            None
+                        }
+                    },
+                );
+
                 // If first attempt, wait and retry
                 if attempt == 0 {
-                    let wait_secs = retry_after.unwrap_or(60).min(120); // Cap at 2 minutes
                     tracing::warn!(
-                        "CoinGecko rate limited, waiting {} seconds before retry",
-                        wait_secs
+                        wait_secs,
+                        "CoinGecko rate limited (429), waiting before retry"
                     );
                     tokio::time::sleep(Duration::from_secs(wait_secs)).await;
                     continue;
