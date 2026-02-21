@@ -5,6 +5,7 @@ import {
   Image,
   ImageBackground,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -19,6 +20,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useCedrosLogin, useEmailAuth, useOrgs, GoogleLoginButton } from '@cedros/login-react-native';
 import { api } from '@trawling-traders/api-client';
+import { CEDROS_CONFIG } from '../config/api';
 import { authScreenStyles as styles } from './auth/AuthScreen.styles';
 
 const LOB_AVATAR = require('../../assets/lob-avatar.png');
@@ -337,7 +339,7 @@ export function AuthScreen() {
                   <Pressable
                     style={styles.inlineLink}
                     onPress={() =>
-                      Alert.alert('Reset Password', 'Password reset flow can be added to your Cedros login config.')
+                      Linking.openURL(`${CEDROS_CONFIG.serverUrl}/auth/forgot-password`)
                     }
                   >
                     <Text style={styles.inlineLinkText}>Forgot password?</Text>
@@ -451,15 +453,15 @@ export function AuthScreen() {
             <Text style={styles.reassurance}>Your bots run on your infrastructure. We don&apos;t touch your keys.</Text>
 
             <View style={styles.metaLinksRow}>
-              <Pressable onPress={() => Alert.alert('Terms', 'Terms page wiring can be attached here.')}>
+              <Pressable onPress={() => Linking.openURL('https://trawlingtraders.com/terms')}>
                 <Text style={styles.metaLink}>Terms</Text>
               </Pressable>
               <Text style={styles.metaDivider}>•</Text>
-              <Pressable onPress={() => Alert.alert('Privacy', 'Privacy page wiring can be attached here.')}>
+              <Pressable onPress={() => Linking.openURL('https://trawlingtraders.com/privacy')}>
                 <Text style={styles.metaLink}>Privacy</Text>
               </Pressable>
               <Text style={styles.metaDivider}>•</Text>
-              <Pressable onPress={() => Alert.alert('Security', 'Security page wiring can be attached here.')}>
+              <Pressable onPress={() => Linking.openURL('https://trawlingtraders.com/security')}>
                 <Text style={styles.metaLink}>Security</Text>
               </Pressable>
             </View>
