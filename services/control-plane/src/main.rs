@@ -142,7 +142,8 @@ async fn build_router(
             header::AUTHORIZATION,
             header::ACCEPT,
             header::COOKIE,
-            header::HeaderName::from_static("x-csrf-token"),
+            // x-csrf-token removed: no CSRF validation is implemented (CP-009).
+            // Re-add only when a CSRF middleware is in place.
         ])
         .allow_credentials(true);
 
