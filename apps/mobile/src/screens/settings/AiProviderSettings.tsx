@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -19,6 +19,17 @@ const PROVIDERS: { key: LlmProvider; label: string }[] = [
   { key: 'openrouter', label: 'OpenRouter' },
 ];
 
+/**
+ * Returns a masked representation of an API key for safe display.
+ * Shows only the last 4 characters to avoid exposing the full key
+ * in screen recordings or React DevTools.
+ */
+function maskApiKey(key: string): string {
+  if (!key) return '';
+  if (key.length <= 4) return '****';
+  return `****${key.slice(-4)}`;
+}
+
 function ProviderCard({ provider }: { provider: { key: LlmProvider; label: string } }) {
   const apiKeys = useSettingsStore((s) => s.apiKeys);
   const preferredModels = useSettingsStore((s) => s.preferredModels);
@@ -26,24 +37,54 @@ function ProviderCard({ provider }: { provider: { key: LlmProvider; label: strin
   const removeApiKey = useSettingsStore((s) => s.removeApiKey);
   const setPreferredModel = useSettingsStore((s) => s.setPreferredModel);
 
-  const [keyDraft, setKeyDraft] = useState(apiKeys[provider.key] ?? '');
-  const [showKey, setShowKey] = useState(false);
-
   const storedKey = apiKeys[provider.key] ?? '';
   const selectedModel = preferredModels[provider.key];
   const models = LLM_MODELS[provider.key];
-  const hasUnsavedKey = keyDraft.trim() !== storedKey;
+
+  // Store masked value in state (safe for screen recordings / DevTools).
+  // The actual key the user types is kept only in a ref so it never enters
+  // React state and is not captured by screen-recording tools.
+  const pendingKeyRef = useRef<string>('');
+  const [keyDisplay, setKeyDisplay] = useState<string>(maskApiKey(storedKey));
+  const [showKey, setShowKey] = useState(false);
+  const [hasUnsavedKey, setHasUnsavedKey] = useState(false);
+
+  const handleChangeText = (text: string) => {
+    // Keep the actual value in a ref, not in state
+    pendingKeyRef.current = text;
+    // Display masked version; show full typed text only when "Show" is active
+    setKeyDisplay(showKey ? text : maskApiKey(text));
+    setHasUnsavedKey(text.trim() !== storedKey);
+  };
+
+  const handleToggleShow = () => {
+    setShowKey((prev) => {
+      const next = !prev;
+      // Re-mask or reveal based on the toggled state
+      if (next) {
+        setKeyDisplay(pendingKeyRef.current || storedKey);
+      } else {
+        setKeyDisplay(maskApiKey(pendingKeyRef.current || storedKey));
+      }
+      return next;
+    });
+  };
 
   const saveKey = () => {
-    const trimmed = keyDraft.trim();
+    const trimmed = pendingKeyRef.current.trim();
     if (trimmed) {
       setApiKey(provider.key, trimmed);
+      pendingKeyRef.current = '';
+      setKeyDisplay(maskApiKey(trimmed));
+      setHasUnsavedKey(false);
     }
   };
 
   const clearKey = () => {
     removeApiKey(provider.key);
-    setKeyDraft('');
+    pendingKeyRef.current = '';
+    setKeyDisplay('');
+    setHasUnsavedKey(false);
   };
 
   return (
@@ -54,15 +95,15 @@ function ProviderCard({ provider }: { provider: { key: LlmProvider; label: strin
       <View style={styles.keyRow}>
         <TextInput
           style={[styles.input, styles.keyInput]}
-          value={keyDraft}
-          onChangeText={setKeyDraft}
+          value={keyDisplay}
+          onChangeText={handleChangeText}
           placeholder="sk-..."
           placeholderTextColor={lightTheme.colors.wave[400]}
           secureTextEntry={!showKey}
           autoCapitalize="none"
           autoCorrect={false}
         />
-        <Pressable style={styles.toggleButton} onPress={() => setShowKey((v) => !v)}>
+        <Pressable style={styles.toggleButton} onPress={handleToggleShow}>
           <Text style={styles.toggleButtonText}>{showKey ? 'Hide' : 'Show'}</Text>
         </Pressable>
       </View>
