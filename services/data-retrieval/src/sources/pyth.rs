@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::sources::health::HealthTracker;
 use crate::types::{
@@ -51,7 +51,15 @@ pub static PYTH_FEED_IDS: phf::Map<&str, &str> = phf::phf_map! {
 fn compute_confidence(price_data: &PriceData) -> Option<f64> {
     let price_int: i64 = price_data.price.parse().ok()?;
     let confidence_int: u64 = price_data.conf.parse().ok()?;
-    let expo = price_data.expo.clamp(-38, 38);
+    let raw_expo = price_data.expo;
+    let expo = raw_expo.clamp(-38, 38);
+    if expo != raw_expo {
+        warn!(
+            original_expo = raw_expo,
+            clamped_expo = expo,
+            "Pyth exponent out of safe range in compute_confidence; clamped"
+        );
+    }
 
     let price_decimal = if expo >= 0 {
         Decimal::from(price_int) * Decimal::from(10i64.pow(expo as u32))
@@ -185,7 +193,16 @@ impl PythClient {
             .context("Failed to parse Pyth price")?;
 
         // Clamp exponent to safe range to prevent overflow on extreme values
-        let expo = price_data.expo.clamp(-38, 38);
+        let raw_expo = price_data.expo;
+        let expo = raw_expo.clamp(-38, 38);
+        if expo != raw_expo {
+            warn!(
+                symbol = symbol,
+                original_expo = raw_expo,
+                clamped_expo = expo,
+                "Pyth exponent out of safe range; clamped to prevent overflow"
+            );
+        }
         let price_decimal = if expo >= 0 {
             Decimal::from(price_int) * Decimal::from(10i64.pow(expo as u32))
         } else {
@@ -270,7 +287,16 @@ impl PythClient {
         for parsed in update.parsed {
             if let Some(symbol) = id_to_symbol.get(parsed.id.as_str()) {
                 let price_int: i64 = parsed.price.price.parse()?;
-                let expo = parsed.price.expo.clamp(-38, 38);
+                let raw_expo = parsed.price.expo;
+                let expo = raw_expo.clamp(-38, 38);
+                if expo != raw_expo {
+                    warn!(
+                        symbol = *symbol,
+                        original_expo = raw_expo,
+                        clamped_expo = expo,
+                        "Pyth batch exponent out of safe range; clamped to prevent overflow"
+                    );
+                }
                 let price_decimal = if expo >= 0 {
                     Decimal::from(price_int) * Decimal::from(10i64.pow(expo as u32))
                 } else {
