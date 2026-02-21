@@ -313,7 +313,7 @@ impl BotRunner {
         // R5-BR-003: Update existing executor's config on subsequent calls,
         // or initialize a new one on first call.
         if let Some(executor) = &mut self.executor {
-            executor.update_execution_config(config.execution.clone());
+            executor.update_execution_config(config.execution);
         } else {
             match TradeExecutor::new(
                 &self.config.data_retrieval_url,

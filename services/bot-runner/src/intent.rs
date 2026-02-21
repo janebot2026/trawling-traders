@@ -362,8 +362,6 @@ impl TradeIntentFinalization {
     }
 }
 
-use uuid;
-
 #[cfg(test)]
 mod tests {
     use super::*;
