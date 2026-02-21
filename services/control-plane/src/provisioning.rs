@@ -601,25 +601,3 @@ pub fn spawn_data_retention_task(pool: sqlx::PgPool) {
         }
     });
 }
-
-/// Idempotency key for bot creation
-///
-/// Format: "bot:{bot_id}:{timestamp}:{nonce}"
-#[derive(Debug, Clone)]
-pub struct IdempotencyKey {
-    pub key: String,
-}
-
-impl IdempotencyKey {
-    pub fn new(bot_id: uuid::Uuid) -> Self {
-        let timestamp = chrono::Utc::now().timestamp_millis();
-        let nonce = rand::random::<u32>();
-        Self {
-            key: format!("bot:{}:{}:{}", bot_id, timestamp, nonce),
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.key
-    }
-}
