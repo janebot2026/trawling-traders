@@ -27,9 +27,11 @@ pub mod provisioning;
 pub mod secrets;
 pub mod webhook;
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
+use uuid::Uuid;
 
 pub use alerting::{AlertConfig, AlertManager};
 pub use db::Db;
@@ -37,6 +39,22 @@ pub use models::*;
 pub use observability::{Logger, MetricsCollector};
 pub use secrets::SecretsManager;
 pub use webhook::{WebhookConfig, WebhookNotifier};
+
+/// Cached subscription entry: (tier_string, is_active, expires_at, bot_count, cached_at)
+type SubscriptionCacheEntry = (
+    String,
+    bool,
+    Option<chrono::DateTime<chrono::Utc>>,
+    i32,
+    Instant,
+);
+
+/// TTL for subscription cache entries (60 seconds).
+///
+/// Keeps per-user subscription state in memory so the DB is not queried on
+/// every authenticated request. The trade-off is that a subscription change
+/// (cancellation, upgrade) takes up to 60 s to propagate.
+pub const SUBSCRIPTION_CACHE_TTL: Duration = Duration::from_secs(60);
 
 /// Application state shared across handlers
 #[derive(Clone)]
@@ -58,6 +76,11 @@ pub struct AppState {
     pub provision_cb: provisioning::CircuitBreaker,
     /// Shared outbound HTTP client for webhook/LLM calls
     pub http_client: reqwest::Client,
+    /// In-memory subscription cache keyed by user_id (60 s TTL).
+    ///
+    /// Avoids a DB round-trip on every authenticated request. Wrapped in
+    /// `Arc<RwLock<…>>` so the `Clone` on `AppState` shares the same map.
+    pub subscription_cache: Arc<RwLock<HashMap<Uuid, SubscriptionCacheEntry>>>,
 }
 
 impl AppState {
@@ -79,6 +102,7 @@ impl AppState {
             jwt_service: None,
             provision_cb: provisioning::create_provision_circuit_breaker(),
             http_client,
+            subscription_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 

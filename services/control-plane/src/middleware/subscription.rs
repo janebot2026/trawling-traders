@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::AuthContext, AppState, SUBSCRIPTION_CACHE_TTL};
 
 /// Subscription tiers
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,10 +92,35 @@ pub async fn subscription_middleware(
 
     let user_id = Uuid::parse_str(&auth.user_id).map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    // Fetch subscription from cedros-pay's subscriptions table.
-    // Tier is derived from product_id (e.g. "trader-pro-monthly" -> Pro).
-    let subscription = sqlx::query_as::<_, (String, String, chrono::DateTime<chrono::Utc>, i64)>(
-        r#"
+    // --- Subscription cache lookup (60 s TTL) ---
+    // Check the in-memory cache first; fall back to DB on miss or expiry.
+    let cached = {
+        let cache = state
+            .subscription_cache
+            .read()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        cache.get(&user_id).cloned()
+    };
+
+    let (tier, expires_at, bot_count) = if let Some((product_id, is_active, exp, count, _cached_at)) =
+        cached.filter(|(_, _, _, _, cached_at)| cached_at.elapsed() < SUBSCRIPTION_CACHE_TTL)
+    {
+        let tier = if is_active {
+            if product_id.contains("enterprise") {
+                SubscriptionTier::Enterprise
+            } else {
+                SubscriptionTier::Pro
+            }
+        } else {
+            SubscriptionTier::Free
+        };
+        (tier, exp, count)
+    } else {
+        // Cache miss or expired: query the DB.
+        // Tier is derived from product_id (e.g. "trader-pro-monthly" -> Pro).
+        let subscription =
+            sqlx::query_as::<_, (String, String, chrono::DateTime<chrono::Utc>, i64)>(
+                r#"
             SELECT s.status, s.product_id, s.current_period_end, COUNT(b.id) as bot_count
             FROM subscriptions s
             LEFT JOIN bots b ON b.user_id = s.user_id::uuid AND b.status != 'destroying'
@@ -103,32 +128,50 @@ pub async fn subscription_middleware(
             AND s.current_period_end > NOW()
             GROUP BY s.id, s.status, s.product_id, s.current_period_end
             "#,
-    )
-    .bind(user_id.to_string())
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!("Subscription query failed: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+            )
+            .bind(user_id.to_string())
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("Subscription query failed: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
-    let (tier, expires_at, bot_count) = match subscription {
-        Some((status, product_id, period_end, count)) => {
-            let tier = if status == "active" {
-                if product_id.contains("enterprise") {
-                    SubscriptionTier::Enterprise
+        let (tier, expires_at, bot_count, product_id_key, is_active) = match subscription {
+            Some((status, product_id, period_end, count)) => {
+                let active = status == "active";
+                let tier = if active {
+                    if product_id.contains("enterprise") {
+                        SubscriptionTier::Enterprise
+                    } else {
+                        SubscriptionTier::Pro
+                    }
                 } else {
-                    SubscriptionTier::Pro
-                }
-            } else {
-                SubscriptionTier::Free
-            };
-            (tier, Some(period_end), count as i32)
+                    SubscriptionTier::Free
+                };
+                (tier, Some(period_end), count as i32, product_id, active)
+            }
+            None => {
+                // No subscription found - treat as free tier
+                (SubscriptionTier::Free, None, 0, String::new(), false)
+            }
+        };
+
+        // Populate cache for next request
+        if let Ok(mut cache) = state.subscription_cache.write() {
+            cache.insert(
+                user_id,
+                (
+                    product_id_key,
+                    is_active,
+                    expires_at,
+                    bot_count,
+                    std::time::Instant::now(),
+                ),
+            );
         }
-        None => {
-            // No subscription found - treat as free tier
-            (SubscriptionTier::Free, None, 0)
-        }
+
+        (tier, expires_at, bot_count)
     };
 
     let sub_context = SubscriptionContext {
