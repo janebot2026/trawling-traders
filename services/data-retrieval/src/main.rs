@@ -16,12 +16,27 @@ const DEFAULT_CORS_ORIGINS: &[&str] = &[
 /// Build a restrictive CORS layer. Origins are read from the
 /// `CORS_ALLOWED_ORIGINS` env var (comma-separated) or fall back to
 /// [`DEFAULT_CORS_ORIGINS`].
+///
+/// Note: `tower-http`'s `CorsLayer` does not expose a per-request rejection
+/// hook, so we cannot log individual blocked origins at request time. Instead
+/// we log any origin strings that fail to parse during configuration so
+/// misconfigured entries are visible at startup. CORS rejections from
+/// disallowed-but-valid origins are silent at the HTTP layer; enabling
+/// `TraceLayer` (already applied) will surface the 403 responses in logs.
 fn build_cors_layer() -> CorsLayer {
     let origins: Vec<HeaderValue> = std::env::var("CORS_ALLOWED_ORIGINS")
         .ok()
         .map(|val| {
             val.split(',')
-                .filter_map(|o| o.trim().parse::<HeaderValue>().ok())
+                .map(|o| o.trim().to_string())
+                .filter_map(|o| {
+                    o.parse::<HeaderValue>().map_err(|_| {
+                        warn!(
+                            origin = %o,
+                            "CORS_ALLOWED_ORIGINS contains an invalid origin that will be ignored"
+                        );
+                    }).ok()
+                })
                 .collect()
         })
         .unwrap_or_else(|| {
