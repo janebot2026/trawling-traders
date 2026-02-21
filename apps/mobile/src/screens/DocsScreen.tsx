@@ -269,8 +269,8 @@ export function DocsScreen() {
 
             <View style={styles.card}>
               <Text style={styles.articleTitle}>{selectedArticle.title}</Text>
-              {selectedArticle.content.map((paragraph) => (
-                <Text key={paragraph} style={styles.articleParagraph}>
+              {selectedArticle.content.map((paragraph, idx) => (
+                <Text key={`p-${idx}`} style={styles.articleParagraph}>
                   {paragraph}
                 </Text>
               ))}
