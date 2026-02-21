@@ -11,6 +11,7 @@ use axum::{
     response::Response,
 };
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use crate::AppState;
@@ -54,8 +55,15 @@ pub async fn bot_auth_middleware(
         .flatten();
 
     match stored_token {
-        Some(token) if token == provided_token => Ok(next.run(request).await),
-        _ => Err(StatusCode::UNAUTHORIZED),
+        Some(token) => {
+            let is_equal = token.as_bytes().ct_eq(provided_token.as_bytes());
+            if bool::from(is_equal) {
+                Ok(next.run(request).await)
+            } else {
+                Err(StatusCode::UNAUTHORIZED)
+            }
+        }
+        None => Err(StatusCode::UNAUTHORIZED),
     }
 }
 
