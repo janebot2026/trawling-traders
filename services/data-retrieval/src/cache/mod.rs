@@ -102,13 +102,3 @@ impl RedisCache {
         Ok(())
     }
 }
-
-// Stub for when Redis is not available
-#[derive(Default)]
-pub struct NoOpCache;
-
-impl NoOpCache {
-    pub fn new() -> Self {
-        Self
-    }
-}
