@@ -14,6 +14,36 @@ use crate::{
     AppState,
 };
 
+/// Retry a fallible async DB operation up to `attempts` times with `delay` between retries.
+///
+/// Only retries on `sqlx::Error::PoolTimedOut` and `sqlx::Error::Io` (transient blips).
+/// Other errors (e.g. RowNotFound) are returned immediately (CP-011).
+async fn with_db_retry<T, F, Fut>(attempts: u32, delay: std::time::Duration, f: F) -> Result<T, sqlx::Error>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, sqlx::Error>>,
+{
+    let mut last_err = None;
+    for attempt in 0..attempts {
+        match f().await {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                let is_transient = matches!(
+                    &e,
+                    sqlx::Error::PoolTimedOut | sqlx::Error::Io(_)
+                );
+                if !is_transient || attempt + 1 == attempts {
+                    return Err(e);
+                }
+                tracing::warn!(attempt, "Transient DB error on config fetch, retrying: {}", e);
+                tokio::time::sleep(delay).await;
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap())
+}
+
 /// GET /bot/:id/config - Bot polls for config updates
 pub async fn get_bot_config(
     State(state): State<Arc<AppState>>,
@@ -21,20 +51,25 @@ pub async fn get_bot_config(
 ) -> Result<Json<BotConfigPayload>, (StatusCode, String)> {
     let start = std::time::Instant::now();
 
-    let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
-        .bind(bot_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        })?;
+    // Initial + 1 retry with 500 ms delay for transient DB blips (CP-011).
+    let bot = with_db_retry(2, std::time::Duration::from_millis(500), || {
+        sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
+            .bind(bot_id)
+            .fetch_one(&state.db)
+    })
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    })?;
 
-    let config = sqlx::query_as::<_, ConfigVersion>("SELECT * FROM config_versions WHERE id = $1")
-        .bind(bot.desired_version_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let config = with_db_retry(2, std::time::Duration::from_millis(500), || {
+        sqlx::query_as::<_, ConfigVersion>("SELECT * FROM config_versions WHERE id = $1")
+            .bind(bot.desired_version_id)
+            .fetch_one(&state.db)
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let config_hash = format!("{}:{}", config.id, config.version);
     let cron_jobs = generate_cron_jobs(&config);
@@ -351,6 +386,20 @@ pub async fn heartbeat(
 
 const MAX_BATCH_SIZE: usize = 500;
 
+/// Valid event_type values — must mirror the `event_type` DB enum (CP-004).
+///
+/// Rejects unknown strings before they reach the database so that the INSERT
+/// cannot fail at the DB level with an ambiguous cast error.
+const VALID_EVENT_TYPES: &[&str] = &[
+    "trade_opened",
+    "trade_closed",
+    "stop_triggered",
+    "config_applied",
+    "config_failed",
+    "error",
+    "status_change",
+];
+
 /// POST /bot/:id/events - Bot pushes events
 pub async fn ingest_events(
     State(state): State<Arc<AppState>>,
@@ -366,6 +415,20 @@ pub async fn ingest_events(
                 MAX_BATCH_SIZE
             ),
         ));
+    }
+
+    // Validate all event_type values against the DB enum allow-list (CP-004).
+    for event in &req.events {
+        if !VALID_EVENT_TYPES.contains(&event.event_type.as_str()) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Invalid event_type '{}'. Allowed: {}",
+                    event.event_type,
+                    VALID_EVENT_TYPES.join(", ")
+                ),
+            ));
+        }
     }
 
     let event_count = req.events.len() as u64;
@@ -442,31 +505,42 @@ pub async fn ingest_events(
 }
 
 /// POST /bot/register - Bot registration on first boot
+///
+/// Uses a single conditional UPDATE (`WHERE status = 'provisioning'`) to atomically
+/// transition the bot from provisioning to online (CP-008). A non-zero `rows_affected`
+/// confirms the transition succeeded; zero means the bot was already registered or
+/// does not exist, both of which return 409 CONFLICT.
 pub async fn register_bot(
     State(state): State<Arc<AppState>>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<RegistrationResponse>, (StatusCode, String)> {
-    let bot = sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
-        .bind(bot_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        })?;
+    // Atomic status transition: only update if the bot is currently 'provisioning'.
+    // This prevents double-registration races without a separate SELECT.
+    let result = sqlx::query(
+        "UPDATE bots SET status = 'online', updated_at = NOW() WHERE id = $1 AND status = 'provisioning'"
+    )
+    .bind(bot_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    })?;
 
-    if bot.status != BotStatus::Provisioning {
-        return Err((
-            StatusCode::CONFLICT,
-            format!("Bot already registered: {:?}", bot.status),
-        ));
+    if result.rows_affected() == 0 {
+        // Either the bot doesn't exist or it was already registered.
+        // Distinguish the two cases with a follow-up SELECT to give a clear error.
+        let exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM bots WHERE id = $1)")
+            .bind(bot_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(false);
+        return Err(if exists {
+            (StatusCode::CONFLICT, "Bot already registered".to_string())
+        } else {
+            (StatusCode::NOT_FOUND, "Bot not found".to_string())
+        });
     }
-
-    sqlx::query("UPDATE bots SET status = 'online', updated_at = NOW() WHERE id = $1")
-        .bind(bot_id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     info!("Bot {} registered successfully", bot_id);
     state.metrics.increment(metrics::BOT_REGISTERED, 1).await;
@@ -484,7 +558,7 @@ pub async fn register_bot(
     .await;
 
     Ok(Json(RegistrationResponse {
-        bot_id: bot.id.to_string(),
+        bot_id: bot_id.to_string(),
         status: "online".to_string(),
         config_url: format!("{}/bot/{}/config", control_plane_url, bot_id),
     }))
