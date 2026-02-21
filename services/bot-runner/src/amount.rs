@@ -148,14 +148,26 @@ pub fn get_tokens_for_focus(focus: &crate::config::AssetFocus) -> Vec<TokenInfo>
     }
 }
 
+/// The Base58 alphabet used by Bitcoin and Solana.
+///
+/// Excludes visually ambiguous characters: `0` (zero), `O` (capital-o),
+/// `I` (capital-i), and `l` (lower-L). `is_alphanumeric()` would wrongly
+/// accept all of these, hence the explicit character set.
+const BASE58_ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+/// Return `true` if every character in `s` is in the Base58 alphabet.
+fn is_valid_base58(s: &str) -> bool {
+    s.chars().all(|c| BASE58_ALPHABET.contains(c))
+}
+
 /// Validate and normalize a mint address or symbol
 /// Returns the canonical mint address
 #[allow(dead_code)] // WIP: mint resolution
 pub fn resolve_mint(symbol_or_mint: &str) -> anyhow::Result<String> {
     if let Some(info) = get_token_info(symbol_or_mint) {
         Ok(info.mint)
-    } else if symbol_or_mint.len() == 44 && symbol_or_mint.chars().all(|c| c.is_alphanumeric()) {
-        // Looks like a base58-encoded mint address
+    } else if symbol_or_mint.len() == 44 && is_valid_base58(symbol_or_mint) {
+        // Looks like a base58-encoded mint address (Solana pubkeys are 32 bytes -> 44 base58 chars)
         // TODO: In production, validate against control-plane or on-chain
         Ok(symbol_or_mint.to_string())
     } else {
@@ -213,5 +225,31 @@ mod tests {
         // Mint address lookup
         let by_mint = get_token_info("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v").unwrap();
         assert_eq!(by_mint.symbol, "USDC");
+    }
+
+    #[test]
+    fn test_is_valid_base58_happy_path() {
+        // Valid Solana mint address (USDC) — no ambiguous chars
+        assert!(is_valid_base58("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+    }
+
+    #[test]
+    fn test_is_valid_base58_rejects_invalid_chars() {
+        // '0' (zero) is not in Base58
+        assert!(!is_valid_base58("0PjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+        // 'O' (capital-o) is not in Base58
+        assert!(!is_valid_base58("OPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+        // 'I' (capital-i) is not in Base58
+        assert!(!is_valid_base58("IPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+        // 'l' (lower-L) is not in Base58
+        assert!(!is_valid_base58("lPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+    }
+
+    #[test]
+    fn test_resolve_mint_rejects_invalid_base58() {
+        // 44 chars but contains '0' — was accepted by the old is_alphanumeric() check
+        let bad_mint = "0PjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+        assert_eq!(bad_mint.len(), 44);
+        assert!(resolve_mint(bad_mint).is_err());
     }
 }
