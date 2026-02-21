@@ -93,7 +93,8 @@ impl BotRunner {
         let portfolio = Portfolio::new(Decimal::from(10000));
 
         // Initialize OpenClaw components
-        let openclaw_client = OpenClawClient::new();
+        let openclaw_client = OpenClawClient::new()
+            .unwrap_or_else(|e| panic!("Failed to initialize OpenClaw client: {}", e));
         let gateway_manager = GatewayManager::new();
 
         // State directory from env or default

@@ -29,8 +29,11 @@ pub struct OpenClawClient {
 impl OpenClawClient {
     /// Create a new OpenClaw client
     ///
-    /// Reads `OPENCLAW_GATEWAY_URL` from environment, defaults to localhost:8090
-    pub fn new() -> Self {
+    /// Reads `OPENCLAW_GATEWAY_URL` from environment, defaults to localhost:8090.
+    ///
+    /// # Errors
+    /// Returns an error if the HTTP client builder fails.
+    pub fn new() -> Result<Self> {
         let gateway_url = std::env::var("OPENCLAW_GATEWAY_URL")
             .unwrap_or_else(|_| DEFAULT_GATEWAY_URL.to_string());
 
@@ -43,33 +46,36 @@ impl OpenClawClient {
             .timeout(Duration::from_secs(timeout_secs))
             .pool_max_idle_per_host(2)
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| anyhow!("Failed to create HTTP client: {}", e))?;
 
         info!(
             "OpenClaw client initialized: url={}, timeout={}s",
             gateway_url, timeout_secs
         );
 
-        Self {
+        Ok(Self {
             gateway_url,
             http_client,
             timeout: Duration::from_secs(timeout_secs),
-        }
+        })
     }
 
     /// Create client with specific URL (for testing)
-    pub fn with_url(gateway_url: String) -> Self {
+    ///
+    /// # Errors
+    /// Returns an error if the HTTP client builder fails.
+    pub fn with_url(gateway_url: String) -> Result<Self> {
         let http_client = Client::builder()
             .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
             .pool_max_idle_per_host(2)
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| anyhow!("Failed to create HTTP client: {}", e))?;
 
-        Self {
+        Ok(Self {
             gateway_url,
             http_client,
             timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
-        }
+        })
     }
 
     /// Request a trading decision from OpenClaw gateway
@@ -208,25 +214,19 @@ impl OpenClawClient {
     }
 }
 
-impl Default for OpenClawClient {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_client_creation() {
-        let client = OpenClawClient::new();
+        let client = OpenClawClient::new().unwrap();
         assert!(client.gateway_url.contains("localhost"));
     }
 
     #[test]
     fn test_client_with_url() {
-        let client = OpenClawClient::with_url("http://custom:9000".to_string());
+        let client = OpenClawClient::with_url("http://custom:9000".to_string()).unwrap();
         assert_eq!(client.gateway_url, "http://custom:9000");
     }
 }
