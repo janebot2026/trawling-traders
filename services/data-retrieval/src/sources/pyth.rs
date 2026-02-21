@@ -156,7 +156,8 @@ impl PythClient {
             .parse()
             .context("Failed to parse Pyth confidence")?;
 
-        let expo = price_data.expo;
+        // Clamp exponent to safe range to prevent overflow on extreme values
+        let expo = price_data.expo.clamp(-38, 38);
         let price_decimal = if expo >= 0 {
             Decimal::from(price_int) * Decimal::from(10i64.pow(expo as u32))
         } else {
@@ -256,7 +257,7 @@ impl PythClient {
         for parsed in update.parsed {
             if let Some(symbol) = id_to_symbol.get(parsed.id.as_str()) {
                 let price_int: i64 = parsed.price.price.parse()?;
-                let expo = parsed.price.expo;
+                let expo = parsed.price.expo.clamp(-38, 38);
                 let price_decimal = if expo >= 0 {
                     Decimal::from(price_int) * Decimal::from(10i64.pow(expo as u32))
                 } else {
