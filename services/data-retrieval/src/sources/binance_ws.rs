@@ -51,6 +51,10 @@ pub struct BinanceWebSocketClient {
     shutdown_tx: Arc<Mutex<watch::Sender<bool>>>,
     /// Atomic counter for unique subscription request IDs
     next_sub_id: Arc<AtomicU64>,
+    /// Monotonically increasing count of price updates that could not be
+    /// delivered (no active receivers).  Exposed via [`dropped_count`] for
+    /// health-endpoint reporting.
+    dropped_count: Arc<AtomicU64>,
 }
 
 impl BinanceWebSocketClient {
@@ -82,6 +86,7 @@ impl BinanceWebSocketClient {
             connected: Arc::new(RwLock::new(true)),
             shutdown_tx,
             next_sub_id: Arc::new(AtomicU64::new(1)),
+            dropped_count: Arc::new(AtomicU64::new(0)),
         };
 
         // Spawn initial message handler.
@@ -108,6 +113,7 @@ impl BinanceWebSocketClient {
             connected: Arc::clone(&self.connected),
             shutdown_tx: Arc::clone(&self.shutdown_tx),
             next_sub_id: Arc::clone(&self.next_sub_id),
+            dropped_count: Arc::clone(&self.dropped_count),
         }
     }
 
@@ -276,15 +282,27 @@ impl BinanceWebSocketClient {
         };
 
         // broadcast::Sender::send returns Err only when there are no active
-        // receivers, which is not an error condition worth logging loudly.
+        // receivers.  We count these drops so health checks can surface them.
         match self.price_tx.send(price_point) {
             Ok(_) => {}
             Err(_) => {
-                debug!("No active price subscribers; broadcast dropped");
+                let total = self.dropped_count.fetch_add(1, Ordering::Relaxed) + 1;
+                warn!(
+                    dropped_total = total,
+                    "Price update dropped: no active subscribers on broadcast channel"
+                );
             }
         }
 
         Ok(())
+    }
+
+    /// Returns the total number of price updates that were dropped because there
+    /// were no active broadcast receivers at the time of the send.
+    ///
+    /// Intended for health-endpoint exposure to surface delivery gaps over time.
+    pub fn dropped_count(&self) -> u64 {
+        self.dropped_count.load(Ordering::Relaxed)
     }
 
     /// Subscribe to the price broadcast channel.
