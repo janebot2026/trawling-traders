@@ -217,8 +217,13 @@ jobs:
             set -e
             echo "=== Trawling Traders Deployment ==="
 
-            # Login to Docker Hub (--password-stdin avoids credential in process listing)
-            echo '${{ secrets.DOCKER_PASSWORD }}' | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+            # Login to Docker Hub using --password-stdin to avoid the credential appearing
+            # in the process listing. The password is passed via a shell variable rather
+            # than direct echo-substitution to prevent issues if the value contains
+            # single-quote characters after GitHub Actions template expansion.
+            DOCKER_PASS='${{ secrets.DOCKER_PASSWORD }}'
+            printf '%s' "$DOCKER_PASS" | docker login -u '${{ secrets.DOCKER_USERNAME }}' --password-stdin
+            unset DOCKER_PASS
 
             # Create Docker network if it doesn't exist
             docker network create trawling-traders-network 2>/dev/null || true
@@ -226,8 +231,10 @@ jobs:
             # Ensure PostgreSQL is on the network
             docker network connect trawling-traders-network trawling-traders-db 2>/dev/null || true
 
-            # Deploy data-retrieval only if its build job succeeded
-            if [[ "${{ needs.build-data-retrieval.result }}" == "success" ]] && docker pull ${{ env.DATA_RETRIEVAL_IMAGE }} 2>/dev/null; then
+            # Deploy data-retrieval only if its build job succeeded.
+            # Pull the SHA-tagged image to guarantee we run the exact image built
+            # in this pipeline run rather than whatever :latest resolves to.
+            if [[ "${{ needs.build-data-retrieval.result }}" == "success" ]] && docker pull ${{ env.DATA_RETRIEVAL_IMAGE_SHA }} 2>/dev/null; then
               echo "Deploying data-retrieval..."
               docker stop trawling-traders-data-retrieval 2>/dev/null || true
               docker rm trawling-traders-data-retrieval 2>/dev/null || true
@@ -238,13 +245,15 @@ jobs:
                 -p 127.0.0.1:8081:8080 \
                 --env ENVIRONMENT="${{ secrets.ENVIRONMENT }}" \
                 --env PORT=8080 \
-                ${{ env.DATA_RETRIEVAL_IMAGE }}
+                ${{ env.DATA_RETRIEVAL_IMAGE_SHA }}
 
               echo "data-retrieval deployed successfully"
             fi
 
-            # Deploy control-plane only if its build job succeeded
-            if [[ "${{ needs.build-control-plane.result }}" == "success" ]] && docker pull ${{ env.CONTROL_PLANE_IMAGE }} 2>/dev/null; then
+            # Deploy control-plane only if its build job succeeded.
+            # Pull the SHA-tagged image to guarantee we run the exact image built
+            # in this pipeline run rather than whatever :latest resolves to.
+            if [[ "${{ needs.build-control-plane.result }}" == "success" ]] && docker pull ${{ env.CONTROL_PLANE_IMAGE_SHA }} 2>/dev/null; then
               echo "Deploying control-plane..."
               docker stop trawling-traders-control-plane 2>/dev/null || true
               docker rm trawling-traders-control-plane 2>/dev/null || true
@@ -265,7 +274,7 @@ jobs:
                 -p 127.0.0.1:3001:3000 \
                 --env PORT=3000 \
                 --env-file "$CP_ENV_FILE" \
-                ${{ env.CONTROL_PLANE_IMAGE }}
+                ${{ env.CONTROL_PLANE_IMAGE_SHA }}
 
               rm -f "$CP_ENV_FILE"
               echo "control-plane deployed successfully"
