@@ -72,7 +72,9 @@ export function HomeOverviewScreen() {
             try {
               const response = await api.bot.getMetrics(bot.id);
               return response.metrics.slice(-30);
-            } catch {
+            } catch (metricsErr) {
+              // MB-002: surface per-bot fetch failures so they are not silently dropped
+              console.warn(`[HomeOverview] Failed to fetch metrics for bot ${bot.id}:`, metricsErr);
               return [];
             }
           })
@@ -82,7 +84,9 @@ export function HomeOverviewScreen() {
             try {
               const response = await api.bot.getEvents(bot.id);
               return response.events;
-            } catch {
+            } catch (eventsErr) {
+              // MB-002: surface per-bot fetch failures so they are not silently dropped
+              console.warn(`[HomeOverview] Failed to fetch events for bot ${bot.id}:`, eventsErr);
               return [];
             }
           })
