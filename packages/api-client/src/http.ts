@@ -10,7 +10,7 @@ import {
 } from './errors';
 
 export const API_BASE_URL = `${API_URL}/v1`;
-export const DATA_API_URL = process.env.DATA_API_URL || 'http://localhost:8080';
+export const DATA_API_URL = process.env.EXPO_PUBLIC_DATA_API_URL || process.env.DATA_API_URL || 'http://localhost:8080';
 
 // Pluggable auth provider (configured by host app)
 export type AuthTokenProvider = () => Promise<string | null>;
