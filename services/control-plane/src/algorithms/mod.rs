@@ -97,11 +97,11 @@ impl Default for AlgorithmParams {
         // Use string parsing for Decimal literals
         Self {
             lookback_period: 20,
-            threshold: Decimal::from_str("0.5").unwrap(),
-            stop_loss_pct: Decimal::from_str("0.05").unwrap(),
-            take_profit_pct: Decimal::from_str("0.10").unwrap(),
-            max_position_pct: Decimal::from_str("0.10").unwrap(),
-            min_confidence: Decimal::from_str("0.6").unwrap(),
+            threshold: Decimal::from_str("0.5").unwrap_or_default(),
+            stop_loss_pct: Decimal::from_str("0.05").unwrap_or_default(),
+            take_profit_pct: Decimal::from_str("0.10").unwrap_or_default(),
+            max_position_pct: Decimal::from_str("0.10").unwrap_or_default(),
+            min_confidence: Decimal::from_str("0.6").unwrap_or_default(),
             extra: serde_json::json!({}),
         }
     }
@@ -149,11 +149,11 @@ impl AlgorithmFactory {
     fn beginner_defaults() -> AlgorithmParams {
         AlgorithmParams {
             lookback_period: 50,
-            threshold: Decimal::from_str("0.7").unwrap(),
-            stop_loss_pct: Decimal::from_str("0.03").unwrap(),
-            take_profit_pct: Decimal::from_str("0.06").unwrap(),
-            max_position_pct: Decimal::from_str("0.05").unwrap(),
-            min_confidence: Decimal::from_str("0.75").unwrap(),
+            threshold: Decimal::from_str("0.7").unwrap_or_default(),
+            stop_loss_pct: Decimal::from_str("0.03").unwrap_or_default(),
+            take_profit_pct: Decimal::from_str("0.06").unwrap_or_default(),
+            max_position_pct: Decimal::from_str("0.05").unwrap_or_default(),
+            min_confidence: Decimal::from_str("0.75").unwrap_or_default(),
             extra: serde_json::json!({
                 "trend_ema_fast": 12,
                 "trend_ema_slow": 26,
@@ -169,11 +169,11 @@ impl AlgorithmFactory {
     fn tweaker_defaults() -> AlgorithmParams {
         AlgorithmParams {
             lookback_period: 30,
-            threshold: Decimal::from_str("0.5").unwrap(),
-            stop_loss_pct: Decimal::from_str("0.05").unwrap(),
-            take_profit_pct: Decimal::from_str("0.10").unwrap(),
-            max_position_pct: Decimal::from_str("0.10").unwrap(),
-            min_confidence: Decimal::from_str("0.60").unwrap(),
+            threshold: Decimal::from_str("0.5").unwrap_or_default(),
+            stop_loss_pct: Decimal::from_str("0.05").unwrap_or_default(),
+            take_profit_pct: Decimal::from_str("0.10").unwrap_or_default(),
+            max_position_pct: Decimal::from_str("0.10").unwrap_or_default(),
+            min_confidence: Decimal::from_str("0.60").unwrap_or_default(),
             extra: serde_json::json!({
                 "trend_ema_fast": 9,
                 "trend_ema_slow": 21,
@@ -189,11 +189,11 @@ impl AlgorithmFactory {
     fn quant_lite_defaults() -> AlgorithmParams {
         AlgorithmParams {
             lookback_period: 14,
-            threshold: Decimal::from_str("0.3").unwrap(),
-            stop_loss_pct: Decimal::from_str("0.08").unwrap(),
-            take_profit_pct: Decimal::from_str("0.15").unwrap(),
-            max_position_pct: Decimal::from_str("0.20").unwrap(),
-            min_confidence: Decimal::from_str("0.45").unwrap(),
+            threshold: Decimal::from_str("0.3").unwrap_or_default(),
+            stop_loss_pct: Decimal::from_str("0.08").unwrap_or_default(),
+            take_profit_pct: Decimal::from_str("0.15").unwrap_or_default(),
+            max_position_pct: Decimal::from_str("0.20").unwrap_or_default(),
+            min_confidence: Decimal::from_str("0.45").unwrap_or_default(),
             extra: serde_json::json!({
                 "trend_ema_fast": 5,
                 "trend_ema_slow": 15,
@@ -214,17 +214,17 @@ impl AlgorithmFactory {
         risk_caps: &RiskCaps,
     ) -> AlgorithmParams {
         let multiplier = match strictness {
-            Strictness::Low => Decimal::from_str("1.2").unwrap(),
+            Strictness::Low => Decimal::from_str("1.2").unwrap_or_default(),
             Strictness::Medium => Decimal::ONE,
-            Strictness::High => Decimal::from_str("0.8").unwrap(),
+            Strictness::High => Decimal::from_str("0.8").unwrap_or_default(),
         };
 
         // Adjust threshold (higher = stricter)
-        params.threshold = (params.threshold * multiplier).min(Decimal::from_str("0.95").unwrap());
+        params.threshold = (params.threshold * multiplier).min(Decimal::from_str("0.95").unwrap_or_default());
 
         // Adjust min confidence (higher = stricter)
         params.min_confidence =
-            (params.min_confidence * multiplier).min(Decimal::from_str("0.95").unwrap());
+            (params.min_confidence * multiplier).min(Decimal::from_str("0.95").unwrap_or_default());
 
         // Apply risk caps
         let max_pos_from_caps =
