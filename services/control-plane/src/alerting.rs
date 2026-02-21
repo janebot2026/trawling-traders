@@ -156,6 +156,24 @@ impl AlertManager {
     /// Record that an alert fired
     async fn record_fired(&self, alert_key: String) {
         let mut state = self.alert_state.write().await;
+
+        // Evict oldest entries when map exceeds 10K to prevent unbounded growth
+        if state.len() > 10_000 {
+            let mut entries: Vec<_> = state
+                .iter()
+                .map(|(k, v)| (k.clone(), v.last_fired))
+                .collect();
+            entries.sort_by_key(|(_, t)| *t);
+            let to_remove: Vec<_> = entries
+                .into_iter()
+                .take(state.len() - 5_000)
+                .map(|(k, _)| k)
+                .collect();
+            for k in to_remove {
+                state.remove(&k);
+            }
+        }
+
         let entry = state.entry(alert_key).or_insert(AlertState {
             last_fired: chrono::Utc::now(),
             count: 0,
@@ -384,6 +402,15 @@ impl AlertManager {
     /// Record a trade failure and check for repeated failures
     pub async fn record_trade_failure(&self, bot_id: &str) -> Option<AlertType> {
         let mut failures = self.trade_failures.write().await;
+
+        // Evict oldest entries when map exceeds 10K to prevent unbounded growth
+        if failures.len() > 10_000 {
+            let keys: Vec<_> = failures.keys().cloned().collect();
+            for k in keys.into_iter().take(failures.len() - 5_000) {
+                failures.remove(&k);
+            }
+        }
+
         let count = failures.entry(bot_id.to_string()).or_insert(0);
         *count += 1;
 
