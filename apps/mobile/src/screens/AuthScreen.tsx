@@ -33,6 +33,15 @@ type LoginStep = 'email' | 'password';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** MB-003: Only open URLs that start with https:// to prevent open-redirect abuse. */
+function openSafeUrl(url: string): void {
+  if (!url.startsWith('https://')) {
+    console.warn('[AuthScreen] Blocked non-https URL from Linking.openURL:', url);
+    return;
+  }
+  Linking.openURL(url);
+}
+
 export function AuthScreen() {
   const navigation = useNavigation<AuthScreenNavigationProp>();
   const insets = useSafeAreaInsets();
@@ -339,7 +348,7 @@ export function AuthScreen() {
                   <Pressable
                     style={styles.inlineLink}
                     onPress={() =>
-                      Linking.openURL(`${CEDROS_CONFIG.serverUrl}/auth/forgot-password`)
+                      openSafeUrl(`${CEDROS_CONFIG.serverUrl}/auth/forgot-password`)
                     }
                   >
                     <Text style={styles.inlineLinkText}>Forgot password?</Text>
@@ -453,15 +462,15 @@ export function AuthScreen() {
             <Text style={styles.reassurance}>Your bots run on your infrastructure. We don&apos;t touch your keys.</Text>
 
             <View style={styles.metaLinksRow}>
-              <Pressable onPress={() => Linking.openURL('https://trawlingtraders.com/terms')}>
+              <Pressable onPress={() => openSafeUrl('https://trawlingtraders.com/terms')}>
                 <Text style={styles.metaLink}>Terms</Text>
               </Pressable>
               <Text style={styles.metaDivider}>•</Text>
-              <Pressable onPress={() => Linking.openURL('https://trawlingtraders.com/privacy')}>
+              <Pressable onPress={() => openSafeUrl('https://trawlingtraders.com/privacy')}>
                 <Text style={styles.metaLink}>Privacy</Text>
               </Pressable>
               <Text style={styles.metaDivider}>•</Text>
-              <Pressable onPress={() => Linking.openURL('https://trawlingtraders.com/security')}>
+              <Pressable onPress={() => openSafeUrl('https://trawlingtraders.com/security')}>
                 <Text style={styles.metaLink}>Security</Text>
               </Pressable>
             </View>

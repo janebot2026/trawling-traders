@@ -69,7 +69,13 @@ export function BillingScreen() {
   };
 
   const openCheckout = () => {
-    Linking.openURL(`${API_URL}/paywall/v1/shop`);
+    const url = `${API_URL}/paywall/v1/shop`;
+    // MB-003: validate URL starts with https:// before opening to prevent open-redirect abuse
+    if (!url.startsWith('https://')) {
+      console.warn('[BillingScreen] Blocked non-https URL from Linking.openURL:', url);
+      return;
+    }
+    Linking.openURL(url);
   };
 
   if (isLoading) {
