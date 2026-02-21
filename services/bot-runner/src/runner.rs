@@ -528,6 +528,25 @@ impl BotRunner {
 
         // Validate and execute each intent
         for intent in &plan.intents {
+            // BR-008: Reject structurally invalid intents before risk validation
+            if intent.action != TradeAction::Hold {
+                if intent.input_mint == intent.output_mint {
+                    warn!(
+                        "Intent {} rejected: input_mint == output_mint ({})",
+                        intent.intent_id, intent.input_mint
+                    );
+                    continue;
+                }
+                if intent.amount_usd <= Decimal::ZERO {
+                    warn!(
+                        "Intent {} rejected: amount_usd must be positive, got {}",
+                        intent.intent_id, intent.amount_usd
+                    );
+                    continue;
+                }
+                // rust_decimal::Decimal cannot represent NaN/Inf, so no finiteness check needed
+            }
+
             // Validate against hard risk rails
             let validation = self.validate_intent(intent, &config, &tick_snapshot, &committed_usd);
 

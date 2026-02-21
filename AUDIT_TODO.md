@@ -155,10 +155,10 @@ Generated from `docs/audit-report.md` on 2026-02-20. Items ordered by severity.
   - Fix: Track applied version_id; skip re-apply if already applied
   - Test: Ack failure then retry doesn't duplicate init
 
-- [ ] **BR-008** OpenClaw intents not validated (same mint, negative amount)
+- [x] **BR-008** OpenClaw intents not validated (same mint, negative amount)
   - Files: `services/bot-runner/src/runner.rs`
-  - Fix: Add intent validation: input != output, amount > 0, bounds check
-  - Test: Self-trade and negative amount rejected
+  - Fix: Added structural validation before risk rail checks: reject same-mint trades and non-positive amounts. Hold intents exempt.
+  - Verified: `cargo test` — 57/57 pass; `cargo check` clean
 
 - [ ] **BR-009** claw-trader path not checked for execute permissions
   - Files: `services/bot-runner/src/executor.rs`
