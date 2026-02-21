@@ -1,5 +1,9 @@
 # Trawling Traders - Frontend Architecture
 
+> **DEPRECATED (2026-02-20):** This document was written during initial planning and
+> references APIs, patterns, and screen counts that no longer reflect the current
+> codebase. Refer to the source code and inline documentation for accurate details.
+
 *Last updated: 2026-02-02*
 
 ## Overview
