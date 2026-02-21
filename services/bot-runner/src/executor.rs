@@ -39,6 +39,8 @@ pub struct QuoteCache {
     entries: Arc<RwLock<HashMap<QuoteCacheKey, QuoteCacheEntry>>>,
     ttl_secs: u64,
     max_size: usize,
+    /// Handle to the running cleanup task so it can be cancelled on restart
+    cleanup_handle: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl QuoteCache {
@@ -47,6 +49,7 @@ impl QuoteCache {
             entries: Arc::new(RwLock::new(HashMap::new())),
             ttl_secs,
             max_size: 10000,
+            cleanup_handle: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -86,25 +89,27 @@ impl QuoteCache {
 
         let mut entries = self.entries.write().await;
 
-        // Batch eviction: when full, remove 10% oldest entries at once
-        // This amortizes the O(n) scan cost instead of doing it on every insert
+        // Retain-based eviction: when full, remove expired entries first,
+        // then if still over capacity, drop entries older than half the TTL.
         if entries.len() >= self.max_size {
-            let evict_count = (self.max_size / 10).max(1);
-            let mut items: Vec<_> = entries
-                .iter()
-                .map(|(k, e)| (k.clone(), e.cached_at))
-                .collect();
-            items.sort_by_key(|(_, t)| *t);
+            let before = entries.len();
+            // First pass: remove expired entries
+            entries.retain(|_, entry| entry.cached_at.elapsed().as_secs() < self.ttl_secs);
 
-            for (k, _) in items.into_iter().take(evict_count) {
-                entries.remove(&k);
+            // If still over capacity, use a tighter cutoff (half TTL)
+            if entries.len() >= self.max_size {
+                let cutoff = Duration::from_secs(self.ttl_secs / 2);
+                entries.retain(|_, entry| entry.cached_at.elapsed() < cutoff);
             }
 
-            debug!(
-                "Quote cache batch eviction: removed {} entries, {} remaining",
-                evict_count,
-                entries.len()
-            );
+            let evicted = before - entries.len();
+            if evicted > 0 {
+                debug!(
+                    "Quote cache eviction: removed {} entries, {} remaining",
+                    evicted,
+                    entries.len()
+                );
+            }
         }
 
         entries.insert(
@@ -132,12 +137,24 @@ impl QuoteCache {
     }
 
     pub fn spawn_cleanup_task(self) {
-        tokio::spawn(async move {
+        let cleanup_handle = self.cleanup_handle.clone();
+        let cache = self.clone();
+        let handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
             loop {
                 interval.tick().await;
-                self.cleanup().await;
+                cache.cleanup().await;
             }
+        });
+
+        // Abort previous cleanup task before storing the new handle
+        let prev_handle = cleanup_handle.clone();
+        tokio::spawn(async move {
+            let mut guard = prev_handle.lock().await;
+            if let Some(old) = guard.take() {
+                old.abort();
+            }
+            *guard = Some(handle);
         });
     }
 }
@@ -411,7 +428,16 @@ impl TradeExecutor {
                 ])
                 .await?;
 
-            let price = ClawTraderPrice {
+            let out_amount = result["outAmount"]
+                .as_str()
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Malformed claw-trader response: missing or invalid outAmount field"
+                    )
+                })?;
+
+            ClawTraderPrice {
                 input_mint: result["inputMint"]
                     .as_str()
                     .unwrap_or(input_mint)
@@ -424,14 +450,10 @@ impl TradeExecutor {
                     .as_str()
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(amount),
-                out_amount: result["outAmount"]
-                    .as_str()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0),
+                out_amount,
                 price_impact_pct: result["priceImpactPct"].as_f64().unwrap_or(0.0),
                 fee_bps: result["feeBps"].as_u64().unwrap_or(69),
-            };
-            price
+            }
         };
 
         // Cache the result
