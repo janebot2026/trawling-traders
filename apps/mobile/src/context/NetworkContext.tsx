@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { lightTheme } from '../theme';
+import { REFRESH_INTERVALS } from '../config/intervals';
 
 interface NetworkContextValue {
   isOnline: boolean;
@@ -85,8 +86,8 @@ export function NetworkProvider({ children }: { children: React.ReactNode }) {
     // Check immediately on mount
     checkConnection();
 
-    // Check every 30 seconds while app is active
-    checkIntervalRef.current = setInterval(checkConnection, 30000);
+    // Check periodically while app is active
+    checkIntervalRef.current = setInterval(checkConnection, REFRESH_INTERVALS.NETWORK_CHECK);
 
     return () => {
       if (checkIntervalRef.current) {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { dataApi } from '@trawling-traders/api-client';
+import { REFRESH_INTERVALS } from '../config/intervals';
 
 interface Price {
   symbol: string;
@@ -16,7 +17,7 @@ interface UsePriceOptions {
 }
 
 export function usePrice(options: UsePriceOptions) {
-  const { symbol, quote = 'USD', refreshInterval = 30000 } = options;
+  const { symbol, quote = 'USD', refreshInterval = REFRESH_INTERVALS.PORTFOLIO } = options;
   const [price, setPrice] = useState<Price | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -54,7 +55,7 @@ interface UsePricesBatchOptions {
 }
 
 export function usePricesBatch(options: UsePricesBatchOptions) {
-  const { symbols, refreshInterval = 30000 } = options;
+  const { symbols, refreshInterval = REFRESH_INTERVALS.PORTFOLIO } = options;
   const [prices, setPrices] = useState<Record<string, Price>>({});
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
