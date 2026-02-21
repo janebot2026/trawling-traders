@@ -84,6 +84,8 @@ pub struct PriceAggregator {
     stock_sources: Vec<Arc<dyn PriceDataSource>>,
     metal_sources: Vec<Arc<dyn PriceDataSource>>,
     realtime_sources: Vec<Arc<BinanceWebSocketClient>>,
+    /// Direct reference to PythClient for batch price fetches (R5-DR-002).
+    pyth_client: Option<PythClient>,
     cache: Option<cache::RedisCache>,
     latest_prices: Arc<RwLock<HashMap<String, PricePoint>>>, // symbol -> price
 }
@@ -101,6 +103,7 @@ impl PriceAggregator {
             stock_sources: Vec::new(),
             metal_sources: Vec::new(),
             realtime_sources: Vec::new(),
+            pyth_client: None,
             cache: None,
             latest_prices: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -116,6 +119,11 @@ impl PriceAggregator {
 
     pub fn add_metal_source(&mut self, source: Arc<dyn PriceDataSource>) {
         self.metal_sources.push(source);
+    }
+
+    /// Set the Pyth client for efficient batch price lookups (stocks/metals).
+    pub fn set_pyth_client(&mut self, client: PythClient) {
+        self.pyth_client = Some(client);
     }
 
     pub fn add_realtime_source(&mut self, source: Arc<BinanceWebSocketClient>) {
@@ -398,14 +406,24 @@ impl PriceAggregator {
         self.get_price_realtime(symbol, "USD").await
     }
 
-    /// Get batch prices for multiple stocks concurrently.
+    /// Get batch prices for multiple stocks in a single Pyth HTTP request.
     ///
-    /// All symbols are fetched in parallel via `join_all`, replacing the previous
-    /// sequential loop that blocked on each HTTP round-trip before starting the next.
+    /// When a [`PythClient`] is configured (via [`set_pyth_client`]), this uses
+    /// the native batch endpoint which fetches all symbols in one round-trip.
+    /// Falls back to concurrent individual lookups otherwise.
     pub async fn get_stock_prices_batch(
         &self,
         symbols: &[&str],
     ) -> Result<HashMap<String, PricePoint>> {
+        // Prefer Pyth batch endpoint for a single HTTP round-trip
+        if let Some(ref pyth) = self.pyth_client {
+            return pyth
+                .get_prices_batch(symbols)
+                .await
+                .map_err(|e| DataRetrievalError::SourceUnhealthy(e.to_string()));
+        }
+
+        // Fallback: concurrent individual lookups
         let futures: Vec<_> = symbols
             .iter()
             .map(|&symbol| async move { (symbol, self.get_stock_price(symbol).await) })

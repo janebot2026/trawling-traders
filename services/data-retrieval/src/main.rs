@@ -1,5 +1,6 @@
 use axum::http::{header, HeaderValue, Method};
-use axum::{routing::get, Router};
+use axum::{middleware, routing::get, Extension, Router};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -88,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
     aggregator.add_crypto_source(coingecko);
     aggregator.add_stock_source(Arc::new(pyth_client.clone()));
     aggregator.add_metal_source(Arc::new(pyth_client.clone()));
+    aggregator.set_pyth_client(pyth_client.clone());
     if let Some(ws) = binance_ws {
         aggregator.add_realtime_source(ws);
         aggregator.start_realtime_consumer().await;
@@ -113,6 +115,19 @@ async fn main() -> anyhow::Result<()> {
         pyth_client,
     });
 
+    // R5-DR-006: In-memory IP-based rate limiter (60 req/min per IP)
+    let rate_limiter = rate_limit::RateLimiter::new(60, std::time::Duration::from_secs(60));
+    // Background cleanup task to evict stale entries every 5 minutes
+    {
+        let limiter = rate_limiter.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                limiter.cleanup().await;
+            }
+        });
+    }
+
     // Build router — static routes must come before parameterized `{symbol}` to avoid shadowing
     let app = Router::new()
         .route(
@@ -123,6 +138,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/prices/{symbol}", get(handlers::get_price))
         .route("/prices", get(handlers::get_price))
         .route("/health", get(handlers::health_check))
+        .layer(middleware::from_fn(rate_limit::rate_limit_middleware))
+        .layer(Extension(rate_limiter))
         .layer(build_cors_layer())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -136,9 +153,14 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
     info!("🚀 Data Retrieval Service listening on port {}", port);
 
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
 
 mod handlers;
+mod rate_limit;
