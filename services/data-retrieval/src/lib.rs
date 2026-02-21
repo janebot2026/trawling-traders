@@ -227,6 +227,14 @@ impl PriceAggregator {
                             }
 
                             // If still over max size, retain only the newest MAX_CACHE_SIZE entries.
+                            // Performance note (DR-008): the sort below is O(n log n) where
+                            // n ≤ MAX_CACHE_SIZE (10,000).  The cache holds one entry per
+                            // trading symbol; the realistic population is a few hundred
+                            // entries at most, making this negligible.  A bounded data
+                            // structure (e.g. `lru` crate) would be O(1) per eviction but
+                            // would add an external dependency for no measurable benefit at
+                            // this scale.  Revisit if MAX_CACHE_SIZE grows past ~100,000.
+                            //
                             // We find the timestamp cutoff without draining the whole map:
                             // collect timestamps, sort, take the cutoff, then retain in-place.
                             if p.len() > MAX_CACHE_SIZE {
