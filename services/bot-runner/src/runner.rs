@@ -688,7 +688,28 @@ impl BotRunner {
         })
     }
 
-    /// Reset daily PnL and trade count if the UTC date has changed
+    /// Reset daily PnL and trade count if the UTC calendar date has changed.
+    ///
+    /// # Design note — UTC reset boundary (BR-003)
+    ///
+    /// The reset compares calendar *dates* in UTC, not local or trader time.
+    /// This means the boundary always falls at 00:00 UTC regardless of the
+    /// operator's timezone. This is intentional: the system has a single,
+    /// consistent, unambiguous reset point that is independent of where the
+    /// bot is deployed.
+    ///
+    /// The tradeoff: a trader who knows the bot resets at UTC midnight could
+    /// exploit the boundary (e.g. take a loss just before midnight and
+    /// immediately resume trading). Mitigations in place:
+    ///
+    /// - The reset time is determined server-side by the bot process clock,
+    ///   not by any value supplied by the trader or OpenClaw.
+    /// - `max_daily_loss_usd` and `max_trades_per_day` apply independently
+    ///   per reset window, limiting the magnitude of any single-window damage.
+    ///
+    /// If per-trader timezone offsets are required in future, add a
+    /// `pnl_reset_timezone_offset_hours: i8` field to `RiskCaps`, default 0,
+    /// and apply it here via `chrono::FixedOffset`.
     fn maybe_reset_daily_pnl(&mut self) {
         let today = chrono::Utc::now().date_naive();
         if today != self.pnl_reset_date {
