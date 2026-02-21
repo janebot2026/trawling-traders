@@ -100,38 +100,6 @@ impl TimeFrame {
     }
 }
 
-/// On-chain metric types
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum OnChainMetricType {
-    ExchangeInflow,
-    ExchangeOutflow,
-    ExchangeNetflow,
-    MinerOutflow,
-    WhaleTransactions,
-    ActiveAddresses,
-    TransactionCount,
-    SupplyHeldByLongTermHolders,
-}
-
-/// On-chain metric data point
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OnChainMetric {
-    pub asset: String,
-    pub metric_type: OnChainMetricType,
-    pub value: f64,
-    pub timestamp: DateTime<Utc>,
-}
-
-/// Social sentiment data
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SentimentData {
-    pub asset: String,
-    pub platform: String,     // "twitter", "reddit", "lunarcrush"
-    pub sentiment_score: f64, // -1.0 to 1.0
-    pub volume: u64,          // Mention count
-    pub timestamp: DateTime<Utc>,
-}
-
 /// Multi-source aggregated price
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregatedPrice {
