@@ -84,6 +84,12 @@ pub struct BotRunner {
     realized_pnl_today: Decimal,
     /// Date of last PnL reset (for daily reset)
     pnl_reset_date: chrono::NaiveDate,
+    /// BR-007: version_id of the last successfully applied config.
+    ///
+    /// Tracked independently of `current_config` so that if `ack_config` fails
+    /// (network blip, 5xx), the runner does not re-apply the same config on the
+    /// next poll cycle. Applied before the ack attempt; survives ack failures.
+    last_applied_version_id: Option<uuid::Uuid>,
 }
 
 impl BotRunner {
@@ -128,6 +134,7 @@ impl BotRunner {
             last_trade_outcome: None,
             realized_pnl_today: Decimal::ZERO,
             pnl_reset_date: chrono::Utc::now().date_naive(),
+            last_applied_version_id: None,
         }
     }
 
@@ -282,23 +289,43 @@ impl BotRunner {
     async fn poll_config(&mut self) -> anyhow::Result<()> {
         match self.client.get_config().await? {
             Some(config) => {
-                // Check if config changed
-                let is_new = self
-                    .current_config
-                    .as_ref()
-                    .map(|c| c.version_id != config.version_id)
-                    .unwrap_or(true);
+                // BR-007: Compare against `last_applied_version_id` rather than
+                // `current_config.version_id`. This field is set immediately after a
+                // successful apply, *before* the ack attempt. If the ack fails the
+                // version is still recorded here, so the runner will not re-apply the
+                // same config on the next poll cycle.
+                let already_applied = self
+                    .last_applied_version_id
+                    .map(|id| id == config.version_id)
+                    .unwrap_or(false);
 
-                if is_new {
-                    info!(
-                        "New config received: version {} ({})",
-                        config.version, config.version_id
+                if already_applied {
+                    debug!(
+                        "Config version {} already applied, skipping",
+                        config.version_id
                     );
+                    return Ok(());
+                }
 
-                    // Apply first, then ack — avoids silent mismatch if apply fails
-                    let version_id = config.version_id;
-                    self.apply_config(config).await?;
-                    self.client.ack_config(version_id).await?;
+                info!(
+                    "New config received: version {} ({})",
+                    config.version, config.version_id
+                );
+
+                // Apply first, then record the applied version, then ack.
+                // Recording before the ack means a failed ack will not cause
+                // re-application on the next poll.
+                let version_id = config.version_id;
+                self.apply_config(config).await?;
+                self.last_applied_version_id = Some(version_id);
+
+                // Ack failure is non-fatal: the control plane may retry later.
+                // We log it but do not propagate — the config is correctly applied.
+                if let Err(e) = self.client.ack_config(version_id).await {
+                    warn!(
+                        "Config ack failed for version {} (will retry next poll): {}",
+                        version_id, e
+                    );
                 }
             }
             None => {
@@ -479,12 +506,17 @@ impl BotRunner {
             return Ok(());
         }
 
+        // BR-004: Compute a single portfolio snapshot for the whole tick. This
+        // snapshot is reused by build_decision_context, write_state_file, and
+        // validate_intent, eliminating 3+ redundant snapshot() calls per tick.
+        let tick_snapshot = self.portfolio.snapshot();
+
         // Update status
         self.status = RunnerStatus::Deciding;
-        self.write_state_file().await.ok();
+        self.write_state_file(Some(&tick_snapshot)).await.ok();
 
         // Build decision context
-        let context = self.build_decision_context(&config).await?;
+        let context = self.build_decision_context(&config, &tick_snapshot).await?;
 
         // Write context to file for debugging
         self.write_context_file(&context).await.ok();
@@ -495,7 +527,7 @@ impl BotRunner {
             Err(e) => {
                 warn!("OpenClaw decision request failed: {}", e);
                 self.status = RunnerStatus::Idle;
-                self.write_state_file().await.ok();
+                self.write_state_file(Some(&tick_snapshot)).await.ok();
                 return Ok(());
             }
         };
@@ -511,11 +543,7 @@ impl BotRunner {
 
         // Update status
         self.status = RunnerStatus::Executing;
-        self.write_state_file().await.ok();
-
-        // BR-015: Compute portfolio snapshot once before the intent loop so that
-        // validate_intent does not call portfolio.snapshot() for every intent.
-        let tick_snapshot = self.portfolio.snapshot();
+        self.write_state_file(Some(&tick_snapshot)).await.ok();
 
         // BR-010: Collect all events during the tick; flush in a single HTTP call.
         let mut tick_events: Vec<EventInput> = Vec::new();
@@ -629,15 +657,20 @@ impl BotRunner {
 
         // Update status back to idle
         self.status = RunnerStatus::Idle;
-        self.write_state_file().await.ok();
+        self.write_state_file(Some(&tick_snapshot)).await.ok();
 
         Ok(())
     }
 
-    /// Build decision context to send to OpenClaw
-    async fn build_decision_context(&self, config: &BotConfig) -> anyhow::Result<DecisionContext> {
-        let snapshot = self.portfolio.snapshot();
-
+    /// Build decision context to send to OpenClaw.
+    ///
+    /// Accepts a pre-computed `snapshot` so that callers can share a single
+    /// `portfolio.snapshot()` call across the full tick (BR-004).
+    async fn build_decision_context(
+        &self,
+        config: &BotConfig,
+        snapshot: &PortfolioSnapshot,
+    ) -> anyhow::Result<DecisionContext> {
         // Build portfolio snapshot for OpenClaw
         let portfolio = OcPortfolioSnapshot {
             equity_usd: snapshot.total_equity,
@@ -945,9 +978,21 @@ impl BotRunner {
         None
     }
 
-    /// Write current state to now.json
-    async fn write_state_file(&self) -> anyhow::Result<()> {
-        let snapshot = self.portfolio.snapshot();
+    /// Write current state to now.json.
+    ///
+    /// Accepts an optional pre-computed `snapshot` so that callers inside
+    /// `decision_tick` can share a single `portfolio.snapshot()` call (BR-004).
+    /// When `None` is passed (e.g. from `graceful_shutdown`), a fresh snapshot
+    /// is computed.
+    async fn write_state_file(&self, snapshot: Option<&PortfolioSnapshot>) -> anyhow::Result<()> {
+        let owned;
+        let snapshot = match snapshot {
+            Some(s) => s,
+            None => {
+                owned = self.portfolio.snapshot();
+                &owned
+            }
+        };
 
         let state = RunnerState {
             status: self.status,
