@@ -26,10 +26,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
   - Test: Verify at most 10 messages are included in LLM request body
   - **Done**: Changed LIMIT from 30 to 10. Reduces max token cost per call by ~66%. Compiles clean.
 
-- [ ] **PERF-001** — get_bot_config makes 3 sequential DB queries
+- [x] **PERF-001** — get_bot_config makes 3 sequential DB queries
   - Files: `services/control-plane/src/handlers/sync.rs`
   - Fix: Join bot + config_version + openclaw_config into a single query
   - Test: Verify endpoint returns same response; measure query count reduction
+  - **Done**: Joined bot + config_version into a single query via `JOIN bots b ON cv.id = b.desired_version_id`. Reduces from 3 to 2 DB round-trips per poll. openclaw config kept separate (optional with many nullable fields). Compiles + clippy clean.
 
 ## Medium
 

@@ -51,25 +51,22 @@ pub async fn get_bot_config(
 ) -> Result<Json<BotConfigPayload>, (StatusCode, String)> {
     let start = std::time::Instant::now();
 
+    // PERF-001: Join bot + config_version in a single query (was 2 sequential).
     // Initial + 1 retry with 500 ms delay for transient DB blips (CP-011).
-    let bot = with_db_retry(2, std::time::Duration::from_millis(500), || {
-        sqlx::query_as::<_, Bot>("SELECT * FROM bots WHERE id = $1")
-            .bind(bot_id)
-            .fetch_one(&state.db)
+    let config = with_db_retry(2, std::time::Duration::from_millis(500), || {
+        sqlx::query_as::<_, ConfigVersion>(
+            r#"SELECT cv.* FROM config_versions cv
+               JOIN bots b ON cv.id = b.desired_version_id
+               WHERE b.id = $1"#,
+        )
+        .bind(bot_id)
+        .fetch_one(&state.db)
     })
     .await
     .map_err(|e| match e {
         sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Bot not found".to_string()),
         _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     })?;
-
-    let config = with_db_retry(2, std::time::Duration::from_millis(500), || {
-        sqlx::query_as::<_, ConfigVersion>("SELECT * FROM config_versions WHERE id = $1")
-            .bind(bot.desired_version_id)
-            .fetch_one(&state.db)
-    })
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let config_hash = format!("{}:{}", config.id, config.version);
     let cron_jobs = generate_cron_jobs(&config);
