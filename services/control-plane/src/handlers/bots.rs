@@ -1088,27 +1088,48 @@ pub async fn bot_action(
             info!("Bot {} destroy triggered", bot_id);
         }
         BotAction::DisableLiveTrading => {
-            // Switch latest config version to paper mode and mark pending
+            // BUG-002: Create a new config version (copy with trading_mode=paper)
+            // instead of mutating the existing version in-place, preserving
+            // config immutability and audit trail.
+            let new_config_id = Uuid::new_v4();
             sqlx::query(
                 r#"
-                UPDATE config_versions SET trading_mode = 'paper'
-                WHERE id = (SELECT desired_version_id FROM bots WHERE id = $1)
+                INSERT INTO config_versions (
+                    id, bot_id, version, name, persona, asset_focus, custom_assets,
+                    algorithm_mode, algorithm_factors, strictness,
+                    max_position_size_percent, max_daily_loss_usd,
+                    max_drawdown_percent, max_trades_per_day,
+                    trading_mode, llm_provider, encrypted_llm_api_key
+                )
+                SELECT
+                    $2, bot_id,
+                    (SELECT COALESCE(MAX(version), 0) + 1 FROM config_versions WHERE bot_id = $3),
+                    name, persona, asset_focus, custom_assets,
+                    algorithm_mode, algorithm_factors, strictness,
+                    max_position_size_percent, max_daily_loss_usd,
+                    max_drawdown_percent, max_trades_per_day,
+                    'paper', llm_provider, encrypted_llm_api_key
+                FROM config_versions
+                WHERE id = (SELECT desired_version_id FROM bots WHERE id = $3)
                 "#,
             )
             .bind(bot_id)
-            .execute(&state.db)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-            sqlx::query(
-                "UPDATE bots SET config_status = 'pending', updated_at = NOW() WHERE id = $1",
-            )
+            .bind(new_config_id)
             .bind(bot_id)
             .execute(&state.db)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-            info!("Bot {} live trading disabled (switched to paper)", bot_id);
+            sqlx::query(
+                "UPDATE bots SET desired_version_id = $1, config_status = 'pending', updated_at = NOW() WHERE id = $2",
+            )
+            .bind(new_config_id)
+            .bind(bot_id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            info!("Bot {} live trading disabled (new config version created with paper mode)", bot_id);
         }
         BotAction::RotateSecrets => {
             // Generate fresh token; store only the hash in the DB.

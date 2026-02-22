@@ -14,10 +14,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
 
 ## High
 
-- [ ] **BUG-002** — DisableLiveTrading mutates immutable config version
+- [x] **BUG-002** — DisableLiveTrading mutates immutable config version
   - Files: `services/control-plane/src/handlers/bots.rs`
   - Fix: Create a new config_version row (copy + trading_mode=paper + version+1) instead of UPDATE in-place
   - Test: Verify a new config_version row exists after action; old row unchanged
+  - **Done**: Replaced UPDATE with INSERT-SELECT that copies all fields, sets trading_mode='paper', increments version. Points bot's desired_version_id to new row. Compiles clean.
 
 - [ ] **SEC-001** — Unbounded LLM context in chat handler
   - Files: `services/control-plane/src/handlers/chat.rs`
