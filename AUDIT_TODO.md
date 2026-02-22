@@ -78,10 +78,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
 
 ## Low
 
-- [ ] **BUG-005** — Config version race in update_bot_config
+- [x] **BUG-005** — Config version race in update_bot_config
   - Files: `services/control-plane/src/handlers/bots.rs`
   - Fix: Wrap INSERT + UPDATE in a transaction
   - Test: Verify both operations succeed atomically
+  - **Done**: Wrapped config_version INSERT + bots UPDATE in a SQLx transaction. If either fails, both roll back. Compiles clean.
 
 - [ ] **SEC-003** — X-Forwarded-For trusted without validation
   - Files: `services/control-plane/src/middleware/rate_limit.rs`

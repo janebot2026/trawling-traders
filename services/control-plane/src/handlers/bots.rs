@@ -946,8 +946,14 @@ pub async fn update_bot_config(
 
     let config_id = Uuid::new_v4();
 
-    // Atomic version increment: INSERT with inline SELECT prevents race between
-    // concurrent config updates producing duplicate version numbers.
+    // BUG-005: Wrap INSERT + UPDATE in a transaction so desired_version_id always
+    // points to the latest version, even if two config updates race.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
     let new_version: i32 = sqlx::query_scalar(
         r#"
         INSERT INTO config_versions (
@@ -986,7 +992,7 @@ pub async fn update_bot_config(
             .transpose()?
             .unwrap_or_default(),
     )
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -995,9 +1001,13 @@ pub async fn update_bot_config(
     )
     .bind(config_id)
     .bind(bot_id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let config = sqlx::query_as::<_, ConfigVersion>("SELECT * FROM config_versions WHERE id = $1")
         .bind(config_id)
