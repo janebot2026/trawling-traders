@@ -108,10 +108,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
   - Test: N/A
   - **Done**: Deleted deprecated `docs/frontend-architecture.md`. Was explicitly marked DEPRECATED and no longer referenced by source code.
 
-- [ ] **REL-003** — get_recent_events always returns empty
+- [x] **REL-003** — get_recent_events always returns empty
   - Files: `services/bot-runner/src/decision.rs`
   - Fix: Populate from recent journal entries stored on disk
   - Test: Verify DecisionContext contains events after trades execute
+  - **Done**: Implemented `get_recent_events()` to read journal entries from `<state_dir>/journal/decisions/`, filter to last 24h, convert to `TradeEvent` structs, sorted newest-first, capped at 50. All tests pass.
 
 - [ ] **REL-005** — CI allows skipping tests
   - Files: `.github/workflows/deploy.yml`

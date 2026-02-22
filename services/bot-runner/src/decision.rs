@@ -555,8 +555,66 @@ impl BotRunner {
     }
 
     /// Return recent trade events for the decision context.
+    ///
+    /// Reads journal entries from `<state_dir>/journal/decisions/` and converts
+    /// them to [`TradeEvent`] structs.  Returns the most recent entries from
+    /// the last 24 hours, sorted newest-first, capped at 50.
     pub(crate) fn get_recent_events(&self) -> Vec<TradeEvent> {
-        Vec::new()
+        let journal_dir = self.state_dir.join("journal/decisions");
+        let entries = match std::fs::read_dir(&journal_dir) {
+            Ok(entries) => entries,
+            Err(_) => return Vec::new(),
+        };
+
+        let cutoff = chrono::Utc::now() - chrono::Duration::hours(24);
+        let mut events: Vec<TradeEvent> = Vec::new();
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let journal: DecisionJournalEntry = match serde_json::from_str(&content) {
+                Ok(j) => j,
+                Err(_) => continue,
+            };
+            if journal.timestamp < cutoff {
+                continue;
+            }
+
+            let symbol = self
+                .get_symbol_for_mint(&journal.intent.output_mint)
+                .or_else(|| self.get_symbol_for_mint(&journal.intent.input_mint))
+                .unwrap_or_else(|| journal.intent.output_mint.clone());
+
+            let (event_type, outcome) = match &journal.execution {
+                Some(exec) => (
+                    format!("trade_{}", exec.stage),
+                    Some(exec.stage.clone()),
+                ),
+                None if !journal.validation.approved => {
+                    ("trade_blocked".to_string(), Some("blocked".to_string()))
+                }
+                None => ("trade_intent".to_string(), Some("pending".to_string())),
+            };
+
+            events.push(TradeEvent {
+                timestamp: journal.timestamp,
+                event_type,
+                symbol,
+                side: Some(format!("{:?}", journal.intent.action)),
+                amount_usd: Some(journal.intent.amount_usd),
+                outcome,
+            });
+        }
+
+        events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        events.truncate(50);
+        events
     }
 
     /// Look up the asset symbol for a mint address from the current config.
