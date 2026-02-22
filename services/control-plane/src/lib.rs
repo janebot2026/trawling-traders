@@ -114,4 +114,29 @@ impl AppState {
         self.jwt_service = Some(jwt_service);
         self
     }
+
+    /// BUG-003: Spawn a background task that evicts stale subscription cache
+    /// entries every 5 minutes to prevent unbounded HashMap growth.
+    pub fn spawn_subscription_cache_cleanup(&self) {
+        let cache = self.subscription_cache.clone();
+        let eviction_age = SUBSCRIPTION_CACHE_TTL * 2;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(300));
+            loop {
+                interval.tick().await;
+                if let Ok(mut map) = cache.write() {
+                    let before = map.len();
+                    map.retain(|_, (_, _, _, cached_at)| cached_at.elapsed() < eviction_age);
+                    let evicted = before - map.len();
+                    if evicted > 0 {
+                        tracing::debug!(
+                            "Subscription cache cleanup: evicted {} stale entries ({} remaining)",
+                            evicted,
+                            map.len()
+                        );
+                    }
+                }
+            }
+        });
+    }
 }

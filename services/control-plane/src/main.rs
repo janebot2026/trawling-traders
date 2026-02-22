@@ -79,6 +79,10 @@ async fn main() -> anyhow::Result<()> {
     control_plane::alerting::spawn_offline_checker(db.clone(), state.alerts.clone());
     info!("✓ Offline bot checker spawned");
 
+    // BUG-003: Spawn subscription cache cleanup (evicts stale entries every 5 min)
+    state.spawn_subscription_cache_cleanup();
+    info!("✓ Subscription cache cleanup task spawned");
+
     // Build router
     let app = build_router(state, db.clone(), login_integration, login_error).await?;
 

@@ -34,10 +34,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
 
 ## Medium
 
-- [ ] **BUG-003** — Subscription cache unbounded growth
+- [x] **BUG-003** — Subscription cache unbounded growth
   - Files: `services/control-plane/src/lib.rs`, `services/control-plane/src/main.rs`
   - Fix: Add periodic cache eviction (every 5 min, remove entries older than 2x TTL)
   - Test: Verify stale entries are removed after cleanup cycle
+  - **Done**: Added `spawn_subscription_cache_cleanup()` that evicts entries older than 2x TTL (120s) every 5 minutes. Called from main.rs alongside other background tasks. Compiles clean.
 
 - [ ] **BUG-004** — bot_shutdown event rejected by VALID_EVENT_TYPES
   - Files: `services/control-plane/src/handlers/sync.rs`
