@@ -394,8 +394,10 @@ pub async fn post_bot_chat_message(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // SEC-001: Cap context window to 10 messages to limit LLM token cost
+    // and prevent excessive data exposure per API call.
     let history = sqlx::query_as::<_, BotChatMessage>(
-        "SELECT * FROM bot_chat_messages WHERE bot_id = $1 ORDER BY created_at DESC LIMIT 30",
+        "SELECT * FROM bot_chat_messages WHERE bot_id = $1 ORDER BY created_at DESC LIMIT 10",
     )
     .bind(bot_id)
     .fetch_all(&state.db)

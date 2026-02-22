@@ -20,10 +20,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
   - Test: Verify a new config_version row exists after action; old row unchanged
   - **Done**: Replaced UPDATE with INSERT-SELECT that copies all fields, sets trading_mode='paper', increments version. Points bot's desired_version_id to new row. Compiles clean.
 
-- [ ] **SEC-001** — Unbounded LLM context in chat handler
+- [x] **SEC-001** — Unbounded LLM context in chat handler
   - Files: `services/control-plane/src/handlers/chat.rs`
   - Fix: Cap conversation history sent to LLM from 30 to 10 messages
   - Test: Verify at most 10 messages are included in LLM request body
+  - **Done**: Changed LIMIT from 30 to 10. Reduces max token cost per call by ~66%. Compiles clean.
 
 - [ ] **PERF-001** — get_bot_config makes 3 sequential DB queries
   - Files: `services/control-plane/src/handlers/sync.rs`
