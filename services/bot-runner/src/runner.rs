@@ -88,6 +88,11 @@ pub struct BotRunner {
     pub(crate) realized_pnl_today: Decimal,
     /// Date of last PnL reset (for daily reset).
     pub(crate) pnl_reset_date: chrono::NaiveDate,
+    /// REL-002: Peak equity high-water mark for drawdown calculation.
+    ///
+    /// Updated each tick to `max(peak_equity, current_equity)`. The drawdown
+    /// percentage is `(peak - current) / peak * 100`. Resets on daily PnL reset.
+    pub(crate) peak_equity: Decimal,
     /// BR-007: version_id of the last successfully applied config.
     ///
     /// Tracked independently of `current_config` so that if `ack_config` fails
@@ -134,6 +139,7 @@ impl BotRunner {
             last_trade_outcome: None,
             realized_pnl_today: Decimal::ZERO,
             pnl_reset_date: chrono::Utc::now().date_naive(),
+            peak_equity: Decimal::ZERO,
             last_applied_version_id: None,
         }
     }

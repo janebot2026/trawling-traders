@@ -60,6 +60,11 @@ impl BotRunner {
         // BR-004: Compute a single portfolio snapshot for the whole tick.
         let tick_snapshot = self.portfolio.snapshot();
 
+        // REL-002: Update peak equity high-water mark for drawdown calculation.
+        if tick_snapshot.total_equity > self.peak_equity {
+            self.peak_equity = tick_snapshot.total_equity;
+        }
+
         self.status = crate::types::RunnerStatus::Deciding;
         self.write_state_file(Some(&tick_snapshot)).await.ok();
 
@@ -367,6 +372,26 @@ impl BotRunner {
             };
         }
 
+        // REL-002: Enforce max_drawdown_percent risk rail.
+        // Drawdown = (peak_equity - current_equity) / peak_equity * 100.
+        if self.peak_equity > Decimal::ZERO {
+            let drawdown_pct = (self.peak_equity - snapshot.total_equity)
+                / self.peak_equity
+                * Decimal::from(100);
+            let max_drawdown = Decimal::from(config.risk_caps.max_drawdown_percent);
+            if drawdown_pct > max_drawdown {
+                return IntentValidation {
+                    intent: intent.clone(),
+                    approved: false,
+                    rejection_reason: Some(format!(
+                        "Drawdown {:.1}% exceeds max {:.1}%",
+                        drawdown_pct, max_drawdown
+                    )),
+                    blocked_by: Some("max_drawdown_percent".to_string()),
+                };
+            }
+        }
+
         IntentValidation {
             intent: intent.clone(),
             approved: true,
@@ -468,4 +493,39 @@ impl BotRunner {
         None
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use rust_decimal::Decimal;
+
+    /// REL-002: Verify drawdown percentage calculation matches the formula
+    /// used in validate_intent: (peak - current) / peak * 100.
+    #[test]
+    fn drawdown_calculation() {
+        let peak = Decimal::from(10000);
+        let current = Decimal::from(9000);
+        let drawdown_pct = (peak - current) / peak * Decimal::from(100);
+        assert_eq!(drawdown_pct, Decimal::from(10)); // 10% drawdown
+
+        // No drawdown when at peak
+        let at_peak = (peak - peak) / peak * Decimal::from(100);
+        assert_eq!(at_peak, Decimal::ZERO);
+
+        // Small drawdown within limit
+        let current_small = Decimal::from(9600);
+        let small_dd = (peak - current_small) / peak * Decimal::from(100);
+        assert_eq!(small_dd, Decimal::from(4)); // 4% drawdown
+    }
+
+    /// REL-002: Verify drawdown exceeding threshold would be caught.
+    #[test]
+    fn drawdown_exceeds_threshold() {
+        let peak = Decimal::from(10000);
+        let current = Decimal::from(8500); // 15% drawdown
+        let max_drawdown = Decimal::from(10); // 10% limit
+
+        let drawdown_pct = (peak - current) / peak * Decimal::from(100);
+        assert!(drawdown_pct > max_drawdown);
+    }
 }

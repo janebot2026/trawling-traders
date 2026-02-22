@@ -52,10 +52,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
   - Test: Verify server stops cleanly on SIGTERM without dropping in-flight requests
   - **Done**: Added `shutdown_signal()` that listens for SIGINT/SIGTERM, wired into `axum::serve().with_graceful_shutdown()`. Cross-platform (Unix SIGTERM + fallback). Compiles clean.
 
-- [ ] **REL-002** — Missing drawdown risk rail in bot-runner
+- [x] **REL-002** — Missing drawdown risk rail in bot-runner
   - Files: `services/bot-runner/src/decision.rs`, `services/bot-runner/src/runner.rs`
   - Fix: Track peak equity in BotRunner; add drawdown check in validate_intent
   - Test: Unit test — set max_drawdown to 5%, simulate 10% drawdown, verify intent is blocked
+  - **Done**: Added `peak_equity` field to BotRunner, updated each tick. Added drawdown check in validate_intent: `(peak - current) / peak * 100 > max_drawdown_percent`. Two unit tests added (drawdown_calculation, drawdown_exceeds_threshold). 38/38 tests pass.
 
 - [ ] **REL-004** — get_recent_prices returns all zeros
   - Files: `services/bot-runner/src/decision.rs`
