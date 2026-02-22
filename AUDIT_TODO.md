@@ -40,10 +40,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
   - Test: Verify stale entries are removed after cleanup cycle
   - **Done**: Added `spawn_subscription_cache_cleanup()` that evicts entries older than 2x TTL (120s) every 5 minutes. Called from main.rs alongside other background tasks. Compiles clean.
 
-- [ ] **BUG-004** — bot_shutdown event rejected by VALID_EVENT_TYPES
+- [x] **BUG-004** — bot_shutdown event rejected by VALID_EVENT_TYPES
   - Files: `services/control-plane/src/handlers/sync.rs`
   - Fix: Add `"bot_shutdown"` and `"portfolio_snapshot"` to VALID_EVENT_TYPES
   - Test: Verify events with these types are accepted (not 400)
+  - **Done**: Added `"bot_shutdown"` and `"portfolio_snapshot"` to VALID_EVENT_TYPES. Compiles clean.
 
 - [ ] **REL-001** — No graceful shutdown for control-plane
   - Files: `services/control-plane/src/main.rs`

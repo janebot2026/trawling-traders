@@ -395,6 +395,9 @@ const VALID_EVENT_TYPES: &[&str] = &[
     "config_failed",
     "error",
     "status_change",
+    // BUG-004: bot-runner sends these but they were missing from the allow-list.
+    "bot_shutdown",
+    "portfolio_snapshot",
 ];
 
 /// POST /bot/:id/events - Bot pushes events
