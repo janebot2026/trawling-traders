@@ -114,10 +114,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
   - Test: Verify DecisionContext contains events after trades execute
   - **Done**: Implemented `get_recent_events()` to read journal entries from `<state_dir>/journal/decisions/`, filter to last 24h, convert to `TradeEvent` structs, sorted newest-first, capped at 50. All tests pass.
 
-- [ ] **REL-005** — CI allows skipping tests
+- [x] **REL-005** — CI allows skipping tests
   - Files: `.github/workflows/deploy.yml`
   - Fix: Remove skip_tests input or add guard (require explicit reason)
   - Test: Verify workflow no longer has unguarded skip path
+  - **Done**: Removed `skip_tests` input entirely. Removed `if` guard on `lint-and-test` job. Simplified build job conditions to require `lint-and-test.result == 'success'` (removed `always()` and `skipped` fallbacks). Tests now always gate builds.
 
 - [ ] **MAINT-001** — executor.rs at 1032 LOC, multiple functions >60 LOC
   - Files: `services/bot-runner/src/executor.rs`

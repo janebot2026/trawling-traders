@@ -5,14 +5,6 @@ on:
     branches: [master]
   workflow_dispatch:
     inputs:
-      skip_tests:
-        description: "Skip tests (use with caution)"
-        required: false
-        default: "false"
-        type: choice
-        options:
-          - "true"
-          - "false"
       services:
         description: "Services to deploy"
         required: false
@@ -63,7 +55,6 @@ jobs:
 
   lint-and-test:
     runs-on: ubuntu-latest
-    if: github.event.inputs.skip_tests != 'true'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
@@ -125,12 +116,9 @@ jobs:
 
   build-control-plane:
     needs: [check-changes, lint-and-test]
-    # always() is required so this job runs even when lint-and-test is skipped
-    # (skip_tests=true). The next line ensures we only proceed when tests
-    # passed or were intentionally skipped — never on failure.
+    # REL-005: Tests must pass before building (skip_tests removed).
     if: |
-      always() &&
-      (needs.lint-and-test.result == 'success' || needs.lint-and-test.result == 'skipped') &&
+      needs.lint-and-test.result == 'success' &&
       (needs.check-changes.outputs.deploy_all == 'true' ||
        needs.check-changes.outputs.control_plane_changed == 'true' ||
        github.event.inputs.services == 'control-plane')
@@ -161,12 +149,9 @@ jobs:
 
   build-data-retrieval:
     needs: [check-changes, lint-and-test]
-    # always() is required so this job runs even when lint-and-test is skipped
-    # (skip_tests=true). The next line ensures we only proceed when tests
-    # passed or were intentionally skipped — never on failure.
+    # REL-005: Tests must pass before building (skip_tests removed).
     if: |
-      always() &&
-      (needs.lint-and-test.result == 'success' || needs.lint-and-test.result == 'skipped') &&
+      needs.lint-and-test.result == 'success' &&
       (needs.check-changes.outputs.deploy_all == 'true' ||
        needs.check-changes.outputs.data_retrieval_changed == 'true' ||
        github.event.inputs.services == 'data-retrieval')
