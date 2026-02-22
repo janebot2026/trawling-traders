@@ -95,11 +95,12 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
     info!("🚀 Control Plane listening on port {}", port);
 
-    // Use into_make_service_with_connect_info to enable ConnectInfo for IP tracking
+    // REL-001: Graceful shutdown — let in-flight requests drain before exit.
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await?;
 
     Ok(())
@@ -454,6 +455,29 @@ async fn build_router(
         .layer(TraceLayer::new_for_http());
 
     Ok(router)
+}
+
+/// REL-001: Wait for SIGINT (Ctrl-C) or SIGTERM (Docker stop) to initiate
+/// graceful shutdown. In-flight requests will drain before the server exits.
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+
+    #[cfg(unix)]
+    {
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to register SIGTERM handler");
+        tokio::select! {
+            _ = ctrl_c => info!("Received SIGINT, shutting down..."),
+            _ = sigterm.recv() => info!("Received SIGTERM, shutting down..."),
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        ctrl_c.await.ok();
+        info!("Received SIGINT, shutting down...");
+    }
 }
 
 fn is_debug_routes_enabled(value: Option<String>) -> bool {
