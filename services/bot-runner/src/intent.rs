@@ -1,11 +1,14 @@
-#![allow(dead_code)] // WIP: trade intent tracking
+// CLEAN-001: Blanket #![allow(dead_code)] removed. Unused methods/fields have
+// targeted #[allow(dead_code)] below. BR-022: wire into execution path to enable
+// trade deduplication/idempotency.
 //! Trade intent tracking for idempotency
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
-/// Trade intent states
+/// Trade intent states (BR-022: not yet wired into execution path)
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum TradeIntentState {
     Created,
@@ -18,7 +21,8 @@ pub enum TradeIntentState {
     Failed { stage: String, error: String },
 }
 
-/// Trade intent for idempotency
+/// Trade intent for idempotency (BR-022: not yet wired into execution path)
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct TradeIntent {
     pub id: uuid::Uuid,
@@ -63,7 +67,8 @@ impl IntentRegistry {
         }
     }
 
-    /// Create a new trade intent
+    /// Create a new trade intent (BR-022: not yet wired)
+    #[allow(dead_code)]
     pub fn create(
         &mut self,
         bot_id: &str,
@@ -92,6 +97,7 @@ impl IntentRegistry {
     ///
     /// Per principal engineer feedback: include mode + version to prevent
     /// incorrectly suppressing legitimate repeated trades after config changes
+    #[allow(dead_code)]
     pub fn create_with_version(
         &mut self,
         bot_id: &str,
@@ -132,6 +138,7 @@ impl IntentRegistry {
     ///
     /// This prevents race conditions between find_equivalent and create
     /// that could result in duplicate intents.
+    #[allow(dead_code)]
     pub fn try_create(
         &mut self,
         bot_id: &str,
@@ -180,11 +187,13 @@ impl IntentRegistry {
     }
 
     /// Get intent by ID
+    #[allow(dead_code)]
     pub fn get(&self, intent_id: &str) -> Option<&TradeIntent> {
         self.intents.get(intent_id)
     }
 
     /// Update intent state
+    #[allow(dead_code)]
     pub fn update_state(&mut self, intent_id: &str, state: TradeIntentState) -> anyhow::Result<()> {
         if let Some(intent) = self.intents.get_mut(intent_id) {
             debug!(
@@ -205,6 +214,7 @@ impl IntentRegistry {
     /// - strategy_version (config version fingerprint)
     ///
     /// Returns the existing intent ID if found
+    #[allow(dead_code)]
     pub fn find_equivalent(
         &self,
         bot_id: &str,
@@ -234,6 +244,7 @@ impl IntentRegistry {
     /// Prevents incorrectly suppressing legitimate repeated trades after:
     /// - Mode switches (paper -> live)
     /// - Config updates (new strategy version)
+    #[allow(dead_code)]
     pub fn find_equivalent_with_context(
         &self,
         bot_id: &str,
@@ -328,6 +339,7 @@ impl IntentRegistry {
     }
 
     /// Get finalization status for an intent
+    #[allow(dead_code)]
     pub fn get_finalization(&self, intent_id: &str) -> Option<TradeIntentFinalization> {
         self.intents
             .get(intent_id)
@@ -348,7 +360,8 @@ impl IntentRegistry {
     }
 }
 
-/// Finalization status for an intent
+/// Finalization status for an intent (BR-022: not yet wired)
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum TradeIntentFinalization {
     Pending,
@@ -357,6 +370,7 @@ pub enum TradeIntentFinalization {
 }
 
 impl TradeIntentFinalization {
+    #[allow(dead_code)]
     pub fn is_finalized(&self) -> bool {
         !matches!(self, TradeIntentFinalization::Pending)
     }

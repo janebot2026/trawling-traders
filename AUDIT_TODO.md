@@ -90,10 +90,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
   - Test: Verify spoofed header doesn't bypass rate limit
   - **Done**: Removed X-Forwarded-For and X-Real-IP header trust for anonymous rate limiting. Now uses only ConnectInfo<SocketAddr> (TCP-level IP). All tests pass.
 
-- [ ] **CLEAN-001** — Dead code in bot-runner IntentRegistry
+- [x] **CLEAN-001** — Dead code in bot-runner IntentRegistry
   - Files: `services/bot-runner/src/intent.rs`
   - Fix: Remove `#![allow(dead_code)]` annotation; keep module as documented placeholder (BR-022)
   - Test: Verify build still passes
+  - **Done**: Replaced blanket `#![allow(dead_code)]` with targeted `#[allow(dead_code)]` on unused items. Added BR-022 notes. Zero warnings, all tests pass.
 
 - [ ] **CLEAN-002** — Duplicate get_authorized_bot helper
   - Files: `services/control-plane/src/handlers/chat.rs`, `services/control-plane/src/handlers/bots.rs`
