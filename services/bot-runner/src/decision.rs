@@ -449,31 +449,109 @@ impl BotRunner {
             .await
     }
 
-    /// Return recent prices for configured assets (from executor cache or as
-    /// stubs that OpenClaw will fill in on its side).
+    /// Return recent prices for configured assets by querying the data-retrieval
+    /// service. Falls back to zero-price stubs if the service is unreachable.
     pub(crate) async fn get_recent_prices(&self) -> HashMap<String, PriceQuote> {
         let mut prices = HashMap::new();
+        let config = match &self.current_config {
+            Some(c) => c,
+            None => return prices,
+        };
 
-        if let Some(config) = &self.current_config {
-            for asset in &config.asset_universe {
-                if !asset.enabled {
-                    continue;
+        let enabled_assets: Vec<_> = config
+            .asset_universe
+            .iter()
+            .filter(|a| a.enabled)
+            .collect();
+
+        if enabled_assets.is_empty() {
+            return prices;
+        }
+
+        // REL-004: Fetch real prices from data-retrieval instead of returning stubs.
+        let symbols: Vec<String> = enabled_assets.iter().map(|a| a.symbol.clone()).collect();
+        let base_url = self.config.data_retrieval_url.trim_end_matches('/');
+
+        match self.fetch_batch_prices(base_url, &symbols).await {
+            Ok(fetched) => {
+                for asset in &enabled_assets {
+                    let price_usd = fetched.get(&asset.symbol).copied().unwrap_or(Decimal::ZERO);
+                    let source = if price_usd > Decimal::ZERO {
+                        "data-retrieval"
+                    } else {
+                        "pending"
+                    };
+                    prices.insert(
+                        asset.mint.clone(),
+                        PriceQuote {
+                            mint: asset.mint.clone(),
+                            symbol: asset.symbol.clone(),
+                            price_usd,
+                            change_24h_pct: None,
+                            timestamp: chrono::Utc::now(),
+                            source: source.to_string(),
+                        },
+                    );
                 }
-                prices.insert(
-                    asset.mint.clone(),
-                    PriceQuote {
-                        mint: asset.mint.clone(),
-                        symbol: asset.symbol.clone(),
-                        price_usd: Decimal::ZERO,
-                        change_24h_pct: None,
-                        timestamp: chrono::Utc::now(),
-                        source: "pending".to_string(),
-                    },
-                );
+            }
+            Err(e) => {
+                warn!("Failed to fetch prices from data-retrieval: {}", e);
+                for asset in &enabled_assets {
+                    prices.insert(
+                        asset.mint.clone(),
+                        PriceQuote {
+                            mint: asset.mint.clone(),
+                            symbol: asset.symbol.clone(),
+                            price_usd: Decimal::ZERO,
+                            change_24h_pct: None,
+                            timestamp: chrono::Utc::now(),
+                            source: "pending".to_string(),
+                        },
+                    );
+                }
             }
         }
 
         prices
+    }
+
+    /// Fetch prices for multiple symbols from the data-retrieval batch endpoint.
+    async fn fetch_batch_prices(
+        &self,
+        base_url: &str,
+        symbols: &[String],
+    ) -> anyhow::Result<HashMap<String, Decimal>> {
+        let url = format!("{}/prices/batch", base_url);
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()?;
+
+        let resp = client
+            .post(&url)
+            .json(&serde_json::json!({ "symbols": symbols }))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            anyhow::bail!("data-retrieval returned {}", resp.status());
+        }
+
+        #[derive(serde::Deserialize)]
+        struct BatchItem {
+            symbol: String,
+            price: Decimal,
+        }
+        #[derive(serde::Deserialize)]
+        struct BatchResponse {
+            prices: Vec<BatchItem>,
+        }
+
+        let body: BatchResponse = resp.json().await?;
+        Ok(body
+            .prices
+            .into_iter()
+            .map(|p| (p.symbol, p.price))
+            .collect())
     }
 
     /// Return recent trade events for the decision context.
