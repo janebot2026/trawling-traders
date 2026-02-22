@@ -4,6 +4,7 @@ use axum::http::StatusCode;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::middleware::AuthContext;
 use crate::models::{Bot, Persona};
 
 /// Derive a deterministic default persona from a user's UUID.
@@ -42,4 +43,17 @@ pub async fn get_authorized_bot(
     }
 
     Ok(bot)
+}
+
+/// CLEAN-002: Convenience wrapper that parses `user_id` from [`AuthContext`]
+/// and delegates to [`get_authorized_bot`]. Replaces duplicate local wrappers
+/// in `bots.rs` and `chat.rs`.
+pub async fn get_authorized_bot_for_auth(
+    pool: &PgPool,
+    auth: &AuthContext,
+    bot_id: Uuid,
+) -> Result<Bot, (StatusCode, String)> {
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
+    get_authorized_bot(pool, bot_id, user_id).await
 }
