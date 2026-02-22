@@ -134,29 +134,16 @@ pub async fn rate_limit_middleware(
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    // Get user ID from auth context, or fall back to client IP for anonymous requests
+    // Get user ID from auth context, or fall back to client IP for anonymous requests.
+    // SEC-003: Use only the TCP socket address for anonymous rate limiting.
+    // X-Forwarded-For / X-Real-IP headers can be spoofed to bypass rate limits.
     let key = if let Some(auth) = request.extensions().get::<AuthContext>() {
         format!("user:{}", auth.user_id)
     } else {
         let ip = request
-            .headers()
-            .get("x-forwarded-for")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.split(',').next())
-            .map(|s| s.trim().to_string())
-            .or_else(|| {
-                request
-                    .headers()
-                    .get("x-real-ip")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string())
-            })
-            .or_else(|| {
-                request
-                    .extensions()
-                    .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-                    .map(|ci| ci.0.ip().to_string())
-            })
+            .extensions()
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|ci| ci.0.ip().to_string())
             .unwrap_or_else(|| "anonymous".to_string());
         format!("anon:{}", ip)
     };

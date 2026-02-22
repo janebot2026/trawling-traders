@@ -84,10 +84,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
   - Test: Verify both operations succeed atomically
   - **Done**: Wrapped config_version INSERT + bots UPDATE in a SQLx transaction. If either fails, both roll back. Compiles clean.
 
-- [ ] **SEC-003** — X-Forwarded-For trusted without validation
+- [x] **SEC-003** — X-Forwarded-For trusted without validation
   - Files: `services/control-plane/src/middleware/rate_limit.rs`
   - Fix: Fall back to socket IP for rate limiting (ignore X-Forwarded-For for anonymous)
   - Test: Verify spoofed header doesn't bypass rate limit
+  - **Done**: Removed X-Forwarded-For and X-Real-IP header trust for anonymous rate limiting. Now uses only ConnectInfo<SocketAddr> (TCP-level IP). All tests pass.
 
 - [ ] **CLEAN-001** — Dead code in bot-runner IntentRegistry
   - Files: `services/bot-runner/src/intent.rs`
