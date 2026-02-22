@@ -164,17 +164,6 @@ pub async fn check_bot_name_availability(
     }))
 }
 
-/// Parse `user_id` from auth context and delegate to the shared [`helpers::get_authorized_bot`].
-async fn get_authorized_bot(
-    db: &sqlx::PgPool,
-    auth: &AuthContext,
-    bot_id: Uuid,
-) -> Result<Bot, (StatusCode, String)> {
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
-    super::helpers::get_authorized_bot(db, bot_id, user_id).await
-}
-
 /// GET /bots - List all bots for authenticated user
 const MAX_BOTS_LIMIT: i64 = 100;
 const DEFAULT_BOTS_LIMIT: i64 = 50;
@@ -887,7 +876,7 @@ pub async fn get_bot(
     Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<BotResponse>, (StatusCode, String)> {
-    let bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+    let bot = super::helpers::get_authorized_bot_for_auth(&state.db, &auth, bot_id).await?;
 
     let config = sqlx::query_as::<_, ConfigVersion>("SELECT * FROM config_versions WHERE id = $1")
         .bind(bot.desired_version_id)
@@ -909,7 +898,7 @@ pub async fn update_bot_config(
     require_live_trading_permission(&sub, req.config.trading_mode)?;
 
     // Verify bot exists and user is authorized
-    let _bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+    let _bot = super::helpers::get_authorized_bot_for_auth(&state.db, &auth, bot_id).await?;
 
     // Validate risk caps are within safe ranges
     req.config
@@ -1027,7 +1016,7 @@ pub async fn bot_action(
     Path(bot_id): Path<Uuid>,
     Json(req): Json<BotActionRequest>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
-    let bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+    let bot = super::helpers::get_authorized_bot_for_auth(&state.db, &auth, bot_id).await?;
 
     let pool = state.db.clone();
 
@@ -1172,7 +1161,7 @@ pub async fn get_metrics(
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<MetricsResponse>, (StatusCode, String)> {
     // Verify bot exists and user is authorized
-    let _bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+    let _bot = super::helpers::get_authorized_bot_for_auth(&state.db, &auth, bot_id).await?;
 
     let metrics_db = sqlx::query_as::<_, MetricDb>(
         r#"
@@ -1203,7 +1192,7 @@ pub async fn get_events(
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<EventsResponse>, (StatusCode, String)> {
     // Verify bot exists and user is authorized
-    let _bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+    let _bot = super::helpers::get_authorized_bot_for_auth(&state.db, &auth, bot_id).await?;
 
     let events = sqlx::query_as::<_, Event>(
         "SELECT * FROM events WHERE bot_id = $1 ORDER BY created_at DESC LIMIT 100",

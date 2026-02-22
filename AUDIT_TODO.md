@@ -96,10 +96,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
   - Test: Verify build still passes
   - **Done**: Replaced blanket `#![allow(dead_code)]` with targeted `#[allow(dead_code)]` on unused items. Added BR-022 notes. Zero warnings, all tests pass.
 
-- [ ] **CLEAN-002** — Duplicate get_authorized_bot helper
+- [x] **CLEAN-002** — Duplicate get_authorized_bot helper
   - Files: `services/control-plane/src/handlers/chat.rs`, `services/control-plane/src/handlers/bots.rs`
   - Fix: Remove local wrappers, call `helpers::get_authorized_bot` directly
   - Test: Verify compilation; no behavior change
+  - **Done**: Removed local `get_authorized_bot` wrappers from bots.rs and chat.rs. All 7 call sites now use `helpers::get_authorized_bot_for_auth`. Compiles clean.
 
 - [ ] **CLEAN-003** — Deprecated docs not cleaned up
   - Files: `docs/frontend-architecture.md`

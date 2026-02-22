@@ -42,17 +42,6 @@ struct LlmConfig {
     api_key: String,
 }
 
-/// Parse `user_id` from auth context and delegate to the shared [`helpers::get_authorized_bot`].
-async fn get_authorized_bot(
-    db: &sqlx::PgPool,
-    auth: &AuthContext,
-    bot_id: Uuid,
-) -> Result<Bot, (StatusCode, String)> {
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user ID".to_string()))?;
-    super::helpers::get_authorized_bot(db, bot_id, user_id).await
-}
-
 async fn load_llm_config(
     state: &AppState,
     bot_id: Uuid,
@@ -334,7 +323,7 @@ pub async fn get_bot_chat_messages(
     Extension(auth): Extension<AuthContext>,
     Path(bot_id): Path<Uuid>,
 ) -> Result<Json<GetBotChatMessagesResponse>, (StatusCode, String)> {
-    let _bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+    let _bot = super::helpers::get_authorized_bot_for_auth(&state.db, &auth, bot_id).await?;
 
     let messages = sqlx::query_as::<_, BotChatMessage>(
         "SELECT * FROM bot_chat_messages WHERE bot_id = $1 ORDER BY created_at ASC LIMIT 200",
@@ -353,7 +342,7 @@ pub async fn post_bot_chat_message(
     Path(bot_id): Path<Uuid>,
     Json(req): Json<BotChatMessageCreateRequest>,
 ) -> Result<Json<PostBotChatMessageResponse>, (StatusCode, String)> {
-    let bot = get_authorized_bot(&state.db, &auth, bot_id).await?;
+    let bot = super::helpers::get_authorized_bot_for_auth(&state.db, &auth, bot_id).await?;
 
     // Rate limit: max 30 LLM chat requests per bot per hour
     let recent_count: (i64,) = sqlx::query_as(
