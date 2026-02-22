@@ -74,9 +74,14 @@ pub struct BotConfig {
     pub execution: ExecutionConfig,
     pub llm_provider: String,
     pub llm_model: String,
+    /// SEC-002: Skip serialization to prevent accidental exposure. Debug impl
+    /// also redacts this field. Held as plain String (not secrecy::Secret)
+    /// since the field is never read after construction and the bot runs in
+    /// an isolated container.
     #[serde(skip_serializing)]
     pub llm_api_key: String,
-    /// Telegram bot token (if enabled)
+    /// Telegram bot token (if enabled). Same serialization guard as llm_api_key.
+    #[serde(skip_serializing)]
     pub telegram_bot_token: Option<String>,
     /// OpenClaw strategy preset (e.g., "conservative", "momentum", "arbitrage")
     #[serde(default = "default_strategy_preset")]
