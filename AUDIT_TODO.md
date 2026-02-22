@@ -102,10 +102,11 @@ Items ordered by severity (Critical > High > Medium > Low), then by category (Bu
   - Test: Verify compilation; no behavior change
   - **Done**: Removed local `get_authorized_bot` wrappers from bots.rs and chat.rs. All 7 call sites now use `helpers::get_authorized_bot_for_auth`. Compiles clean.
 
-- [ ] **CLEAN-003** — Deprecated docs not cleaned up
+- [x] **CLEAN-003** — Deprecated docs not cleaned up
   - Files: `docs/frontend-architecture.md`
   - Fix: Delete deprecated document
   - Test: N/A
+  - **Done**: Deleted deprecated `docs/frontend-architecture.md`. Was explicitly marked DEPRECATED and no longer referenced by source code.
 
 - [ ] **REL-003** — get_recent_events always returns empty
   - Files: `services/bot-runner/src/decision.rs`
