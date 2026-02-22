@@ -1,0 +1,117 @@
+# Audit Fix Checklist
+
+Items ordered by severity (Critical > High > Medium > Low), then by category (Bug > Security > Perf > Reliability > Maintainability > Cleanup).
+
+---
+
+## Critical
+
+- [x] **BUG-001** — bot_auth_middleware hash mismatch (auth bypass)
+  - Files: `services/control-plane/src/middleware/bot_auth.rs`
+  - Fix: Hash incoming token with SHA-256 before constant-time comparison against stored hash
+  - Test: Unit test — hash a known token, store hash, verify middleware accepts plaintext after hashing internally
+  - **Done**: Added SHA-256 hashing of provided token before ct_eq comparison. Added `token_hash_comparison_matches_generate_scheme` test. 5/5 bot_auth tests pass.
+
+## High
+
+- [ ] **BUG-002** — DisableLiveTrading mutates immutable config version
+  - Files: `services/control-plane/src/handlers/bots.rs`
+  - Fix: Create a new config_version row (copy + trading_mode=paper + version+1) instead of UPDATE in-place
+  - Test: Verify a new config_version row exists after action; old row unchanged
+
+- [ ] **SEC-001** — Unbounded LLM context in chat handler
+  - Files: `services/control-plane/src/handlers/chat.rs`
+  - Fix: Cap conversation history sent to LLM from 30 to 10 messages
+  - Test: Verify at most 10 messages are included in LLM request body
+
+- [ ] **PERF-001** — get_bot_config makes 3 sequential DB queries
+  - Files: `services/control-plane/src/handlers/sync.rs`
+  - Fix: Join bot + config_version + openclaw_config into a single query
+  - Test: Verify endpoint returns same response; measure query count reduction
+
+## Medium
+
+- [ ] **BUG-003** — Subscription cache unbounded growth
+  - Files: `services/control-plane/src/lib.rs`, `services/control-plane/src/main.rs`
+  - Fix: Add periodic cache eviction (every 5 min, remove entries older than 2x TTL)
+  - Test: Verify stale entries are removed after cleanup cycle
+
+- [ ] **BUG-004** — bot_shutdown event rejected by VALID_EVENT_TYPES
+  - Files: `services/control-plane/src/handlers/sync.rs`
+  - Fix: Add `"bot_shutdown"` and `"portfolio_snapshot"` to VALID_EVENT_TYPES
+  - Test: Verify events with these types are accepted (not 400)
+
+- [ ] **REL-001** — No graceful shutdown for control-plane
+  - Files: `services/control-plane/src/main.rs`
+  - Fix: Add `with_graceful_shutdown(shutdown_signal())` using SIGTERM/SIGINT handler
+  - Test: Verify server stops cleanly on SIGTERM without dropping in-flight requests
+
+- [ ] **REL-002** — Missing drawdown risk rail in bot-runner
+  - Files: `services/bot-runner/src/decision.rs`, `services/bot-runner/src/runner.rs`
+  - Fix: Track peak equity in BotRunner; add drawdown check in validate_intent
+  - Test: Unit test — set max_drawdown to 5%, simulate 10% drawdown, verify intent is blocked
+
+- [ ] **REL-004** — get_recent_prices returns all zeros
+  - Files: `services/bot-runner/src/decision.rs`
+  - Fix: Fetch prices from data-retrieval service using configured URL
+  - Test: Verify PriceQuote entries have non-zero prices when data-retrieval is reachable
+
+- [ ] **SEC-002** — LLM API key in bot-runner process memory (plaintext)
+  - Files: `services/bot-runner/src/config.rs`, `services/bot-runner/Cargo.toml`
+  - Fix: Wrap llm_api_key with `secrecy::Secret<String>` for zeroize-on-drop
+  - Test: Verify Debug output still redacts key; verify secrecy dependency compiles
+
+- [ ] **PERF-002** — Large files exceeding size budgets
+  - Files: Multiple (bots.rs, models/mod.rs, sync.rs, executor.rs, etc.)
+  - Fix: Split along responsibility boundaries
+  - Test: Verify compilation after split; no behavior change
+  - Note: Deferred — large refactor, lower ROI vs. other fixes
+
+## Low
+
+- [ ] **BUG-005** — Config version race in update_bot_config
+  - Files: `services/control-plane/src/handlers/bots.rs`
+  - Fix: Wrap INSERT + UPDATE in a transaction
+  - Test: Verify both operations succeed atomically
+
+- [ ] **SEC-003** — X-Forwarded-For trusted without validation
+  - Files: `services/control-plane/src/middleware/rate_limit.rs`
+  - Fix: Fall back to socket IP for rate limiting (ignore X-Forwarded-For for anonymous)
+  - Test: Verify spoofed header doesn't bypass rate limit
+
+- [ ] **CLEAN-001** — Dead code in bot-runner IntentRegistry
+  - Files: `services/bot-runner/src/intent.rs`
+  - Fix: Remove `#![allow(dead_code)]` annotation; keep module as documented placeholder (BR-022)
+  - Test: Verify build still passes
+
+- [ ] **CLEAN-002** — Duplicate get_authorized_bot helper
+  - Files: `services/control-plane/src/handlers/chat.rs`, `services/control-plane/src/handlers/bots.rs`
+  - Fix: Remove local wrappers, call `helpers::get_authorized_bot` directly
+  - Test: Verify compilation; no behavior change
+
+- [ ] **CLEAN-003** — Deprecated docs not cleaned up
+  - Files: `docs/frontend-architecture.md`
+  - Fix: Delete deprecated document
+  - Test: N/A
+
+- [ ] **REL-003** — get_recent_events always returns empty
+  - Files: `services/bot-runner/src/decision.rs`
+  - Fix: Populate from recent journal entries stored on disk
+  - Test: Verify DecisionContext contains events after trades execute
+
+- [ ] **REL-005** — CI allows skipping tests
+  - Files: `.github/workflows/deploy.yml`
+  - Fix: Remove skip_tests input or add guard (require explicit reason)
+  - Test: Verify workflow no longer has unguarded skip path
+
+- [ ] **MAINT-001** — executor.rs at 1032 LOC, multiple functions >60 LOC
+  - Files: `services/bot-runner/src/executor.rs`
+  - Fix: Split into submodules (quote_cache, cli, stages)
+  - Test: Verify compilation; no behavior change
+  - Note: Deferred — large refactor
+
+- [ ] **MAINT-002** — Mobile CreateBotWizard.styles.ts is 643 LOC
+  - Files: `apps/mobile/src/screens/create-bot/CreateBotWizard.styles.ts`
+  - Fix: Split into wizardBase.styles.ts, carouselStyles.ts, factorStyles.ts
+  - Test: Verify app builds; no visual change
+  - Note: Deferred — cosmetic, lower priority

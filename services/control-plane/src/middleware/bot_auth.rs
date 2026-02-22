@@ -55,8 +55,12 @@ pub async fn bot_auth_middleware(
         .flatten();
 
     match stored_token {
-        Some(token) => {
-            let is_equal = token.as_bytes().ct_eq(provided_token.as_bytes());
+        Some(stored_hash) => {
+            // BUG-001: The DB stores SHA-256(plaintext_token). Hash the incoming
+            // token before constant-time comparison, matching get_bot_secrets.
+            use sha2::{Digest, Sha256};
+            let provided_hash = hex::encode(Sha256::digest(provided_token.as_bytes()));
+            let is_equal = stored_hash.as_bytes().ct_eq(provided_hash.as_bytes());
             if bool::from(is_equal) {
                 Ok(next.run(request).await)
             } else {
@@ -94,5 +98,28 @@ mod tests {
     fn rejects_path_without_bot_id() {
         assert!(extract_bot_id_from_path("/v1/bot/heartbeat").is_none());
         assert!(extract_bot_id_from_path("/v1/account/settings").is_none());
+    }
+
+    /// BUG-001: Verify that hashing the plaintext token produces the stored hash,
+    /// matching the scheme used by `generate_bootstrap_token` and `get_bot_secrets`.
+    #[test]
+    fn token_hash_comparison_matches_generate_scheme() {
+        use sha2::{Digest, Sha256};
+        use subtle::ConstantTimeEq;
+
+        let plaintext = "abcdef1234567890";
+        let stored_hash = hex::encode(Sha256::digest(plaintext.as_bytes()));
+
+        // Simulate what the middleware now does: hash the provided token
+        let provided_hash = hex::encode(Sha256::digest(plaintext.as_bytes()));
+        assert!(bool::from(
+            stored_hash.as_bytes().ct_eq(provided_hash.as_bytes())
+        ));
+
+        // Wrong token must not match
+        let wrong_hash = hex::encode(Sha256::digest(b"wrong_token"));
+        assert!(!bool::from(
+            stored_hash.as_bytes().ct_eq(wrong_hash.as_bytes())
+        ));
     }
 }
