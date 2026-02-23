@@ -230,19 +230,29 @@ mod tests {
     #[test]
     fn test_is_valid_base58_happy_path() {
         // Valid Solana mint address (USDC) — no ambiguous chars
-        assert!(is_valid_base58("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+        assert!(is_valid_base58(
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        ));
     }
 
     #[test]
     fn test_is_valid_base58_rejects_invalid_chars() {
         // '0' (zero) is not in Base58
-        assert!(!is_valid_base58("0PjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+        assert!(!is_valid_base58(
+            "0PjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        ));
         // 'O' (capital-o) is not in Base58
-        assert!(!is_valid_base58("OPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+        assert!(!is_valid_base58(
+            "OPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        ));
         // 'I' (capital-i) is not in Base58
-        assert!(!is_valid_base58("IPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+        assert!(!is_valid_base58(
+            "IPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        ));
         // 'l' (lower-L) is not in Base58
-        assert!(!is_valid_base58("lPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+        assert!(!is_valid_base58(
+            "lPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        ));
     }
 
     #[test]

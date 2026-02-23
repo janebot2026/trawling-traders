@@ -119,7 +119,10 @@ async fn main() -> anyhow::Result<()> {
                 info!("✓ Redis cache initialized");
             }
             Err(e) => {
-                warn!("⚠ Redis cache unavailable ({}), continuing without cache", e);
+                warn!(
+                    "⚠ Redis cache unavailable ({}), continuing without cache",
+                    e
+                );
             }
         }
     }

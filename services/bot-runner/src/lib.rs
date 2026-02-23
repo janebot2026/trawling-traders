@@ -44,7 +44,7 @@ pub use openclaw::OpenClawClient;
 pub use portfolio::{Portfolio, PortfolioSnapshot, Position};
 pub use runner::BotRunner;
 pub use types::{
-    DecisionContext, DecisionJournalEntry, DecisionPlan, GatewayHealth, Holding,
-    IntentValidation, LastTradeOutcome, OpenClawIntent, PriceQuote, RiskRails, RunnerState,
-    RunnerStatus, TradeAction, TradeEvent,
+    DecisionContext, DecisionJournalEntry, DecisionPlan, GatewayHealth, Holding, IntentValidation,
+    LastTradeOutcome, OpenClawIntent, PriceQuote, RiskRails, RunnerState, RunnerStatus,
+    TradeAction, TradeEvent,
 };

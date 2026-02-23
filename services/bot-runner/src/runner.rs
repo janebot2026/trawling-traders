@@ -365,7 +365,11 @@ impl BotRunner {
             }
         }
 
-        let gateway_version = self.gateway_manager.gateway_version().await.unwrap_or_default();
+        let gateway_version = self
+            .gateway_manager
+            .gateway_version()
+            .await
+            .unwrap_or_default();
 
         let event = EventInput {
             event_type: "config_applied".to_string(),

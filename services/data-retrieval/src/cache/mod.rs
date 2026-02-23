@@ -59,12 +59,12 @@ impl RedisCache {
     ) -> anyhow::Result<Option<AggregatedPrice>> {
         let key = format!("price:{}:{}", asset.to_uppercase(), quote.to_uppercase());
 
-        let result: std::result::Result<Option<String>, redis::RedisError> = timeout(
-            REDIS_OP_TIMEOUT,
-            self.conn.read().await.clone().get(&key),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("Redis GET timed out after {}s", REDIS_OP_TIMEOUT.as_secs()))?;
+        let result: std::result::Result<Option<String>, redis::RedisError> =
+            timeout(REDIS_OP_TIMEOUT, self.conn.read().await.clone().get(&key))
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!("Redis GET timed out after {}s", REDIS_OP_TIMEOUT.as_secs())
+                })?;
 
         let value: Option<String> = match result {
             Ok(v) => v,
@@ -74,17 +74,14 @@ impl RedisCache {
                     return Err(e.into());
                 }
                 // Retry once after successful reconnect (also time-bounded).
-                timeout(
-                    REDIS_OP_TIMEOUT,
-                    self.conn.read().await.clone().get(&key),
-                )
-                .await
-                .map_err(|_| {
-                    anyhow::anyhow!(
-                        "Redis GET retry timed out after {}s",
-                        REDIS_OP_TIMEOUT.as_secs()
-                    )
-                })??
+                timeout(REDIS_OP_TIMEOUT, self.conn.read().await.clone().get(&key))
+                    .await
+                    .map_err(|_| {
+                        anyhow::anyhow!(
+                            "Redis GET retry timed out after {}s",
+                            REDIS_OP_TIMEOUT.as_secs()
+                        )
+                    })??
             }
         };
 
@@ -119,7 +116,9 @@ impl RedisCache {
                 .set_ex::<_, _, ()>(&key, &json, 30),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("Redis SET timed out after {}s", REDIS_OP_TIMEOUT.as_secs()))?;
+        .map_err(|_| {
+            anyhow::anyhow!("Redis SET timed out after {}s", REDIS_OP_TIMEOUT.as_secs())
+        })?;
 
         if let Err(e) = result {
             if let Err(re) = self.reconnect().await {
@@ -157,7 +156,9 @@ impl RedisCache {
             self.conn.read().await.clone().del::<_, ()>(&key),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("Redis DEL timed out after {}s", REDIS_OP_TIMEOUT.as_secs()))?;
+        .map_err(|_| {
+            anyhow::anyhow!("Redis DEL timed out after {}s", REDIS_OP_TIMEOUT.as_secs())
+        })?;
 
         if let Err(e) = result {
             if let Err(re) = self.reconnect().await {

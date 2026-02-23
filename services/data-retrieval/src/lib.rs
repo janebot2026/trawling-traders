@@ -188,7 +188,8 @@ impl PriceAggregator {
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap_or_default()
                                     .subsec_millis()
-                                    % (base.max(1) as u32 * 250)) as u64
+                                    % (base.max(1) as u32 * 250))
+                                    as u64
                                     / 1000;
                                 reconnect_delay_secs = base + jitter;
                                 continue; // Try again after delay

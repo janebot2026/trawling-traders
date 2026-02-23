@@ -50,7 +50,12 @@ pub async fn get_price(
     let raw_symbol = path_symbol
         .map(|Path(s)| s)
         .or(query.symbol)
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Missing symbol parameter".to_string()))?;
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                "Missing symbol parameter".to_string(),
+            )
+        })?;
     let symbol = raw_symbol.to_uppercase();
     let quote = query.quote.to_uppercase();
 

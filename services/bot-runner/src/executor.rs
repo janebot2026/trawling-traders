@@ -712,10 +712,7 @@ impl TradeExecutor {
         result.signature = Some("paper_trade_simulated".to_string());
         result.execution = ExecutionData {
             out_amount_raw: simulated_out,
-            realized_price: compute_realized_price(
-                simulated_out, output_mint,
-                amount, input_mint,
-            ),
+            realized_price: compute_realized_price(simulated_out, output_mint, amount, input_mint),
             slippage_bps_estimate: Some(half_slippage_bps),
         };
     }
@@ -859,8 +856,10 @@ impl TradeExecutor {
             result.execution = ExecutionData {
                 out_amount_raw: out_amount,
                 realized_price: compute_realized_price(
-                    out_amount, &result.output_mint,
-                    in_amount, &result.input_mint,
+                    out_amount,
+                    &result.output_mint,
+                    in_amount,
+                    &result.input_mint,
                 ),
                 slippage_bps_estimate: Some(slippage_bps),
             };
@@ -993,8 +992,10 @@ mod tests {
     fn realized_price_sell_normalizes_decimals() {
         // Sell 5 SOL (9 dec) and receive 1000 USDC (6 dec) => 200 USDC/SOL
         let price = compute_realized_price(
-            1_000_000_000, USDC_MINT, // 1000 USDC
-            5_000_000_000, SOL_MINT,  // 5 SOL
+            1_000_000_000,
+            USDC_MINT, // 1000 USDC
+            5_000_000_000,
+            SOL_MINT, // 5 SOL
         );
         assert_eq!(price, Decimal::from(200));
     }
@@ -1003,8 +1004,10 @@ mod tests {
     fn realized_price_buy_normalizes_decimals() {
         // Buy 2 SOL (out) with 400 USDC (in) => price = 2 / 400 = 0.005 SOL/USDC
         let price = compute_realized_price(
-            2_000_000_000, SOL_MINT,  // 2 SOL out
-            400_000_000,   USDC_MINT, // 400 USDC in
+            2_000_000_000,
+            SOL_MINT, // 2 SOL out
+            400_000_000,
+            USDC_MINT, // 400 USDC in
         );
         // out/in = 2 SOL / 400 USDC = 0.005
         assert_eq!(price.to_string(), "0.005");

@@ -108,9 +108,10 @@ impl GatewayManager {
     /// Render main openclaw.json configuration
     fn render_main_config(&self, config: &BotConfig) -> Result<()> {
         // Enable Telegram if token is provided
-        let telegram = config.telegram_bot_token.as_ref().map(|_| TelegramConfig {
-            enabled: true,
-        });
+        let telegram = config
+            .telegram_bot_token
+            .as_ref()
+            .map(|_| TelegramConfig { enabled: true });
 
         // Generate character config based on persona
         let character = self.generate_character_config(config);
@@ -363,10 +364,16 @@ impl GatewayManager {
             match self.check_gateway_health().await {
                 Ok(true) => return Ok(()),
                 Ok(false) => {
-                    debug!("Gateway not yet healthy (attempt {}/{})", attempt, MAX_HEALTH_ATTEMPTS);
+                    debug!(
+                        "Gateway not yet healthy (attempt {}/{})",
+                        attempt, MAX_HEALTH_ATTEMPTS
+                    );
                 }
                 Err(e) => {
-                    debug!("Health check error (attempt {}/{}): {}", attempt, MAX_HEALTH_ATTEMPTS, e);
+                    debug!(
+                        "Health check error (attempt {}/{}): {}",
+                        attempt, MAX_HEALTH_ATTEMPTS, e
+                    );
                 }
             }
             if attempt < MAX_HEALTH_ATTEMPTS {

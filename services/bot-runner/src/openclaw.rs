@@ -99,7 +99,10 @@ impl OpenClawClient {
             .await
             .map_err(|e| {
                 if e.is_timeout() {
-                    anyhow!("OpenClaw decision request timed out after {:?}", self.timeout)
+                    anyhow!(
+                        "OpenClaw decision request timed out after {:?}",
+                        self.timeout
+                    )
                 } else if e.is_connect() {
                     anyhow!("Failed to connect to OpenClaw gateway at {}: {}", url, e)
                 } else {
@@ -122,9 +125,10 @@ impl OpenClawClient {
             ));
         }
 
-        let plan: DecisionPlan = response.json().await.map_err(|e| {
-            anyhow!("Failed to parse OpenClaw decision response: {}", e)
-        })?;
+        let plan: DecisionPlan = response
+            .json()
+            .await
+            .map_err(|e| anyhow!("Failed to parse OpenClaw decision response: {}", e))?;
 
         info!(
             "Received decision plan: plan_id={}, intents={}, explanations={}",

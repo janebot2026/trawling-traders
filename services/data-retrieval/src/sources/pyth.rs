@@ -243,7 +243,11 @@ impl PythClient {
         }
 
         let params: Vec<String> = feed_ids.iter().map(|id| format!("ids[]={}", id)).collect();
-        let url = format!("{}/updates/price/latest?{}", self.base_url, params.join("&"));
+        let url = format!(
+            "{}/updates/price/latest?{}",
+            self.base_url,
+            params.join("&")
+        );
 
         let start = std::time::Instant::now();
         let response = match self

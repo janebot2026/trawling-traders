@@ -51,10 +51,7 @@ impl BotRunner {
     }
 
     /// Write decision context to `<state_dir>/decision_context.json`.
-    pub(crate) async fn write_context_file(
-        &self,
-        context: &DecisionContext,
-    ) -> anyhow::Result<()> {
+    pub(crate) async fn write_context_file(&self, context: &DecisionContext) -> anyhow::Result<()> {
         let path = self.state_dir.join("decision_context.json");
         let content = serde_json::to_string_pretty(context)?;
         tokio::fs::write(path, content).await?;

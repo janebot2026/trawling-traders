@@ -106,7 +106,9 @@ impl ControlPlaneClient {
         };
 
         let response = self
-            .with_retry("register", || self.apply_auth(self.client.post(&url)).json(&req).send())
+            .with_retry("register", || {
+                self.apply_auth(self.client.post(&url)).json(&req).send()
+            })
             .await?;
 
         if response.status().is_success() {
@@ -159,7 +161,9 @@ impl ControlPlaneClient {
         debug!("Polling config from {}", url);
 
         let response = self
-            .with_retry("get_config", || self.apply_auth(self.client.get(&url)).send())
+            .with_retry("get_config", || {
+                self.apply_auth(self.client.get(&url)).send()
+            })
             .await?;
 
         match response.status() {

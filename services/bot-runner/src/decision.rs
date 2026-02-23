@@ -119,8 +119,7 @@ impl BotRunner {
                 }
             }
 
-            let validation =
-                self.validate_intent(intent, &config, &tick_snapshot, &committed_usd);
+            let validation = self.validate_intent(intent, &config, &tick_snapshot, &committed_usd);
 
             let journal_entry = DecisionJournalEntry {
                 intent_id: intent.intent_id,
@@ -163,9 +162,8 @@ impl BotRunner {
                 self.trade_count += 1;
 
                 if intent.action == TradeAction::Buy {
-                    *committed_usd
-                        .entry(intent.output_mint.clone())
-                        .or_default() += intent.amount_usd;
+                    *committed_usd.entry(intent.output_mint.clone()).or_default() +=
+                        intent.amount_usd;
                 }
 
                 self.last_trade_outcome = Some(LastTradeOutcome {
@@ -375,9 +373,8 @@ impl BotRunner {
         // REL-002: Enforce max_drawdown_percent risk rail.
         // Drawdown = (peak_equity - current_equity) / peak_equity * 100.
         if self.peak_equity > Decimal::ZERO {
-            let drawdown_pct = (self.peak_equity - snapshot.total_equity)
-                / self.peak_equity
-                * Decimal::from(100);
+            let drawdown_pct =
+                (self.peak_equity - snapshot.total_equity) / self.peak_equity * Decimal::from(100);
             let max_drawdown = Decimal::from(config.risk_caps.max_drawdown_percent);
             if drawdown_pct > max_drawdown {
                 return IntentValidation {
@@ -458,11 +455,7 @@ impl BotRunner {
             None => return prices,
         };
 
-        let enabled_assets: Vec<_> = config
-            .asset_universe
-            .iter()
-            .filter(|a| a.enabled)
-            .collect();
+        let enabled_assets: Vec<_> = config.asset_universe.iter().filter(|a| a.enabled).collect();
 
         if enabled_assets.is_empty() {
             return prices;
@@ -592,10 +585,7 @@ impl BotRunner {
                 .unwrap_or_else(|| journal.intent.output_mint.clone());
 
             let (event_type, outcome) = match &journal.execution {
-                Some(exec) => (
-                    format!("trade_{}", exec.stage),
-                    Some(exec.stage.clone()),
-                ),
+                Some(exec) => (format!("trade_{}", exec.stage), Some(exec.stage.clone())),
                 None if !journal.validation.approved => {
                     ("trade_blocked".to_string(), Some("blocked".to_string()))
                 }
@@ -628,7 +618,6 @@ impl BotRunner {
         }
         None
     }
-
 }
 
 #[cfg(test)]
