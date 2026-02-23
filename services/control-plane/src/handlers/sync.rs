@@ -18,7 +18,11 @@ use crate::{
 ///
 /// Only retries on `sqlx::Error::PoolTimedOut` and `sqlx::Error::Io` (transient blips).
 /// Other errors (e.g. RowNotFound) are returned immediately (CP-011).
-async fn with_db_retry<T, F, Fut>(attempts: u32, delay: std::time::Duration, f: F) -> Result<T, sqlx::Error>
+async fn with_db_retry<T, F, Fut>(
+    attempts: u32,
+    delay: std::time::Duration,
+    f: F,
+) -> Result<T, sqlx::Error>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = Result<T, sqlx::Error>>,
@@ -28,14 +32,15 @@ where
         match f().await {
             Ok(v) => return Ok(v),
             Err(e) => {
-                let is_transient = matches!(
-                    &e,
-                    sqlx::Error::PoolTimedOut | sqlx::Error::Io(_)
-                );
+                let is_transient = matches!(&e, sqlx::Error::PoolTimedOut | sqlx::Error::Io(_));
                 if !is_transient || attempt + 1 == attempts {
                     return Err(e);
                 }
-                tracing::warn!(attempt, "Transient DB error on config fetch, retrying: {}", e);
+                tracing::warn!(
+                    attempt,
+                    "Transient DB error on config fetch, retrying: {}",
+                    e
+                );
                 tokio::time::sleep(delay).await;
                 last_err = Some(e);
             }
@@ -302,11 +307,16 @@ pub async fn heartbeat(
             for metric in &metrics_batch {
                 timestamps.push(metric.timestamp);
                 equities.push(bigdecimal_from_decimal(&metric.equity).map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Invalid equity value: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Invalid equity value: {}", e),
+                    )
                 })?);
-                pnls.push(bigdecimal_from_decimal(&metric.pnl).map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Invalid pnl value: {}", e))
-                })?);
+                pnls.push(
+                    bigdecimal_from_decimal(&metric.pnl).map_err(|e| {
+                        (StatusCode::BAD_REQUEST, format!("Invalid pnl value: {}", e))
+                    })?,
+                );
             }
 
             let bot_ids: Vec<Uuid> = vec![bot_id; batch_len];
@@ -530,11 +540,12 @@ pub async fn register_bot(
     if result.rows_affected() == 0 {
         // Either the bot doesn't exist or it was already registered.
         // Distinguish the two cases with a follow-up SELECT to give a clear error.
-        let exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM bots WHERE id = $1)")
-            .bind(bot_id)
-            .fetch_one(&state.db)
-            .await
-            .unwrap_or(false);
+        let exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM bots WHERE id = $1)")
+                .bind(bot_id)
+                .fetch_one(&state.db)
+                .await
+                .unwrap_or(false);
         return Err(if exists {
             (StatusCode::CONFLICT, "Bot already registered".to_string())
         } else {
@@ -782,20 +793,21 @@ pub async fn get_bot_secrets(
 
             match config_version {
                 Some(cv) => {
-                    let decrypted_key = state
-                        .secrets
-                        .decrypt(&cv.encrypted_llm_api_key)
-                        .map_err(|e| {
-                            tracing::error!(
-                                bot_id = %bot_id,
-                                "Failed to decrypt legacy LLM API key in secrets endpoint: {}",
-                                e
-                            );
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "Failed to decrypt LLM API key".to_string(),
-                            )
-                        })?;
+                    let decrypted_key =
+                        state
+                            .secrets
+                            .decrypt(&cv.encrypted_llm_api_key)
+                            .map_err(|e| {
+                                tracing::error!(
+                                    bot_id = %bot_id,
+                                    "Failed to decrypt legacy LLM API key in secrets endpoint: {}",
+                                    e
+                                );
+                                (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "Failed to decrypt LLM API key".to_string(),
+                                )
+                            })?;
                     (cv.llm_provider, String::new(), decrypted_key, None)
                 }
                 None => (String::new(), String::new(), String::new(), None),

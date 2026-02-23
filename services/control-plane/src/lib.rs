@@ -45,12 +45,7 @@ pub use webhook::{WebhookConfig, WebhookNotifier};
 /// `is_active` is NOT stored; it is derived from `expires_at > now()` at serve
 /// time so that a subscription that expires while still within the cache TTL
 /// window is immediately rejected rather than granted access (CP-003).
-type SubscriptionCacheEntry = (
-    String,
-    Option<chrono::DateTime<chrono::Utc>>,
-    i32,
-    Instant,
-);
+type SubscriptionCacheEntry = (String, Option<chrono::DateTime<chrono::Utc>>, i32, Instant);
 
 /// TTL for subscription cache entries (60 seconds).
 ///

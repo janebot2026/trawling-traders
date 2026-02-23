@@ -398,7 +398,8 @@ pub async fn post_bot_chat_message(
 
     let llm = load_llm_config(&state, bot_id).await?;
     let system_prompt = build_system_prompt(&bot);
-    let assistant_content = call_llm(&state.http_client, &llm, &system_prompt, &chronological).await?;
+    let assistant_content =
+        call_llm(&state.http_client, &llm, &system_prompt, &chronological).await?;
 
     let assistant_message = sqlx::query_as::<_, BotChatMessage>(
         "INSERT INTO bot_chat_messages (bot_id, role, content) VALUES ($1, 'assistant', $2) RETURNING *",

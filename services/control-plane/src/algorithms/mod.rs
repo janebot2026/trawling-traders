@@ -220,7 +220,8 @@ impl AlgorithmFactory {
         };
 
         // Adjust threshold (higher = stricter)
-        params.threshold = (params.threshold * multiplier).min(Decimal::from_str("0.95").unwrap_or_default());
+        params.threshold =
+            (params.threshold * multiplier).min(Decimal::from_str("0.95").unwrap_or_default());
 
         // Adjust min confidence (higher = stricter)
         params.min_confidence =

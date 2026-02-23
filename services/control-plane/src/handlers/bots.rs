@@ -25,7 +25,9 @@ fn require_live_trading_permission(
     sub: &SubscriptionContext,
     mode: TradingMode,
 ) -> Result<(), (StatusCode, String)> {
-    if mode == TradingMode::Live && sub.tier == crate::middleware::subscription::SubscriptionTier::Free {
+    if mode == TradingMode::Live
+        && sub.tier == crate::middleware::subscription::SubscriptionTier::Free
+    {
         return Err((
             StatusCode::FORBIDDEN,
             "Live trading requires a paid subscription".to_string(),
@@ -46,8 +48,7 @@ where
     tokio::spawn(async move {
         if let Err(join_err) = handle.await {
             error!(bot_id = %bot_id, error = %join_err, "Background task panicked");
-            update_bot_status(&supervisor_pool, bot_id, BotStatus::Error, "Internal panic")
-                .await;
+            update_bot_status(&supervisor_pool, bot_id, BotStatus::Error, "Internal panic").await;
         }
     });
 }
@@ -407,12 +408,16 @@ pub async fn create_bot(
         .custom_assets
         .map(serde_json::to_value)
         .transpose()
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid custom_assets payload: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Invalid custom_assets payload: {}", e),
+            )
+        })?;
     // Validate each algorithm factor weight (CP-007): must be finite and in [-100, 100].
     if let Some(factors) = &req.algorithm_factors {
         for f in factors {
-            f.validate()
-                .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+            f.validate().map_err(|e| (StatusCode::BAD_REQUEST, e))?;
         }
     }
     let algorithm_factors_json = req
@@ -420,7 +425,12 @@ pub async fn create_bot(
         .as_ref()
         .map(serde_json::to_value)
         .transpose()
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid algorithm_factors payload: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Invalid algorithm_factors payload: {}", e),
+            )
+        })?;
 
     sqlx::query(
         r#"
@@ -705,13 +715,13 @@ async fn spawn_bot_droplet(
             );
 
             // Update bot with droplet_id (status stays 'provisioning' — goes 'online' on first heartbeat)
-            if let Err(e) = sqlx::query(
-                "UPDATE bots SET droplet_id = $1, updated_at = NOW() WHERE id = $2"
-            )
-            .bind(droplet.id)
-            .bind(bot_id)
-            .execute(&pool)
-            .await {
+            if let Err(e) =
+                sqlx::query("UPDATE bots SET droplet_id = $1, updated_at = NOW() WHERE id = $2")
+                    .bind(droplet.id)
+                    .bind(bot_id)
+                    .execute(&pool)
+                    .await
+            {
                 error!("Failed to update bot {} with droplet_id: {}", bot_id, e);
             }
         }
@@ -745,7 +755,10 @@ async fn destroy_bot_droplet(
                 return;
             }
             Err(e) => {
-                warn!("Failed to read DO token for destroy of bot {}: {}", bot_id, e);
+                warn!(
+                    "Failed to read DO token for destroy of bot {}: {}",
+                    bot_id, e
+                );
                 return;
             }
         };
@@ -815,7 +828,10 @@ async fn redeploy_bot_droplet(
                     return;
                 }
                 Err(e) => {
-                    warn!("Failed to read DO token for redeploy of bot {}: {}", bot_id, e);
+                    warn!(
+                        "Failed to read DO token for redeploy of bot {}: {}",
+                        bot_id, e
+                    );
                     update_bot_status(&pool, bot_id, BotStatus::Error, "DO token read error").await;
                     return;
                 }
@@ -917,12 +933,16 @@ pub async fn update_bot_config(
         .custom_assets
         .map(serde_json::to_value)
         .transpose()
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid custom_assets payload: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Invalid custom_assets payload: {}", e),
+            )
+        })?;
     // Validate each algorithm factor weight (CP-007): must be finite and in [-100, 100].
     if let Some(factors) = &req.config.algorithm_factors {
         for f in factors {
-            f.validate()
-                .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+            f.validate().map_err(|e| (StatusCode::BAD_REQUEST, e))?;
         }
     }
     let algorithm_factors_json = req
@@ -931,7 +951,12 @@ pub async fn update_bot_config(
         .as_ref()
         .map(serde_json::to_value)
         .transpose()
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid algorithm_factors payload: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Invalid algorithm_factors payload: {}", e),
+            )
+        })?;
 
     let config_id = Uuid::new_v4();
 
@@ -1128,7 +1153,10 @@ pub async fn bot_action(
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-            info!("Bot {} live trading disabled (new config version created with paper mode)", bot_id);
+            info!(
+                "Bot {} live trading disabled (new config version created with paper mode)",
+                bot_id
+            );
         }
         BotAction::RotateSecrets => {
             // Generate fresh token; store only the hash in the DB.
@@ -1145,9 +1173,9 @@ pub async fn bot_action(
 
             info!("Bot {} secrets rotated", bot_id);
 
-            return Ok(axum::response::IntoResponse::into_response(
-                Json(serde_json::json!({ "bootstrap_token": new_token_plain })),
-            ));
+            return Ok(axum::response::IntoResponse::into_response(Json(
+                serde_json::json!({ "bootstrap_token": new_token_plain }),
+            )));
         }
     }
 
@@ -1229,7 +1257,10 @@ pub async fn get_current_user(
         sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "User not found".to_string()),
         _ => {
             error!(user_id = %user_id, error = %e, "Failed to fetch current user");
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch user".to_string())
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to fetch user".to_string(),
+            )
         }
     })?;
 

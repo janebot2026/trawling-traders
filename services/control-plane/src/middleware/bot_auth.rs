@@ -44,15 +44,16 @@ pub async fn bot_auth_middleware(
     let auth_str = auth_header.to_str().map_err(|_| StatusCode::UNAUTHORIZED)?;
     let provided_token = extract_bearer_token(auth_str).ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let stored_token: Option<String> = sqlx::query_scalar("SELECT bootstrap_token FROM bots WHERE id = $1")
-        .bind(bot_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!("Bot auth lookup failed for {}: {}", bot_id, e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .flatten();
+    let stored_token: Option<String> =
+        sqlx::query_scalar("SELECT bootstrap_token FROM bots WHERE id = $1")
+            .bind(bot_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("Bot auth lookup failed for {}: {}", bot_id, e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+            .flatten();
 
     match stored_token {
         Some(stored_hash) => {

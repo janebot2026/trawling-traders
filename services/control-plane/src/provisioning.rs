@@ -83,9 +83,8 @@ where
         }
     }
 
-    Err(last_error.unwrap_or_else(|| {
-        anyhow::anyhow!("Retry operation failed without an error payload")
-    }))
+    Err(last_error
+        .unwrap_or_else(|| anyhow::anyhow!("Retry operation failed without an error payload")))
 }
 
 // ==================== CIRCUIT BREAKER ====================
@@ -270,13 +269,11 @@ mod tests {
 
         let result = with_retry(|| async { Ok::<(), anyhow::Error>(()) }, config).await;
         assert!(result.is_err());
-        assert!(
-            result
-                .err()
-                .expect("error expected")
-                .to_string()
-                .contains("max_attempts must be at least 1")
-        );
+        assert!(result
+            .err()
+            .expect("error expected")
+            .to_string()
+            .contains("max_attempts must be at least 1"));
     }
 }
 
@@ -575,10 +572,11 @@ pub fn spawn_data_retention_task(pool: sqlx::PgPool) {
             let pool_ref = &pool;
             let config_ref = &config;
 
-            let tick_result =
-                std::panic::AssertUnwindSafe(async move { cleanup_old_data(pool_ref, config_ref).await })
-                    .catch_unwind()
-                    .await;
+            let tick_result = std::panic::AssertUnwindSafe(async move {
+                cleanup_old_data(pool_ref, config_ref).await
+            })
+            .catch_unwind()
+            .await;
 
             match tick_result {
                 Ok(Err(e)) => {
