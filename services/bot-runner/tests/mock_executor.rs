@@ -132,7 +132,7 @@ impl MockTradeExecutor {
         result
     }
 
-    fn calculate_mock_swap(&self, input_mint: &str, output_mint: &str, amount: u64) -> (u64, f64) {
+    fn calculate_mock_swap(&self, _input_mint: &str, output_mint: &str, amount: u64) -> (u64, f64) {
         // USDC is 6 decimals
         let usdc_decimals = 1_000_000.0;
         let amount_usdc = amount as f64 / usdc_decimals;
@@ -179,6 +179,7 @@ impl MockTradeExecutor {
     }
 
     /// Fetch mock price for testing
+    #[allow(dead_code)]
     pub async fn fetch_price(
         &self,
         input_mint: &str,
@@ -199,6 +200,7 @@ impl MockTradeExecutor {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MockPrice {
     pub input_mint: String,
     pub output_mint: String,

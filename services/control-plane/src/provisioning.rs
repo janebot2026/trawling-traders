@@ -270,8 +270,7 @@ mod tests {
         let result = with_retry(|| async { Ok::<(), anyhow::Error>(()) }, config).await;
         assert!(result.is_err());
         assert!(result
-            .err()
-            .expect("error expected")
+            .unwrap_err()
             .to_string()
             .contains("max_attempts must be at least 1"));
     }

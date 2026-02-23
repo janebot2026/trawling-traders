@@ -68,7 +68,7 @@ impl IntentRegistry {
     }
 
     /// Create a new trade intent (BR-022: not yet wired)
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::too_many_arguments)]
     pub fn create(
         &mut self,
         bot_id: &str,
@@ -97,7 +97,7 @@ impl IntentRegistry {
     ///
     /// Per principal engineer feedback: include mode + version to prevent
     /// incorrectly suppressing legitimate repeated trades after config changes
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::too_many_arguments)]
     pub fn create_with_version(
         &mut self,
         bot_id: &str,
@@ -138,7 +138,7 @@ impl IntentRegistry {
     ///
     /// This prevents race conditions between find_equivalent and create
     /// that could result in duplicate intents.
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::too_many_arguments)]
     pub fn try_create(
         &mut self,
         bot_id: &str,
@@ -271,6 +271,7 @@ impl IntentRegistry {
     }
 
     /// Internal equivalence check logic
+    #[allow(clippy::too_many_arguments)]
     fn is_intent_equivalent(
         &self,
         intent: &TradeIntent,

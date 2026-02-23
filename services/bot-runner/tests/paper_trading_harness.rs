@@ -26,6 +26,12 @@ pub struct MockControlPlane {
     config_acked: Arc<Mutex<Vec<Uuid>>>,
 }
 
+impl Default for MockControlPlane {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockControlPlane {
     pub fn new() -> Self {
         Self {
