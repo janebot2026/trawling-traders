@@ -80,7 +80,7 @@ Order: Critical/High first, then Medium, then Low.
     - Add test for quota boundary behavior.
   - Completion note: Replaced split `COUNT` + `INSERT` flow with a single atomic SQL statement using `pg_advisory_xact_lock(hashtext(bot_id))`, in-statement count check, and conditional insert. Added rate-limit constant test `chat_rate_limit_constant_matches_api_message_expectation`. Verified via `cd services/control-plane && cargo test`.
 
-- [ ] **F-008 — Decision tick performs blocking filesystem reads on async path**
+- [x] **F-008 — Decision tick performs blocking filesystem reads on async path**
   - Files touched: `services/bot-runner/src/decision.rs` (and tests)
   - Planned fix:
     - Move recent-event file reads to non-blocking tokio fs APIs.
@@ -88,6 +88,7 @@ Order: Critical/High first, then Medium, then Low.
   - Test plan:
     - `cargo test` bot-runner.
     - Regression test for recent-event extraction output consistency.
+  - Completion note: Converted `get_recent_events` to async and replaced blocking `std::fs` calls with `tokio::fs::read_dir`/`read_to_string`; updated decision-context flow to await event collection. Added async regression test `get_recent_events_reads_journal_entries`. Verified via `cd services/bot-runner && cargo test`.
 
 - [ ] **F-009 — New reqwest client created for each batch price fetch**
   - Files touched: `services/bot-runner/src/runner.rs`, `services/bot-runner/src/decision.rs` (and tests)

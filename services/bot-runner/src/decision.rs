@@ -238,7 +238,7 @@ impl BotRunner {
             governor_paused: false, // TODO: Check governor state
         };
 
-        let recent_events = self.get_recent_events();
+        let recent_events = self.get_recent_events().await;
 
         Ok(DecisionContext {
             bot_id: self.config.bot_id,
@@ -538,9 +538,9 @@ impl BotRunner {
     /// Reads journal entries from `<state_dir>/journal/decisions/` and converts
     /// them to [`TradeEvent`] structs.  Returns the most recent entries from
     /// the last 24 hours, sorted newest-first, capped at 50.
-    pub(crate) fn get_recent_events(&self) -> Vec<TradeEvent> {
+    pub(crate) async fn get_recent_events(&self) -> Vec<TradeEvent> {
         let journal_dir = self.state_dir.join("journal/decisions");
-        let entries = match std::fs::read_dir(&journal_dir) {
+        let mut entries = match tokio::fs::read_dir(&journal_dir).await {
             Ok(entries) => entries,
             Err(_) => return Vec::new(),
         };
@@ -548,12 +548,12 @@ impl BotRunner {
         let cutoff = chrono::Utc::now() - chrono::Duration::hours(24);
         let mut events: Vec<TradeEvent> = Vec::new();
 
-        for entry in entries.flatten() {
+        while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            let content = match std::fs::read_to_string(&path) {
+            let content = match tokio::fs::read_to_string(&path).await {
                 Ok(c) => c,
                 Err(_) => continue,
             };
@@ -643,7 +643,16 @@ fn parse_batch_prices_response(body: &str) -> anyhow::Result<HashMap<String, Dec
 mod tests {
     use rust_decimal::Decimal;
     use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use crate::client::ControlPlaneClient;
+    use crate::config::Config;
+    use crate::runner::BotRunner;
+    use crate::types::{DecisionJournalEntry, IntentValidation, OpenClawIntent, TradeAction};
     use super::parse_batch_prices_response;
 
     /// REL-002: Verify drawdown percentage calculation matches the formula
@@ -707,5 +716,59 @@ mod tests {
         expected.insert("BTC".to_string(), Decimal::from_str_exact("100.5").unwrap());
         expected.insert("ETH".to_string(), Decimal::from_str_exact("200.25").unwrap());
         assert_eq!(prices, expected);
+    }
+
+    #[tokio::test]
+    async fn get_recent_events_reads_journal_entries() {
+        let bot_id = Uuid::new_v4();
+        let client = Arc::new(ControlPlaneClient::new("http://localhost:3000", bot_id).unwrap());
+        let config = Config {
+            bot_id,
+            control_plane_url: "http://localhost:3000".to_string(),
+            data_retrieval_url: "http://localhost:8080".to_string(),
+            solana_rpc_url: "https://api.devnet.solana.com".to_string(),
+            agent_wallet: None,
+            keypair_path: PathBuf::from("/tmp/test-keypair.json"),
+            wallet_address: "unknown".to_string(),
+        };
+        let mut runner = BotRunner::new(client, config).unwrap();
+
+        let temp_root = std::env::temp_dir().join(format!("tt-events-{}", Uuid::new_v4()));
+        let journal_dir = temp_root.join("journal/decisions");
+        std::fs::create_dir_all(&journal_dir).unwrap();
+        runner.state_dir = temp_root.clone();
+
+        let intent = OpenClawIntent {
+            intent_id: Uuid::new_v4(),
+            action: TradeAction::Buy,
+            input_mint: "USDC".to_string(),
+            output_mint: "SOL_MINT".to_string(),
+            amount_usd: Decimal::from(50),
+            rationale: "test".to_string(),
+            confidence: 0.9,
+        };
+        let entry = DecisionJournalEntry {
+            intent_id: intent.intent_id,
+            plan_id: Uuid::new_v4(),
+            plan_hash: "hash".to_string(),
+            intent: intent.clone(),
+            validation: IntentValidation {
+                intent,
+                approved: true,
+                rejection_reason: None,
+                blocked_by: None,
+            },
+            execution: None,
+            timestamp: Utc::now(),
+        };
+        let path = journal_dir.join("entry.json");
+        std::fs::write(path, serde_json::to_string(&entry).unwrap()).unwrap();
+
+        let events = runner.get_recent_events().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "trade_intent");
+        assert_eq!(events[0].symbol, "SOL_MINT");
+
+        let _ = std::fs::remove_dir_all(temp_root);
     }
 }
