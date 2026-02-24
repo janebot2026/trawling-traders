@@ -102,7 +102,7 @@ Order: Critical/High first, then Medium, then Low.
 
 ## Low
 
-- [ ] **F-010 — Mobile lint script broken (`eslint` missing)**
+- [x] **F-010 — Mobile lint script broken (`eslint` missing)**
   - Files touched: `apps/mobile/package.json` (possibly lockfile) and CI/test docs if needed
   - Planned fix:
     - Ensure lint command has a resolvable eslint binary.
@@ -110,3 +110,4 @@ Order: Critical/High first, then Medium, then Low.
   - Test plan:
     - `cd apps/mobile && npm run lint`.
     - Verify no regression in `npm test` and workspace typecheck.
+  - Completion note: Added local ESLint setup for mobile (`apps/mobile/.eslintrc.cjs`) and installed required lint deps (`eslint`, `@typescript-eslint/parser`, `eslint-plugin-react-hooks`) in mobile devDependencies. Verified with `cd apps/mobile && npm run lint`, `npm run typecheck`, and `cd apps/mobile && npm test -- --runInBand`.
