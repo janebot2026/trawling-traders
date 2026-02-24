@@ -28,7 +28,7 @@ Order: Critical/High first, then Medium, then Low.
     - Add/adjust unit test proving cache hit path for crypto symbol lookup.
   - Completion note: Added `normalize_symbol` to canonicalize Binance symbols to `/USD` and used it in trade processing. Added regression test `normalize_symbol_uses_usd_canonical_quote`. Verified via `cd services/data-retrieval && cargo test`.
 
-- [ ] **F-003 — Subscription tier semantics inconsistent for no-subscription users**
+- [x] **F-003 — Subscription tier semantics inconsistent for no-subscription users**
   - Files touched: `services/control-plane/src/middleware/subscription.rs` (and tests)
   - Planned fix:
     - Make enforcement match intended Free-tier behavior consistently.
@@ -36,6 +36,7 @@ Order: Critical/High first, then Medium, then Low.
   - Test plan:
     - `cargo test` control-plane middleware tests.
     - Add test coverage for no-subscription user on GET and mutating endpoints.
+  - Completion note: Added `should_block_for_inactive_subscription` policy helper and changed enforcement to block only inactive paid tiers on mutating requests; Free tier is no longer blanket-blocked. Added tests `allows_mutating_requests_for_free_tier`, `blocks_mutating_requests_for_inactive_paid_tiers`, and `allows_get_requests_for_all_tiers`. Verified via `cd services/control-plane && cargo test`.
 
 - [ ] **F-004 — Bot registration errors are swallowed and runner continues**
   - Files touched: `services/bot-runner/src/main.rs` (and tests)

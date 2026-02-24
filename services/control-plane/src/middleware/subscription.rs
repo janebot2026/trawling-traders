@@ -78,6 +78,13 @@ pub struct SubscriptionContext {
     pub bot_count: i32,
 }
 
+fn should_block_for_inactive_subscription(method: &Method, sub: &SubscriptionContext) -> bool {
+    if *method == Method::GET {
+        return false;
+    }
+    !sub.is_active && sub.tier != SubscriptionTier::Free
+}
+
 /// Check if user has active subscription and sufficient quota
 pub async fn subscription_middleware(
     State(state): State<Arc<AppState>>,
@@ -190,7 +197,7 @@ pub async fn subscription_middleware(
     // Block mutating operations for inactive subscriptions.
     // GET (read-only) requests pass through so free-tier users can still
     // read their own data (e.g. /bots, /me, /account/settings).
-    if !sub_context.is_active && request.method() != Method::GET {
+    if should_block_for_inactive_subscription(request.method(), &sub_context) {
         return Err(StatusCode::PAYMENT_REQUIRED);
     }
 
@@ -225,3 +232,44 @@ pub async fn bot_create_limit_middleware(
 
 /// Extract SubscriptionContext from request extensions
 pub use axum::extract::Extension as SubscriptionExtension;
+
+#[cfg(test)]
+mod tests {
+    use super::{should_block_for_inactive_subscription, SubscriptionContext, SubscriptionTier};
+    use axum::http::Method;
+
+    fn sub_context(tier: SubscriptionTier, is_active: bool) -> SubscriptionContext {
+        SubscriptionContext {
+            tier,
+            is_active,
+            expires_at: None,
+            bot_count: 0,
+        }
+    }
+
+    #[test]
+    fn allows_mutating_requests_for_free_tier() {
+        let free = sub_context(SubscriptionTier::Free, false);
+        assert!(!should_block_for_inactive_subscription(&Method::POST, &free));
+        assert!(!should_block_for_inactive_subscription(&Method::PATCH, &free));
+    }
+
+    #[test]
+    fn blocks_mutating_requests_for_inactive_paid_tiers() {
+        let pro = sub_context(SubscriptionTier::Pro, false);
+        let enterprise = sub_context(SubscriptionTier::Enterprise, false);
+        assert!(should_block_for_inactive_subscription(&Method::POST, &pro));
+        assert!(should_block_for_inactive_subscription(
+            &Method::DELETE,
+            &enterprise
+        ));
+    }
+
+    #[test]
+    fn allows_get_requests_for_all_tiers() {
+        let free = sub_context(SubscriptionTier::Free, false);
+        let pro = sub_context(SubscriptionTier::Pro, false);
+        assert!(!should_block_for_inactive_subscription(&Method::GET, &free));
+        assert!(!should_block_for_inactive_subscription(&Method::GET, &pro));
+    }
+}
