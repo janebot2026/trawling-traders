@@ -48,7 +48,7 @@ Order: Critical/High first, then Medium, then Low.
     - Add unit test for non-idempotent registration failure path.
   - Completion note: Updated startup registration handling to suppress only explicit `409 ... already registered` errors and propagate all other registration failures. Added tests `detects_idempotent_already_registered_error` and `does_not_treat_other_errors_as_idempotent`. Verified via `cd services/bot-runner && cargo test`.
 
-- [ ] **F-005 — BotRunner panics on OpenClaw client init failure**
+- [x] **F-005 — BotRunner panics on OpenClaw client init failure**
   - Files touched: `services/bot-runner/src/runner.rs`, `services/bot-runner/src/main.rs` (and tests)
   - Planned fix:
     - Replace panic path with fallible construction and explicit error propagation.
@@ -56,6 +56,7 @@ Order: Critical/High first, then Medium, then Low.
   - Test plan:
     - `cargo test` bot-runner.
     - Add unit test ensuring constructor returns `Err` instead of panic on invalid config.
+  - Completion note: Refactored `BotRunner::new` to return `anyhow::Result<Self>` and removed panic path; startup now propagates constructor errors via `main`. Added constructor behavior regression test `bot_runner_new_is_fallible_and_returns_ok_for_valid_inputs`. Verified via `cd services/bot-runner && cargo test`.
 
 ## Medium
 

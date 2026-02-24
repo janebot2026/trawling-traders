@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
     register_bot(&client).await?;
 
     // Create and run bot runner
-    let runner = BotRunner::new(client, config);
+    let runner = BotRunner::new(client, config)?;
     runner.run().await
 }
 

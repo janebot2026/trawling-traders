@@ -103,11 +103,11 @@ pub struct BotRunner {
 
 impl BotRunner {
     /// Create a new bot runner.
-    pub fn new(client: Arc<ControlPlaneClient>, config: Config) -> Self {
+    pub fn new(client: Arc<ControlPlaneClient>, config: Config) -> anyhow::Result<Self> {
         let portfolio = Portfolio::new(Decimal::from(10000));
 
         let openclaw_client = OpenClawClient::new()
-            .unwrap_or_else(|e| panic!("Failed to initialize OpenClaw client: {}", e));
+            .map_err(|e| anyhow::anyhow!("Failed to initialize OpenClaw client: {}", e))?;
         let gateway_manager = GatewayManager::new();
 
         let state_dir = std::env::var("BOT_STATE_DIR")
@@ -121,7 +121,7 @@ impl BotRunner {
             warn!("Failed to create journal dir: {}", e);
         }
 
-        Self {
+        Ok(Self {
             client,
             config,
             current_config: None,
@@ -141,7 +141,7 @@ impl BotRunner {
             pnl_reset_date: chrono::Utc::now().date_naive(),
             peak_equity: Decimal::ZERO,
             last_applied_version_id: None,
-        }
+        })
     }
 
     /// Run the main bot loop with graceful shutdown handling.
@@ -469,5 +469,38 @@ impl BotRunner {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use uuid::Uuid;
+
+    use crate::client::ControlPlaneClient;
+    use crate::config::Config;
+    use crate::runner::BotRunner;
+
+    #[test]
+    fn bot_runner_new_is_fallible_and_returns_ok_for_valid_inputs() {
+        let bot_id = Uuid::new_v4();
+        let client = Arc::new(
+            ControlPlaneClient::new("http://localhost:3000", bot_id)
+                .expect("control plane client should initialize"),
+        );
+        let config = Config {
+            bot_id,
+            control_plane_url: "http://localhost:3000".to_string(),
+            data_retrieval_url: "http://localhost:8080".to_string(),
+            solana_rpc_url: "https://api.devnet.solana.com".to_string(),
+            agent_wallet: None,
+            keypair_path: PathBuf::from("/tmp/test-keypair.json"),
+            wallet_address: "unknown".to_string(),
+        };
+
+        let runner = BotRunner::new(client, config);
+        assert!(runner.is_ok(), "BotRunner::new should return Result");
     }
 }
