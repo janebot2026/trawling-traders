@@ -430,7 +430,26 @@ async fn build_router(
         .nest("/v1", app_routes)
         .nest("/v1", bot_routes)
         .nest("/v1/admin", admin_routes)
-        .merge(cedros_routes) // cedros-pay applies its own /paywall/v1 prefix
+        .merge(cedros_routes.layer(axum::middleware::from_fn(
+            |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| async move {
+                let method = req.method().clone();
+                let uri = req.uri().clone();
+                // Only log admin routes to avoid noise
+                if uri.path().contains("/admin") {
+                    let has_auth = req.headers().get(axum::http::header::AUTHORIZATION).is_some();
+                    let has_api_key = req.headers().get("x-api-key").is_some();
+                    tracing::info!(
+                        %method, %uri, has_auth, has_api_key,
+                        "cedros-pay request"
+                    );
+                    let resp = next.run(req).await;
+                    tracing::info!(%method, %uri, status = %resp.status(), "cedros-pay response");
+                    resp
+                } else {
+                    next.run(req).await
+                }
+            },
+        ))) // cedros-pay applies its own route prefix
         .nest("/v1/auth", login_routes.layer(axum::middleware::from_fn(
             |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| async move {
                 let method = req.method().clone();
