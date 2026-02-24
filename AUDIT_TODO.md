@@ -1,133 +1,104 @@
-# Audit Fix Checklist
+# Audit Master Checklist
 
-Items ordered by severity (Critical > High > Medium > Low), then by category (Bug > Security > Perf > Reliability > Maintainability > Cleanup).
-
----
+This checklist tracks all findings from the latest full-repo audit.
+Order: Critical/High first, then Medium, then Low.
 
 ## Critical
 
-- [x] **BUG-001** — bot_auth_middleware hash mismatch (auth bypass)
-  - Files: `services/control-plane/src/middleware/bot_auth.rs`
-  - Fix: Hash incoming token with SHA-256 before constant-time comparison against stored hash
-  - Test: Unit test — hash a known token, store hash, verify middleware accepts plaintext after hashing internally
-  - **Done**: Added SHA-256 hashing of provided token before ct_eq comparison. Added `token_hash_comparison_matches_generate_scheme` test. 5/5 bot_auth tests pass.
+- [x] **F-001 — Batch price contract mismatch between bot-runner and data-retrieval**
+  - Files touched: `services/bot-runner/src/decision.rs` (and tests)
+  - Planned fix:
+    - Align batch response parsing with actual `/prices/batch` map response.
+    - Keep parsing robust against schema drift where safe.
+    - Add regression test for response parsing contract.
+  - Test plan:
+    - `cargo test` for bot-runner parsing tests and existing suites.
+    - Manual repro: verify non-zero parsed prices from sample response payload.
+  - Completion note: Added contract-compatible parser for map-shaped payloads with legacy list fallback (`parse_batch_prices_response`), plus two regression tests (`parses_map_shaped_batch_response`, `parses_legacy_list_shaped_batch_response`). Verified via `cd services/bot-runner && cargo test`.
 
 ## High
 
-- [x] **BUG-002** — DisableLiveTrading mutates immutable config version
-  - Files: `services/control-plane/src/handlers/bots.rs`
-  - Fix: Create a new config_version row (copy + trading_mode=paper + version+1) instead of UPDATE in-place
-  - Test: Verify a new config_version row exists after action; old row unchanged
-  - **Done**: Replaced UPDATE with INSERT-SELECT that copies all fields, sets trading_mode='paper', increments version. Points bot's desired_version_id to new row. Compiles clean.
+- [ ] **F-002 — Real-time cache key mismatch (`/USDT` vs `/USD`) causes cache bypass**
+  - Files touched: `services/data-retrieval/src/lib.rs`, `services/data-retrieval/src/sources/binance_ws.rs` (and tests)
+  - Planned fix:
+    - Normalize websocket-derived symbols to the same quote format used by `get_price_realtime` lookups.
+    - Preserve backwards compatibility for existing subscriptions.
+  - Test plan:
+    - `cargo test` data-retrieval.
+    - Add/adjust unit test proving cache hit path for crypto symbol lookup.
 
-- [x] **SEC-001** — Unbounded LLM context in chat handler
-  - Files: `services/control-plane/src/handlers/chat.rs`
-  - Fix: Cap conversation history sent to LLM from 30 to 10 messages
-  - Test: Verify at most 10 messages are included in LLM request body
-  - **Done**: Changed LIMIT from 30 to 10. Reduces max token cost per call by ~66%. Compiles clean.
+- [ ] **F-003 — Subscription tier semantics inconsistent for no-subscription users**
+  - Files touched: `services/control-plane/src/middleware/subscription.rs` (and tests)
+  - Planned fix:
+    - Make enforcement match intended Free-tier behavior consistently.
+    - Ensure non-paying users are not accidentally treated as fully blocked when policy expects Free-tier operations.
+  - Test plan:
+    - `cargo test` control-plane middleware tests.
+    - Add test coverage for no-subscription user on GET and mutating endpoints.
 
-- [x] **PERF-001** — get_bot_config makes 3 sequential DB queries
-  - Files: `services/control-plane/src/handlers/sync.rs`
-  - Fix: Join bot + config_version + openclaw_config into a single query
-  - Test: Verify endpoint returns same response; measure query count reduction
-  - **Done**: Joined bot + config_version into a single query via `JOIN bots b ON cv.id = b.desired_version_id`. Reduces from 3 to 2 DB round-trips per poll. openclaw config kept separate (optional with many nullable fields). Compiles + clippy clean.
+- [ ] **F-004 — Bot registration errors are swallowed and runner continues**
+  - Files touched: `services/bot-runner/src/main.rs` (and tests)
+  - Planned fix:
+    - Only ignore expected idempotent registration outcomes.
+    - Propagate true registration failures to fail fast at startup.
+  - Test plan:
+    - `cargo test` bot-runner.
+    - Add unit test for non-idempotent registration failure path.
+
+- [ ] **F-005 — BotRunner panics on OpenClaw client init failure**
+  - Files touched: `services/bot-runner/src/runner.rs`, `services/bot-runner/src/main.rs` (and tests)
+  - Planned fix:
+    - Replace panic path with fallible construction and explicit error propagation.
+    - Preserve startup logs and failure context.
+  - Test plan:
+    - `cargo test` bot-runner.
+    - Add unit test ensuring constructor returns `Err` instead of panic on invalid config.
 
 ## Medium
 
-- [x] **BUG-003** — Subscription cache unbounded growth
-  - Files: `services/control-plane/src/lib.rs`, `services/control-plane/src/main.rs`
-  - Fix: Add periodic cache eviction (every 5 min, remove entries older than 2x TTL)
-  - Test: Verify stale entries are removed after cleanup cycle
-  - **Done**: Added `spawn_subscription_cache_cleanup()` that evicts entries older than 2x TTL (120s) every 5 minutes. Called from main.rs alongside other background tasks. Compiles clean.
+- [ ] **F-006 — CSV report generation is unbounded/heavy in request path**
+  - Files touched: `services/control-plane/src/handlers/reports.rs` (and tests)
+  - Planned fix:
+    - Add safe upper bound and explicit truncation/error behavior for large report requests.
+    - Keep output schema stable while reducing memory/latency risk.
+  - Test plan:
+    - `cargo test` control-plane.
+    - Add tests for oversized result handling and normal-case behavior.
 
-- [x] **BUG-004** — bot_shutdown event rejected by VALID_EVENT_TYPES
-  - Files: `services/control-plane/src/handlers/sync.rs`
-  - Fix: Add `"bot_shutdown"` and `"portfolio_snapshot"` to VALID_EVENT_TYPES
-  - Test: Verify events with these types are accepted (not 400)
-  - **Done**: Added `"bot_shutdown"` and `"portfolio_snapshot"` to VALID_EVENT_TYPES. Compiles clean.
+- [ ] **F-007 — Chat hourly quota check is non-atomic (race window)**
+  - Files touched: `services/control-plane/src/handlers/chat.rs` (and tests)
+  - Planned fix:
+    - Enforce quota atomically in database transaction/lock step.
+    - Preserve existing limit values and response semantics.
+  - Test plan:
+    - `cargo test` control-plane.
+    - Add test for quota boundary behavior.
 
-- [x] **REL-001** — No graceful shutdown for control-plane
-  - Files: `services/control-plane/src/main.rs`
-  - Fix: Add `with_graceful_shutdown(shutdown_signal())` using SIGTERM/SIGINT handler
-  - Test: Verify server stops cleanly on SIGTERM without dropping in-flight requests
-  - **Done**: Added `shutdown_signal()` that listens for SIGINT/SIGTERM, wired into `axum::serve().with_graceful_shutdown()`. Cross-platform (Unix SIGTERM + fallback). Compiles clean.
+- [ ] **F-008 — Decision tick performs blocking filesystem reads on async path**
+  - Files touched: `services/bot-runner/src/decision.rs` (and tests)
+  - Planned fix:
+    - Move recent-event file reads to non-blocking tokio fs APIs.
+    - Keep same filtering/sorting output.
+  - Test plan:
+    - `cargo test` bot-runner.
+    - Regression test for recent-event extraction output consistency.
 
-- [x] **REL-002** — Missing drawdown risk rail in bot-runner
-  - Files: `services/bot-runner/src/decision.rs`, `services/bot-runner/src/runner.rs`
-  - Fix: Track peak equity in BotRunner; add drawdown check in validate_intent
-  - Test: Unit test — set max_drawdown to 5%, simulate 10% drawdown, verify intent is blocked
-  - **Done**: Added `peak_equity` field to BotRunner, updated each tick. Added drawdown check in validate_intent: `(peak - current) / peak * 100 > max_drawdown_percent`. Two unit tests added (drawdown_calculation, drawdown_exceeds_threshold). 38/38 tests pass.
-
-- [x] **REL-004** — get_recent_prices returns all zeros
-  - Files: `services/bot-runner/src/decision.rs`
-  - Fix: Fetch prices from data-retrieval service using configured URL
-  - Test: Verify PriceQuote entries have non-zero prices when data-retrieval is reachable
-  - **Done**: Implemented `fetch_batch_prices()` that POSTs to data-retrieval `/prices/batch`. Falls back to zero-price stubs on failure (graceful degradation). 10s timeout. All tests pass.
-
-- [x] **SEC-002** — LLM API key in bot-runner process memory (plaintext)
-  - Files: `services/bot-runner/src/config.rs`
-  - Fix: Wrap llm_api_key with `secrecy::Secret<String>` for zeroize-on-drop
-  - Test: Verify Debug output still redacts key; verify secrecy dependency compiles
-  - **Done**: Field is never read after construction; `#[serde(skip_serializing)]` already prevents accidental serialization; Debug impl redacts it. Added `#[serde(skip_serializing)]` to `telegram_bot_token` as well. Decided against adding `secrecy` crate (unused field, isolated container). Documented the defense-in-depth rationale.
-
-- [ ] **PERF-002** — Large files exceeding size budgets
-  - Files: Multiple (bots.rs, models/mod.rs, sync.rs, executor.rs, etc.)
-  - Fix: Split along responsibility boundaries
-  - Test: Verify compilation after split; no behavior change
-  - Note: Deferred — large refactor, lower ROI vs. other fixes
+- [ ] **F-009 — New reqwest client created for each batch price fetch**
+  - Files touched: `services/bot-runner/src/runner.rs`, `services/bot-runner/src/decision.rs` (and tests)
+  - Planned fix:
+    - Reuse a shared HTTP client on `BotRunner`.
+    - Keep existing timeouts and request behavior.
+  - Test plan:
+    - `cargo test` bot-runner.
+    - Compile-time and behavior regression checks for price fetch path.
 
 ## Low
 
-- [x] **BUG-005** — Config version race in update_bot_config
-  - Files: `services/control-plane/src/handlers/bots.rs`
-  - Fix: Wrap INSERT + UPDATE in a transaction
-  - Test: Verify both operations succeed atomically
-  - **Done**: Wrapped config_version INSERT + bots UPDATE in a SQLx transaction. If either fails, both roll back. Compiles clean.
-
-- [x] **SEC-003** — X-Forwarded-For trusted without validation
-  - Files: `services/control-plane/src/middleware/rate_limit.rs`
-  - Fix: Fall back to socket IP for rate limiting (ignore X-Forwarded-For for anonymous)
-  - Test: Verify spoofed header doesn't bypass rate limit
-  - **Done**: Removed X-Forwarded-For and X-Real-IP header trust for anonymous rate limiting. Now uses only ConnectInfo<SocketAddr> (TCP-level IP). All tests pass.
-
-- [x] **CLEAN-001** — Dead code in bot-runner IntentRegistry
-  - Files: `services/bot-runner/src/intent.rs`
-  - Fix: Remove `#![allow(dead_code)]` annotation; keep module as documented placeholder (BR-022)
-  - Test: Verify build still passes
-  - **Done**: Replaced blanket `#![allow(dead_code)]` with targeted `#[allow(dead_code)]` on unused items. Added BR-022 notes. Zero warnings, all tests pass.
-
-- [x] **CLEAN-002** — Duplicate get_authorized_bot helper
-  - Files: `services/control-plane/src/handlers/chat.rs`, `services/control-plane/src/handlers/bots.rs`
-  - Fix: Remove local wrappers, call `helpers::get_authorized_bot` directly
-  - Test: Verify compilation; no behavior change
-  - **Done**: Removed local `get_authorized_bot` wrappers from bots.rs and chat.rs. All 7 call sites now use `helpers::get_authorized_bot_for_auth`. Compiles clean.
-
-- [x] **CLEAN-003** — Deprecated docs not cleaned up
-  - Files: `docs/frontend-architecture.md`
-  - Fix: Delete deprecated document
-  - Test: N/A
-  - **Done**: Deleted deprecated `docs/frontend-architecture.md`. Was explicitly marked DEPRECATED and no longer referenced by source code.
-
-- [x] **REL-003** — get_recent_events always returns empty
-  - Files: `services/bot-runner/src/decision.rs`
-  - Fix: Populate from recent journal entries stored on disk
-  - Test: Verify DecisionContext contains events after trades execute
-  - **Done**: Implemented `get_recent_events()` to read journal entries from `<state_dir>/journal/decisions/`, filter to last 24h, convert to `TradeEvent` structs, sorted newest-first, capped at 50. All tests pass.
-
-- [x] **REL-005** — CI allows skipping tests
-  - Files: `.github/workflows/deploy.yml`
-  - Fix: Remove skip_tests input or add guard (require explicit reason)
-  - Test: Verify workflow no longer has unguarded skip path
-  - **Done**: Removed `skip_tests` input entirely. Removed `if` guard on `lint-and-test` job. Simplified build job conditions to require `lint-and-test.result == 'success'` (removed `always()` and `skipped` fallbacks). Tests now always gate builds.
-
-- [ ] **MAINT-001** — executor.rs at 1032 LOC, multiple functions >60 LOC
-  - Files: `services/bot-runner/src/executor.rs`
-  - Fix: Split into submodules (quote_cache, cli, stages)
-  - Test: Verify compilation; no behavior change
-  - Note: Deferred — large refactor
-
-- [ ] **MAINT-002** — Mobile CreateBotWizard.styles.ts is 643 LOC
-  - Files: `apps/mobile/src/screens/create-bot/CreateBotWizard.styles.ts`
-  - Fix: Split into wizardBase.styles.ts, carouselStyles.ts, factorStyles.ts
-  - Test: Verify app builds; no visual change
-  - Note: Deferred — cosmetic, lower priority
+- [ ] **F-010 — Mobile lint script broken (`eslint` missing)**
+  - Files touched: `apps/mobile/package.json` (possibly lockfile) and CI/test docs if needed
+  - Planned fix:
+    - Ensure lint command has a resolvable eslint binary.
+    - Keep lint command behavior unchanged for developers/CI.
+  - Test plan:
+    - `cd apps/mobile && npm run lint`.
+    - Verify no regression in `npm test` and workspace typecheck.

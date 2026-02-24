@@ -529,22 +529,8 @@ impl BotRunner {
             anyhow::bail!("data-retrieval returned {}", resp.status());
         }
 
-        #[derive(serde::Deserialize)]
-        struct BatchItem {
-            symbol: String,
-            price: Decimal,
-        }
-        #[derive(serde::Deserialize)]
-        struct BatchResponse {
-            prices: Vec<BatchItem>,
-        }
-
-        let body: BatchResponse = resp.json().await?;
-        Ok(body
-            .prices
-            .into_iter()
-            .map(|p| (p.symbol, p.price))
-            .collect())
+        let body = resp.text().await?;
+        parse_batch_prices_response(&body)
     }
 
     /// Return recent trade events for the decision context.
@@ -620,9 +606,45 @@ impl BotRunner {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct BatchItem {
+    symbol: Option<String>,
+    price: Decimal,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum BatchPrices {
+    Map(HashMap<String, BatchItem>),
+    List(Vec<BatchItem>),
+}
+
+#[derive(serde::Deserialize)]
+struct BatchResponse {
+    prices: BatchPrices,
+}
+
+fn parse_batch_prices_response(body: &str) -> anyhow::Result<HashMap<String, Decimal>> {
+    let parsed: BatchResponse = serde_json::from_str(body)?;
+    let prices = match parsed.prices {
+        BatchPrices::Map(map) => map
+            .into_iter()
+            .map(|(key, item)| (item.symbol.unwrap_or(key), item.price))
+            .collect(),
+        BatchPrices::List(list) => list
+            .into_iter()
+            .filter_map(|item| item.symbol.map(|symbol| (symbol, item.price)))
+            .collect(),
+    };
+    Ok(prices)
+}
+
 #[cfg(test)]
 mod tests {
     use rust_decimal::Decimal;
+    use std::collections::HashMap;
+
+    use super::parse_batch_prices_response;
 
     /// REL-002: Verify drawdown percentage calculation matches the formula
     /// used in validate_intent: (peak - current) / peak * 100.
@@ -652,5 +674,38 @@ mod tests {
 
         let drawdown_pct = (peak - current) / peak * Decimal::from(100);
         assert!(drawdown_pct > max_drawdown);
+    }
+
+    #[test]
+    fn parses_map_shaped_batch_response() {
+        let body = r#"{
+            "prices": {
+                "BTC": {"symbol": "BTC", "price": "100.5", "source": "aggregated", "timestamp": "2026-01-01T00:00:00Z"},
+                "ETH": {"symbol": "ETH", "price": "200.25", "source": "aggregated", "timestamp": "2026-01-01T00:00:00Z"}
+            },
+            "errors": []
+        }"#;
+
+        let prices = parse_batch_prices_response(body).expect("map response should parse");
+        let mut expected = HashMap::new();
+        expected.insert("BTC".to_string(), Decimal::from_str_exact("100.5").unwrap());
+        expected.insert("ETH".to_string(), Decimal::from_str_exact("200.25").unwrap());
+        assert_eq!(prices, expected);
+    }
+
+    #[test]
+    fn parses_legacy_list_shaped_batch_response() {
+        let body = r#"{
+            "prices": [
+                {"symbol": "BTC", "price": "100.5"},
+                {"symbol": "ETH", "price": "200.25"}
+            ]
+        }"#;
+
+        let prices = parse_batch_prices_response(body).expect("list response should parse");
+        let mut expected = HashMap::new();
+        expected.insert("BTC".to_string(), Decimal::from_str_exact("100.5").unwrap());
+        expected.insert("ETH".to_string(), Decimal::from_str_exact("200.25").unwrap());
+        assert_eq!(prices, expected);
     }
 }
