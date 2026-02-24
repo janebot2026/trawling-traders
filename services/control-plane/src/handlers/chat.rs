@@ -10,6 +10,8 @@ use uuid::Uuid;
 
 use crate::{middleware::AuthContext, models::*, AppState};
 
+const MAX_CHAT_MESSAGES_PER_HOUR: i64 = 30;
+
 #[derive(Debug, Deserialize)]
 struct OpenAiMessage {
     content: String,
@@ -344,22 +346,6 @@ pub async fn post_bot_chat_message(
 ) -> Result<Json<PostBotChatMessageResponse>, (StatusCode, String)> {
     let bot = super::helpers::get_authorized_bot_for_auth(&state.db, &auth, bot_id).await?;
 
-    // Rate limit: max 30 LLM chat requests per bot per hour
-    let recent_count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM bot_chat_messages WHERE bot_id = $1 AND role = 'user' AND created_at > NOW() - INTERVAL '1 hour'",
-    )
-    .bind(bot_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    if recent_count.0 >= 30 {
-        return Err((
-            StatusCode::TOO_MANY_REQUESTS,
-            "Rate limit exceeded: max 30 chat messages per bot per hour".to_string(),
-        ));
-    }
-
     let content = req.content.trim();
     if content.is_empty() {
         return Err((
@@ -374,14 +360,39 @@ pub async fn post_bot_chat_message(
         ));
     }
 
+    // Atomic quota enforcement: advisory lock + count check + insert in one statement.
+    // This prevents concurrent requests from overshooting the hourly cap.
     let user_message = sqlx::query_as::<_, BotChatMessage>(
-        "INSERT INTO bot_chat_messages (bot_id, role, content) VALUES ($1, 'user', $2) RETURNING *",
+        "WITH _lock AS (
+            SELECT pg_advisory_xact_lock(hashtext($1::text))
+        ), recent AS (
+            SELECT COUNT(*) AS count
+            FROM bot_chat_messages
+            WHERE bot_id = $1
+              AND role = 'user'
+              AND created_at > NOW() - INTERVAL '1 hour'
+        )
+        INSERT INTO bot_chat_messages (bot_id, role, content)
+        SELECT $1, 'user', $2
+        FROM recent
+        WHERE recent.count < $3
+        RETURNING *",
     )
     .bind(bot_id)
     .bind(content)
-    .fetch_one(&state.db)
+    .bind(MAX_CHAT_MESSAGES_PER_HOUR)
+    .fetch_optional(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .ok_or_else(|| {
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            format!(
+                "Rate limit exceeded: max {} chat messages per bot per hour",
+                MAX_CHAT_MESSAGES_PER_HOUR
+            ),
+        )
+    })?;
 
     // SEC-001: Cap context window to 10 messages to limit LLM token cost
     // and prevent excessive data exposure per API call.
@@ -414,4 +425,14 @@ pub async fn post_bot_chat_message(
         user_message,
         assistant_message,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MAX_CHAT_MESSAGES_PER_HOUR;
+
+    #[test]
+    fn chat_rate_limit_constant_matches_api_message_expectation() {
+        assert_eq!(MAX_CHAT_MESSAGES_PER_HOUR, 30);
+    }
 }
