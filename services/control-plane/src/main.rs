@@ -459,8 +459,15 @@ async fn build_router(
                     %method, %uri, has_auth, auth_header = "[REDACTED]",
                     "cedros-login request"
                 );
-                let resp = next.run(req).await;
+                let mut resp = next.run(req).await;
                 tracing::info!(%method, %uri, status = %resp.status(), "cedros-login response");
+                // Cache JWKS responses — keys only rotate on server restart
+                if uri.path().ends_with("/.well-known/jwks.json") && resp.status().is_success() {
+                    resp.headers_mut().insert(
+                        axum::http::header::CACHE_CONTROL,
+                        "public, max-age=300, stale-while-revalidate=60".parse().unwrap(),
+                    );
+                }
                 resp
             },
         )))
