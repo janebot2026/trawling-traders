@@ -1,62 +1,45 @@
-# Audit Remediation Summary
+# Audit Summary
 
-**Date**: 2026-02-22
-**Audit source**: `docs/AUDIT-REPORT.md` (17 findings)
+**Date**: 2026-02-24  
 **Tracker**: `AUDIT_TODO.md`
 
----
+## Totals
 
-## Results
+- Total items fixed: **10 / 10**
+- Deferred items: **0**
+- New issues discovered during remediation: **0**
 
-| Severity | Fixed | Deferred | Total |
-|----------|-------|----------|-------|
-| Critical | 1     | 0        | 1     |
-| High     | 3     | 0        | 3     |
-| Medium   | 6     | 1        | 7     |
-| Low      | 7     | 2        | 9     |
-| **Total**| **17**| **3**    | **20**|
+## Key Improvements
 
-**14 of 17 findings fixed. 3 deferred (large refactors, low ROI).**
+### Bugs and Correctness
+- Fixed batch price response contract parsing mismatch in bot decision engine (`F-001`).
+- Fixed realtime symbol normalization mismatch causing cache misses (`F-002`).
+- Corrected subscription enforcement semantics for inactive paid tiers vs Free tier behavior (`F-003`).
+- Stopped swallowing non-idempotent bot registration failures; startup now fails fast correctly (`F-004`).
+- Removed panic path from `BotRunner` construction; now returns explicit error (`F-005`).
 
----
+### Performance and Reliability
+- Added hard row cap and explicit oversized response handling in report generation path (`F-006`).
+- Made chat quota enforcement atomic to remove race window at hourly boundary (`F-007`).
+- Replaced blocking filesystem reads on async decision path with `tokio::fs` (`F-008`).
+- Reused shared HTTP client for batch price fetches to avoid per-tick client churn (`F-009`).
 
-## Commits (chronological)
+### Cleanup / Tooling
+- Restored working mobile lint setup by adding missing ESLint tooling/config (`F-010`).
 
-| # | Commit | Finding | Area |
-|---|--------|---------|------|
-| 1 | `fix(auth): BUG-001 hash token before comparison in bot_auth_middleware` | BUG-001 | Security |
-| 2 | `fix(api): BUG-002 create new config version for DisableLiveTrading` | BUG-002 | Data integrity |
-| 3 | `fix(api): SEC-001 cap LLM context to 10 messages in chat handler` | SEC-001 | Security/Cost |
-| 4 | `perf(api): PERF-001 join bot+config queries in get_bot_config` | PERF-001 | Performance |
-| 5 | `fix(api): BUG-003 add periodic subscription cache eviction` | BUG-003 | Reliability |
-| 6 | `fix(api): BUG-004 add bot_shutdown and portfolio_snapshot to event types` | BUG-004 | Correctness |
-| 7 | `fix(infra): REL-001 add graceful shutdown to control-plane server` | REL-001 | Reliability |
-| 8 | `fix(bot-runner): REL-002 enforce max_drawdown_percent risk rail` | REL-002 | Risk management |
-| 9 | `fix(bot-runner): REL-004 fetch real prices from data-retrieval service` | REL-004 | Correctness |
-| 10 | `fix(bot-runner): SEC-002 prevent secret field serialization leakage` | SEC-002 | Security |
-| 11 | `fix(api): BUG-005 wrap config version INSERT+UPDATE in transaction` | BUG-005 | Data integrity |
-| 12 | `fix(api): SEC-003 use socket IP for anonymous rate limiting` | SEC-003 | Security |
-| 13 | `chore(cleanup): CLEAN-001 replace blanket dead_code allow with targeted annotations` | CLEAN-001 | Code quality |
-| 14 | `chore(cleanup): CLEAN-002 deduplicate get_authorized_bot helper` | CLEAN-002 | Code quality |
-| 15 | `chore(docs): CLEAN-003 delete deprecated frontend-architecture.md` | CLEAN-003 | Housekeeping |
-| 16 | `fix(bot-runner): REL-003 populate get_recent_events from journal entries` | REL-003 | Correctness |
-| 17 | `fix(infra): REL-005 remove skip_tests bypass from CI pipeline` | REL-005 | CI safety |
+## Verification Summary
 
----
+- `cd services/bot-runner && cargo test`
+- `cd services/data-retrieval && cargo test`
+- `cd services/control-plane && cargo test`
+- `cd apps/mobile && npm run lint`
+- `npm run typecheck`
+- `cd apps/mobile && npm test -- --runInBand`
 
-## Deferred Items
+All checklist items in `AUDIT_TODO.md` are marked complete with per-item verification notes.
 
-| Finding | Reason |
-|---------|--------|
-| PERF-002 | Large multi-file split (bots.rs, models, sync.rs, executor.rs). Lower ROI than functional fixes. |
-| MAINT-001 | executor.rs at 1032 LOC. Needs submodule extraction (quote_cache, cli, stages). Large refactor. |
-| MAINT-002 | Mobile CreateBotWizard.styles.ts at 643 LOC. Cosmetic, no behavioral impact. |
+## Follow-up Recommendations (Optional)
 
----
-
-## Verification
-
-- **control-plane**: `cargo check` clean, `cargo clippy` clean, all tests pass
-- **bot-runner**: `cargo check` clean, `cargo clippy` clean, all tests pass
-- **CI workflow**: YAML syntax valid, skip_tests path removed
-- **No external behavior changes** except where fixing proven bugs (BUG-001 through BUG-005)
+1. Add a lightweight CI guard that asserts `AUDIT_TODO.md` has no unchecked entries when remediation branches are finalized.
+2. Add concurrency-focused integration tests for rate limits and quota logic to complement unit coverage.
+3. Consider periodic perf smoke tests on report generation and decision tick latency to detect regressions early.

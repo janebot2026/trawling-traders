@@ -250,8 +250,14 @@ mod tests {
     #[test]
     fn allows_mutating_requests_for_free_tier() {
         let free = sub_context(SubscriptionTier::Free, false);
-        assert!(!should_block_for_inactive_subscription(&Method::POST, &free));
-        assert!(!should_block_for_inactive_subscription(&Method::PATCH, &free));
+        assert!(!should_block_for_inactive_subscription(
+            &Method::POST,
+            &free
+        ));
+        assert!(!should_block_for_inactive_subscription(
+            &Method::PATCH,
+            &free
+        ));
     }
 
     #[test]

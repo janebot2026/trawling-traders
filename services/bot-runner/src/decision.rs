@@ -646,11 +646,11 @@ mod tests {
     use chrono::Utc;
     use uuid::Uuid;
 
+    use super::parse_batch_prices_response;
     use crate::client::ControlPlaneClient;
     use crate::config::Config;
     use crate::runner::BotRunner;
     use crate::types::{DecisionJournalEntry, IntentValidation, OpenClawIntent, TradeAction};
-    use super::parse_batch_prices_response;
 
     /// REL-002: Verify drawdown percentage calculation matches the formula
     /// used in validate_intent: (peak - current) / peak * 100.
@@ -695,7 +695,10 @@ mod tests {
         let prices = parse_batch_prices_response(body).expect("map response should parse");
         let mut expected = HashMap::new();
         expected.insert("BTC".to_string(), Decimal::from_str_exact("100.5").unwrap());
-        expected.insert("ETH".to_string(), Decimal::from_str_exact("200.25").unwrap());
+        expected.insert(
+            "ETH".to_string(),
+            Decimal::from_str_exact("200.25").unwrap(),
+        );
         assert_eq!(prices, expected);
     }
 
@@ -711,7 +714,10 @@ mod tests {
         let prices = parse_batch_prices_response(body).expect("list response should parse");
         let mut expected = HashMap::new();
         expected.insert("BTC".to_string(), Decimal::from_str_exact("100.5").unwrap());
-        expected.insert("ETH".to_string(), Decimal::from_str_exact("200.25").unwrap());
+        expected.insert(
+            "ETH".to_string(),
+            Decimal::from_str_exact("200.25").unwrap(),
+        );
         assert_eq!(prices, expected);
     }
 

@@ -494,8 +494,14 @@ mod tests {
 
     #[test]
     fn normalize_symbol_uses_usd_canonical_quote() {
-        assert_eq!(BinanceWebSocketClient::normalize_symbol("BTCUSDT"), "BTC/USD");
-        assert_eq!(BinanceWebSocketClient::normalize_symbol("ETHUSD"), "ETH/USD");
+        assert_eq!(
+            BinanceWebSocketClient::normalize_symbol("BTCUSDT"),
+            "BTC/USD"
+        );
+        assert_eq!(
+            BinanceWebSocketClient::normalize_symbol("ETHUSD"),
+            "ETH/USD"
+        );
         assert_eq!(
             BinanceWebSocketClient::normalize_symbol("BTC/USD"),
             "BTC/USD"
