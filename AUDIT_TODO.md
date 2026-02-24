@@ -60,7 +60,7 @@ Order: Critical/High first, then Medium, then Low.
 
 ## Medium
 
-- [ ] **F-006 — CSV report generation is unbounded/heavy in request path**
+- [x] **F-006 — CSV report generation is unbounded/heavy in request path**
   - Files touched: `services/control-plane/src/handlers/reports.rs` (and tests)
   - Planned fix:
     - Add safe upper bound and explicit truncation/error behavior for large report requests.
@@ -68,6 +68,7 @@ Order: Critical/High first, then Medium, then Low.
   - Test plan:
     - `cargo test` control-plane.
     - Add tests for oversized result handling and normal-case behavior.
+  - Completion note: Added `MAX_REPORT_ROWS=10_000`, changed query limit to `MAX_REPORT_ROWS+1`, and now return `413 PAYLOAD_TOO_LARGE` when filtered report rows exceed cap. Added unit tests `enforce_report_size_limit_rejects_oversized_payloads` and `enforce_report_size_limit_allows_max_rows`. Verified via `cd services/control-plane && cargo test`.
 
 - [ ] **F-007 — Chat hourly quota check is non-atomic (race window)**
   - Files touched: `services/control-plane/src/handlers/chat.rs` (and tests)

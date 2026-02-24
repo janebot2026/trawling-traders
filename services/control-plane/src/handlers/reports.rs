@@ -15,6 +15,8 @@ use crate::{
     AppState,
 };
 
+const MAX_REPORT_ROWS: usize = 10_000;
+
 #[derive(sqlx::FromRow)]
 struct EventWithBotName {
     bot_name: String,
@@ -135,12 +137,26 @@ fn filter_report_rows(rows: Vec<(String, Event)>, report_kind: &str) -> Vec<(Str
         .collect()
 }
 
+fn enforce_report_size_limit(rows_len: usize) -> Result<(), (StatusCode, String)> {
+    if rows_len > MAX_REPORT_ROWS {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "Report exceeds maximum row limit ({}). Narrow timeframe or report scope.",
+                MAX_REPORT_ROWS
+            ),
+        ));
+    }
+    Ok(())
+}
+
 async fn collect_report_rows(
     state: &AppState,
     user_id: Uuid,
     cutoff: Option<DateTime<Utc>>,
     report_kind: &str,
 ) -> Result<Vec<(String, Event)>, (StatusCode, String)> {
+    let row_limit = MAX_REPORT_ROWS as i64 + 1;
     let rows: Vec<EventWithBotName> = sqlx::query_as(
         "SELECT b.name AS bot_name, e.id, e.bot_id, e.event_type, e.message, e.metadata, e.created_at
          FROM events e
@@ -148,10 +164,11 @@ async fn collect_report_rows(
          WHERE b.user_id = $1
            AND ($2::timestamptz IS NULL OR e.created_at >= $2)
          ORDER BY e.created_at ASC, e.id ASC
-         LIMIT 50000",
+         LIMIT $3",
     )
     .bind(user_id)
     .bind(cutoff)
+    .bind(row_limit)
     .fetch_all(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -173,7 +190,9 @@ async fn collect_report_rows(
         })
         .collect();
 
-    Ok(filter_report_rows(report_rows, report_kind))
+    let filtered_rows = filter_report_rows(report_rows, report_kind);
+    enforce_report_size_limit(filtered_rows.len())?;
+    Ok(filtered_rows)
 }
 
 async fn resolve_webhook_url(state: &AppState) -> Result<String, (StatusCode, String)> {
@@ -317,8 +336,9 @@ pub async fn request_email_csv_report(
 
 #[cfg(test)]
 mod tests {
-    use super::filter_report_rows;
+    use super::{enforce_report_size_limit, filter_report_rows, MAX_REPORT_ROWS};
     use crate::models::{Event, EventType};
+    use axum::http::StatusCode;
     use chrono::{Duration, Utc};
     use uuid::Uuid;
 
@@ -366,5 +386,16 @@ mod tests {
         assert_eq!(filtered[0].1.event_type, EventType::TradeOpened);
         assert_eq!(filtered[1].1.event_type, EventType::TradeClosed);
         assert!(filtered[0].1.created_at < filtered[1].1.created_at);
+    }
+
+    #[test]
+    fn enforce_report_size_limit_rejects_oversized_payloads() {
+        let err = enforce_report_size_limit(MAX_REPORT_ROWS + 1).expect_err("should reject");
+        assert_eq!(err.0, StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[test]
+    fn enforce_report_size_limit_allows_max_rows() {
+        assert!(enforce_report_size_limit(MAX_REPORT_ROWS).is_ok());
     }
 }
