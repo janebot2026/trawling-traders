@@ -58,6 +58,21 @@ pub struct BinanceWebSocketClient {
 }
 
 impl BinanceWebSocketClient {
+    fn normalize_symbol(symbol: &str) -> String {
+        if symbol.contains('/') {
+            return symbol.to_string();
+        }
+        if let Some(base) = symbol.strip_suffix("USDT") {
+            // Use USD as our canonical quote key so cache lookups and HTTP responses
+            // share the same symbol form.
+            format!("{}/USD", base)
+        } else if let Some(base) = symbol.strip_suffix("USD") {
+            format!("{}/USD", base)
+        } else {
+            symbol.to_string()
+        }
+    }
+
     /// Connect to Binance combined stream WebSocket.
     pub async fn new() -> Result<Self> {
         let url = "wss://stream.binance.com:9443/ws";
@@ -265,16 +280,8 @@ impl BinanceWebSocketClient {
         let price = Decimal::from_str(price_str)
             .map_err(|e| DataRetrievalError::InvalidResponse(format!("Invalid price: {}", e)))?;
 
-        let formatted_symbol = if let Some(base) = symbol.strip_suffix("USDT") {
-            format!("{}/USDT", base)
-        } else if let Some(base) = symbol.strip_suffix("USD") {
-            format!("{}/USD", base)
-        } else {
-            symbol.to_string()
-        };
-
         let price_point = PricePoint {
-            symbol: formatted_symbol,
+            symbol: Self::normalize_symbol(symbol),
             price,
             source: "binance".to_string(),
             timestamp,
@@ -483,5 +490,15 @@ mod tests {
         client.reconnect().await.unwrap();
         // rx should still be valid; a send on the new handler will reach it.
         assert!(rx.try_recv().is_err()); // empty but not closed
+    }
+
+    #[test]
+    fn normalize_symbol_uses_usd_canonical_quote() {
+        assert_eq!(BinanceWebSocketClient::normalize_symbol("BTCUSDT"), "BTC/USD");
+        assert_eq!(BinanceWebSocketClient::normalize_symbol("ETHUSD"), "ETH/USD");
+        assert_eq!(
+            BinanceWebSocketClient::normalize_symbol("BTC/USD"),
+            "BTC/USD"
+        );
     }
 }

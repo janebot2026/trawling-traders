@@ -18,7 +18,7 @@ Order: Critical/High first, then Medium, then Low.
 
 ## High
 
-- [ ] **F-002 — Real-time cache key mismatch (`/USDT` vs `/USD`) causes cache bypass**
+- [x] **F-002 — Real-time cache key mismatch (`/USDT` vs `/USD`) causes cache bypass**
   - Files touched: `services/data-retrieval/src/lib.rs`, `services/data-retrieval/src/sources/binance_ws.rs` (and tests)
   - Planned fix:
     - Normalize websocket-derived symbols to the same quote format used by `get_price_realtime` lookups.
@@ -26,6 +26,7 @@ Order: Critical/High first, then Medium, then Low.
   - Test plan:
     - `cargo test` data-retrieval.
     - Add/adjust unit test proving cache hit path for crypto symbol lookup.
+  - Completion note: Added `normalize_symbol` to canonicalize Binance symbols to `/USD` and used it in trade processing. Added regression test `normalize_symbol_uses_usd_canonical_quote`. Verified via `cd services/data-retrieval && cargo test`.
 
 - [ ] **F-003 — Subscription tier semantics inconsistent for no-subscription users**
   - Files touched: `services/control-plane/src/middleware/subscription.rs` (and tests)
