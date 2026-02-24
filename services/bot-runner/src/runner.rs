@@ -72,6 +72,8 @@ pub struct BotRunner {
     pub(crate) trade_count: u32,
     /// OpenClaw gateway HTTP client.
     pub(crate) openclaw_client: OpenClawClient,
+    /// Shared HTTP client for data-retrieval requests.
+    pub(crate) data_http_client: reqwest::Client,
     /// Gateway configuration manager.
     pub(crate) gateway_manager: GatewayManager,
     /// State directory for runner files (now.json, journal/).
@@ -108,6 +110,10 @@ impl BotRunner {
 
         let openclaw_client = OpenClawClient::new()
             .map_err(|e| anyhow::anyhow!("Failed to initialize OpenClaw client: {}", e))?;
+        let data_http_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize data HTTP client: {}", e))?;
         let gateway_manager = GatewayManager::new();
 
         let state_dir = std::env::var("BOT_STATE_DIR")
@@ -131,6 +137,7 @@ impl BotRunner {
             reconciler: None,
             trade_count: 0,
             openclaw_client,
+            data_http_client,
             gateway_manager,
             state_dir,
             status: RunnerStatus::Idle,

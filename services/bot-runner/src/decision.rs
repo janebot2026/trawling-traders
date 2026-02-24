@@ -515,11 +515,8 @@ impl BotRunner {
         symbols: &[String],
     ) -> anyhow::Result<HashMap<String, Decimal>> {
         let url = format!("{}/prices/batch", base_url);
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()?;
-
-        let resp = client
+        let resp = self
+            .data_http_client
             .post(&url)
             .json(&serde_json::json!({ "symbols": symbols }))
             .send()

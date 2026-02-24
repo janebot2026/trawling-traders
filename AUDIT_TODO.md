@@ -90,7 +90,7 @@ Order: Critical/High first, then Medium, then Low.
     - Regression test for recent-event extraction output consistency.
   - Completion note: Converted `get_recent_events` to async and replaced blocking `std::fs` calls with `tokio::fs::read_dir`/`read_to_string`; updated decision-context flow to await event collection. Added async regression test `get_recent_events_reads_journal_entries`. Verified via `cd services/bot-runner && cargo test`.
 
-- [ ] **F-009 — New reqwest client created for each batch price fetch**
+- [x] **F-009 — New reqwest client created for each batch price fetch**
   - Files touched: `services/bot-runner/src/runner.rs`, `services/bot-runner/src/decision.rs` (and tests)
   - Planned fix:
     - Reuse a shared HTTP client on `BotRunner`.
@@ -98,6 +98,7 @@ Order: Critical/High first, then Medium, then Low.
   - Test plan:
     - `cargo test` bot-runner.
     - Compile-time and behavior regression checks for price fetch path.
+  - Completion note: Added shared `data_http_client` on `BotRunner` (10s timeout) and switched `fetch_batch_prices` to reuse it instead of constructing a new client per tick. Verified via `cd services/bot-runner && cargo test`.
 
 ## Low
 
