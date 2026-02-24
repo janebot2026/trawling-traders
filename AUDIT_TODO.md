@@ -38,7 +38,7 @@ Order: Critical/High first, then Medium, then Low.
     - Add test coverage for no-subscription user on GET and mutating endpoints.
   - Completion note: Added `should_block_for_inactive_subscription` policy helper and changed enforcement to block only inactive paid tiers on mutating requests; Free tier is no longer blanket-blocked. Added tests `allows_mutating_requests_for_free_tier`, `blocks_mutating_requests_for_inactive_paid_tiers`, and `allows_get_requests_for_all_tiers`. Verified via `cd services/control-plane && cargo test`.
 
-- [ ] **F-004 — Bot registration errors are swallowed and runner continues**
+- [x] **F-004 — Bot registration errors are swallowed and runner continues**
   - Files touched: `services/bot-runner/src/main.rs` (and tests)
   - Planned fix:
     - Only ignore expected idempotent registration outcomes.
@@ -46,6 +46,7 @@ Order: Critical/High first, then Medium, then Low.
   - Test plan:
     - `cargo test` bot-runner.
     - Add unit test for non-idempotent registration failure path.
+  - Completion note: Updated startup registration handling to suppress only explicit `409 ... already registered` errors and propagate all other registration failures. Added tests `detects_idempotent_already_registered_error` and `does_not_treat_other_errors_as_idempotent`. Verified via `cd services/bot-runner && cargo test`.
 
 - [ ] **F-005 — BotRunner panics on OpenClaw client init failure**
   - Files touched: `services/bot-runner/src/runner.rs`, `services/bot-runner/src/main.rs` (and tests)

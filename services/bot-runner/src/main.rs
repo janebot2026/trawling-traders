@@ -78,14 +78,46 @@ async fn register_bot(client: &ControlPlaneClient) -> anyhow::Result<()> {
             Ok(())
         }
         Err(e) => {
-            // Already registered is OK, but still try to report wallet
-            warn!("Registration response: {}", e);
-            if let Some(addr) = wallet {
-                if let Err(e) = client.report_wallet(&addr).await {
-                    warn!("Wallet report failed (non-critical): {}", e);
+            let err_msg = e.to_string();
+            if is_already_registered_error(&err_msg) {
+                // Already registered is OK, but still try to report wallet
+                warn!("Registration response: {}", err_msg);
+                if let Some(addr) = wallet {
+                    if let Err(e) = client.report_wallet(&addr).await {
+                        warn!("Wallet report failed (non-critical): {}", e);
+                    }
                 }
+                Ok(())
+            } else {
+                Err(e)
             }
-            Ok(())
         }
+    }
+}
+
+fn is_already_registered_error(error_message: &str) -> bool {
+    let lower = error_message.to_ascii_lowercase();
+    lower.contains("409") && lower.contains("already registered")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_already_registered_error;
+
+    #[test]
+    fn detects_idempotent_already_registered_error() {
+        assert!(is_already_registered_error(
+            "Registration failed: 409 Conflict - Bot already registered"
+        ));
+    }
+
+    #[test]
+    fn does_not_treat_other_errors_as_idempotent() {
+        assert!(!is_already_registered_error(
+            "Registration failed: 500 Internal Server Error"
+        ));
+        assert!(!is_already_registered_error(
+            "Registration failed: 409 Conflict - Bot not found"
+        ));
     }
 }
