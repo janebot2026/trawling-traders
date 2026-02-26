@@ -111,4 +111,21 @@ pub mod keys {
     pub const MAX_BOTS_PER_USER: &str = "max_bots_per_user";
     pub const MAX_CONCURRENT_PROVISIONS: &str = "max_concurrent_provisions";
     pub const RATE_LIMIT_REQUESTS_PER_MINUTE: &str = "rate_limit_requests_per_minute";
+
+    // Authentication
+    pub const EMAIL_AUTH_ENABLED: &str = "email_auth_enabled";
+    pub const GOOGLE_AUTH_ENABLED: &str = "google_auth_enabled";
+    pub const APPLE_AUTH_ENABLED: &str = "apple_auth_enabled";
+    pub const SOLANA_AUTH_ENABLED: &str = "solana_auth_enabled";
+    pub const BLOCK_DISPOSABLE_EMAILS: &str = "block_disposable_emails";
+    pub const REQUIRE_EMAIL_VERIFICATION: &str = "require_email_verification";
+    pub const GOOGLE_CLIENT_ID: &str = "google_client_id";
+    pub const APPLE_CLIENT_ID: &str = "apple_client_id";
+    pub const APPLE_TEAM_ID: &str = "apple_team_id";
+    pub const INSTANT_LINK_ENABLED: &str = "instant_link_enabled";
+    pub const SSO_ENABLED: &str = "sso_enabled";
+    pub const WEBAUTHN_ENABLED: &str = "webauthn_enabled";
+    pub const WEBAUTHN_RP_ID: &str = "webauthn_rp_id";
+    pub const WEBAUTHN_RP_NAME: &str = "webauthn_rp_name";
+    pub const WEBAUTHN_RP_ORIGIN: &str = "webauthn_rp_origin";
 }

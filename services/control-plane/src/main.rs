@@ -363,7 +363,7 @@ async fn build_router(
 
     // Cedros Pay routes - try full integration, fallback to placeholder
     let mut pay_error: Option<String> = None;
-    let cedros_routes = match control_plane::cedros::pay::full_router(pool).await {
+    let cedros_routes = match control_plane::cedros::pay::full_router(pool.clone()).await {
         Ok(router) => {
             info!("✓ Cedros Pay full integration active");
             router
@@ -450,6 +450,11 @@ async fn build_router(
                 }
             },
         ))) // cedros-pay applies its own route prefix
+        .merge(
+            Router::new()
+                .route("/v1/auth/discovery", get(control_plane::cedros::login::discovery_handler))
+                .layer(axum::extract::Extension(pool.clone())),
+        )
         .nest("/v1/auth", login_routes.layer(axum::middleware::from_fn(
             |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| async move {
                 let method = req.method().clone();

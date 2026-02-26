@@ -23,6 +23,9 @@ pub struct AuthContext {
     pub user_id: String,
     pub email: Option<String>,
     pub is_admin: bool,
+    /// Whether the user's email has been verified.
+    /// Populated from DB for API key auth; from JWT claims once cedros-login 0.0.18+ is deployed.
+    pub email_verified: bool,
 }
 
 /// Auth middleware that validates Cedros Login RS256 JWTs or API keys
@@ -73,6 +76,10 @@ fn authenticate_jwt(state: &AppState, token: &str) -> Result<AuthContext, Status
         user_id: claims.sub.to_string(),
         email: None,
         is_admin: claims.is_system_admin.unwrap_or(false),
+        // unwrap_or(true): old tokens minted by 0.0.17 won't have this field (None).
+        // Default true so they aren't blocked — cedros-login already gates login
+        // for unverified users when require_verification is enabled.
+        email_verified: claims.email_verified.unwrap_or(true),
     })
 }
 
@@ -84,8 +91,8 @@ async fn authenticate_api_key(state: &AppState, api_key: &str) -> Result<AuthCon
     let key_hash = hex::encode(Sha256::digest(api_key.as_bytes()));
     let key_prefix: String = api_key.chars().take(16).collect();
 
-    let row: Option<(uuid::Uuid, Option<String>, bool)> = sqlx::query_as(
-        "SELECT u.id, u.email, COALESCE(u.is_system_admin, false) \
+    let row: Option<(uuid::Uuid, Option<String>, bool, bool)> = sqlx::query_as(
+        "SELECT u.id, u.email, COALESCE(u.is_system_admin, false), u.email_verified \
          FROM api_keys ak JOIN users u ON u.id = ak.user_id \
          WHERE ak.key_prefix = $1 AND ak.key_hash = $2",
     )
@@ -98,7 +105,7 @@ async fn authenticate_api_key(state: &AppState, api_key: &str) -> Result<AuthCon
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let (user_id, email, is_admin) = row.ok_or_else(|| {
+    let (user_id, email, is_admin, email_verified) = row.ok_or_else(|| {
         tracing::debug!("Invalid API key (prefix: {})", &key_prefix);
         StatusCode::UNAUTHORIZED
     })?;
@@ -107,6 +114,7 @@ async fn authenticate_api_key(state: &AppState, api_key: &str) -> Result<AuthCon
         user_id: user_id.to_string(),
         email,
         is_admin,
+        email_verified,
     })
 }
 

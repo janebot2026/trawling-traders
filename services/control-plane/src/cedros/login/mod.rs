@@ -9,6 +9,8 @@ use cedros_login::services::JwtService;
 use sqlx::PgPool;
 use std::sync::Arc;
 
+use crate::config::{self, keys};
+
 /// Build result containing the auth router and JWT service for token validation
 pub struct LoginIntegration {
     pub router: Router,
@@ -39,6 +41,58 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         Some(pem.to_string())
     });
 
+    // Read auth provider toggles from platform_config
+    let email_enabled =
+        config::get_config_or(&pool, keys::EMAIL_AUTH_ENABLED, "true").await == "true";
+    let google_enabled =
+        config::get_config_or(&pool, keys::GOOGLE_AUTH_ENABLED, "false").await == "true";
+    let apple_enabled =
+        config::get_config_or(&pool, keys::APPLE_AUTH_ENABLED, "false").await == "true";
+    let solana_enabled =
+        config::get_config_or(&pool, keys::SOLANA_AUTH_ENABLED, "false").await == "true";
+    let block_disposable =
+        config::get_config_or(&pool, keys::BLOCK_DISPOSABLE_EMAILS, "false").await == "true";
+    let require_verification =
+        config::get_config_or(&pool, keys::REQUIRE_EMAIL_VERIFICATION, "false").await == "true";
+
+    let sso_enabled = config::get_config_or(&pool, keys::SSO_ENABLED, "false").await == "true";
+    let webauthn_enabled =
+        config::get_config_or(&pool, keys::WEBAUTHN_ENABLED, "false").await == "true";
+
+    // Read OAuth credentials from platform_config (falls back to env vars)
+    let google_client_id = config::get_config(&pool, keys::GOOGLE_CLIENT_ID)
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("GOOGLE_CLIENT_ID").ok());
+    let apple_client_id = config::get_config(&pool, keys::APPLE_CLIENT_ID)
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("APPLE_CLIENT_ID").ok());
+    let apple_team_id = config::get_config(&pool, keys::APPLE_TEAM_ID)
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("APPLE_TEAM_ID").ok());
+
+    // Read WebAuthn RP config from platform_config (falls back to env vars)
+    let webauthn_rp_id = config::get_config(&pool, keys::WEBAUTHN_RP_ID)
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("WEBAUTHN_RP_ID").ok());
+    let webauthn_rp_name = config::get_config(&pool, keys::WEBAUTHN_RP_NAME)
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("WEBAUTHN_RP_NAME").ok());
+    let webauthn_rp_origin = config::get_config(&pool, keys::WEBAUTHN_RP_ORIGIN)
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("WEBAUTHN_RP_ORIGIN").ok());
+
     // Build config - database config not needed since we pass the pool directly
     let config = cedros_login::Config {
         server: cedros_login::config::ServerConfig {
@@ -57,12 +111,32 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
             refresh_token_expiry: cedros_login::config::default_refresh_expiry(),
         },
         database: Default::default(),
-        // Defaults for everything else - configure via env vars as needed
-        email: Default::default(),
-        google: Default::default(),
-        apple: Default::default(),
-        solana: Default::default(),
-        webauthn: Default::default(),
+        email: cedros_login::config::EmailConfig {
+            enabled: email_enabled,
+            block_disposable_emails: block_disposable,
+            require_verification: require_verification,
+            ..Default::default()
+        },
+        google: cedros_login::config::GoogleConfig {
+            enabled: google_enabled,
+            client_id: google_client_id,
+        },
+        apple: cedros_login::config::AppleConfig {
+            enabled: apple_enabled,
+            client_id: apple_client_id,
+            team_id: apple_team_id,
+        },
+        solana: cedros_login::config::SolanaConfig {
+            enabled: solana_enabled,
+            ..Default::default()
+        },
+        webauthn: cedros_login::config::WebAuthnConfig {
+            enabled: webauthn_enabled,
+            rp_id: webauthn_rp_id,
+            rp_name: webauthn_rp_name,
+            rp_origin: webauthn_rp_origin,
+            ..Default::default()
+        },
         cors: cedros_login::config::CorsConfig {
             allowed_origins: vec![],
             disabled: true, // Host app manages CORS for all routes
@@ -74,7 +148,9 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         webhook: Default::default(),
         rate_limit: Default::default(),
         notification: Default::default(),
-        sso: Default::default(),
+        sso: cedros_login::config::SsoConfig {
+            enabled: sso_enabled,
+        },
         wallet: Default::default(),
         privacy: Default::default(),
     };
@@ -85,17 +161,189 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
 
     // cedros-login now uses idempotent DDL + ignore_missing, so it handles
     // its own migrations cleanly alongside our app's and cedros-pay's entries.
-    let storage = cedros_login::Storage::postgres_with_pool(pool)
+    let storage = cedros_login::Storage::postgres_with_pool(pool.clone())
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create cedros-login storage: {:?}", e))?;
 
     let callback = Arc::new(cedros_login::NoopCallback);
     let router = cedros_login::router_with_storage(config, callback, storage);
 
+    // Sync platform_config auth settings to cedros-login's system_settings table
+    // so runtime reads via SettingsService reflect our config state.
+    sync_all_auth_settings(&pool).await;
+
     Ok(LoginIntegration {
         router,
         jwt_service,
     })
+}
+
+/// Dynamic auth discovery handler — reads enabled providers from platform_config.
+///
+/// Returns `{ "providers": ["email", ...] }`. Reads DB on every call so admin
+/// toggles take effect immediately without restart.
+pub async fn discovery_handler(
+    axum::extract::Extension(pool): axum::extract::Extension<PgPool>,
+) -> axum::Json<serde_json::Value> {
+    let mut providers = Vec::new();
+
+    if config::get_config_or(&pool, keys::EMAIL_AUTH_ENABLED, "true").await == "true" {
+        providers.push("email");
+    }
+    if config::get_config_or(&pool, keys::GOOGLE_AUTH_ENABLED, "false").await == "true" {
+        providers.push("google");
+    }
+    if config::get_config_or(&pool, keys::APPLE_AUTH_ENABLED, "false").await == "true" {
+        providers.push("apple");
+    }
+    if config::get_config_or(&pool, keys::SOLANA_AUTH_ENABLED, "false").await == "true" {
+        providers.push("solana");
+    }
+    if config::get_config_or(&pool, keys::INSTANT_LINK_ENABLED, "false").await == "true" {
+        providers.push("instantLink");
+    }
+    if config::get_config_or(&pool, keys::SSO_ENABLED, "false").await == "true" {
+        providers.push("sso");
+    }
+    if config::get_config_or(&pool, keys::WEBAUTHN_ENABLED, "false").await == "true" {
+        providers.push("webauthn");
+    }
+
+    axum::Json(serde_json::json!({ "providers": providers }))
+}
+
+// ============================================================================
+// Runtime settings sync — platform_config → cedros-login system_settings
+// ============================================================================
+
+/// Mapping from our platform_config key to cedros-login's system_settings (key, category).
+///
+/// cedros-login 0.0.18+ reads these at request time via SettingsService (60s cache),
+/// so writes here take effect without restart.
+const AUTH_SETTINGS_MAP: &[(&str, &str, &str)] = &[
+    (keys::EMAIL_AUTH_ENABLED, "auth_email_enabled", "auth.email"),
+    (
+        keys::GOOGLE_AUTH_ENABLED,
+        "auth_google_enabled",
+        "auth.google",
+    ),
+    (keys::APPLE_AUTH_ENABLED, "auth_apple_enabled", "auth.apple"),
+    (
+        keys::SOLANA_AUTH_ENABLED,
+        "auth_solana_enabled",
+        "auth.solana",
+    ),
+    (
+        keys::BLOCK_DISPOSABLE_EMAILS,
+        "auth_email_block_disposable",
+        "auth.email",
+    ),
+    (
+        keys::REQUIRE_EMAIL_VERIFICATION,
+        "auth_email_require_verification",
+        "auth.email",
+    ),
+    (
+        keys::GOOGLE_CLIENT_ID,
+        "auth_google_client_id",
+        "auth.google",
+    ),
+    (keys::APPLE_CLIENT_ID, "auth_apple_client_id", "auth.apple"),
+    (keys::APPLE_TEAM_ID, "auth_apple_team_id", "auth.apple"),
+    (
+        keys::INSTANT_LINK_ENABLED,
+        "auth_instantlink_enabled",
+        "auth.instantlink",
+    ),
+    (keys::SSO_ENABLED, "feature_sso", "features"),
+    (
+        keys::WEBAUTHN_ENABLED,
+        "auth_webauthn_enabled",
+        "auth.webauthn",
+    ),
+    (keys::WEBAUTHN_RP_ID, "auth_webauthn_rp_id", "auth.webauthn"),
+    (
+        keys::WEBAUTHN_RP_NAME,
+        "auth_webauthn_rp_name",
+        "auth.webauthn",
+    ),
+    (
+        keys::WEBAUTHN_RP_ORIGIN,
+        "auth_webauthn_rp_origin",
+        "auth.webauthn",
+    ),
+];
+
+/// Sync a single platform_config key to cedros-login's system_settings table.
+///
+/// Returns true if the key was an auth setting that was synced.
+/// Non-auth keys are silently ignored (returns false).
+pub async fn sync_auth_setting(pool: &PgPool, platform_key: &str, value: &str) -> bool {
+    let Some((_, ss_key, ss_category)) = AUTH_SETTINGS_MAP
+        .iter()
+        .find(|(pk, _, _)| *pk == platform_key)
+    else {
+        return false;
+    };
+
+    let result = sqlx::query(
+        "INSERT INTO system_settings (key, value, category, is_secret, updated_at)
+         VALUES ($1, $2, $3, false, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+    )
+    .bind(ss_key)
+    .bind(value)
+    .bind(ss_category)
+    .execute(pool)
+    .await;
+
+    if let Err(e) = result {
+        tracing::warn!(
+            platform_key,
+            system_settings_key = ss_key,
+            error = %e,
+            "Failed to sync auth setting to system_settings"
+        );
+    } else {
+        tracing::info!(
+            platform_key,
+            system_settings_key = ss_key,
+            "Synced auth setting to system_settings"
+        );
+    }
+    true
+}
+
+/// Sync all auth settings from platform_config to system_settings at startup.
+///
+/// Ensures cedros-login's runtime settings match our platform_config state.
+pub async fn sync_all_auth_settings(pool: &PgPool) {
+    for &(platform_key, ss_key, ss_category) in AUTH_SETTINGS_MAP {
+        let value = config::get_config_or(pool, platform_key, "").await;
+        if value.is_empty() {
+            continue; // Don't overwrite cedros-login defaults with empty strings
+        }
+        let result = sqlx::query(
+            "INSERT INTO system_settings (key, value, category, is_secret, updated_at)
+             VALUES ($1, $2, $3, false, NOW())
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+        )
+        .bind(ss_key)
+        .bind(&value)
+        .bind(ss_category)
+        .execute(pool)
+        .await;
+
+        if let Err(e) = result {
+            tracing::warn!(
+                platform_key,
+                system_settings_key = ss_key,
+                error = %e,
+                "Startup sync: failed to sync auth setting"
+            );
+        }
+    }
+    tracing::info!("Synced auth settings from platform_config to system_settings");
 }
 
 /// Simple placeholder routes (used when full integration fails)

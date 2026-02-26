@@ -12,7 +12,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::info;
 
-use crate::{middleware::AdminContext, models::*, AppState};
+use crate::{config::keys, middleware::AdminContext, models::*, AppState};
 
 const MASKED_VALUE: &str = "********";
 
@@ -136,6 +136,15 @@ pub async fn update_config(
             }
         };
 
+        // Validate: reject enabling an auth provider without required credentials
+        if let Some(err) = validate_auth_toggle(&state.db, &update.key, &update.value).await {
+            failed.push(ConfigUpdateError {
+                key: update.key,
+                error: err,
+            });
+            continue;
+        }
+
         // Encrypt value if needed
         let new_value = if config.encrypted && !update.value.is_empty() {
             match state.secrets.encrypt(&update.value) {
@@ -195,6 +204,9 @@ pub async fn update_config(
         .execute(&state.db)
         .await;
 
+        // Sync auth settings to cedros-login's system_settings for runtime effect
+        crate::cedros::login::sync_auth_setting(&state.db, &update.key, &update.value).await;
+
         info!(
             "Config '{}' updated by admin {}",
             update.key, admin.admin_id
@@ -203,6 +215,44 @@ pub async fn update_config(
     }
 
     Ok(Json(UpdateConfigResponse { updated, failed }))
+}
+
+/// Validate auth provider toggles — reject enabling a provider without its required credentials.
+///
+/// Returns `Some(error_message)` if the update should be rejected, `None` if OK.
+async fn validate_auth_toggle(pool: &sqlx::PgPool, key: &str, value: &str) -> Option<String> {
+    if value != "true" {
+        return None;
+    }
+
+    // Map: auth toggle key -> list of required credential keys
+    let requirements: &[&str] = match key {
+        keys::GOOGLE_AUTH_ENABLED => &[keys::GOOGLE_CLIENT_ID],
+        keys::APPLE_AUTH_ENABLED => &[keys::APPLE_CLIENT_ID, keys::APPLE_TEAM_ID],
+        keys::WEBAUTHN_ENABLED => &[keys::WEBAUTHN_RP_ID, keys::WEBAUTHN_RP_ORIGIN],
+        _ => return None,
+    };
+
+    let mut missing = Vec::new();
+    for &credential_key in requirements {
+        let has_value = crate::config::get_config(pool, credential_key)
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if !has_value {
+            missing.push(credential_key);
+        }
+    }
+
+    if missing.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Cannot enable: {} must be set first",
+            missing.join(", ")
+        ))
+    }
 }
 
 /// GET /admin/config/audit - Get config change audit log
@@ -312,6 +362,9 @@ pub async fn sync_env_to_db(
         ("discord_webhook_url", "DISCORD_ALERT_WEBHOOK", true),
         ("email_webhook_url", "EMAIL_ALERT_WEBHOOK", true),
         ("alert_email_to", "ALERT_EMAIL_TO", false),
+        ("google_client_id", "GOOGLE_CLIENT_ID", false),
+        ("apple_client_id", "APPLE_CLIENT_ID", false),
+        ("apple_team_id", "APPLE_TEAM_ID", false),
     ];
 
     let mut updated = Vec::new();

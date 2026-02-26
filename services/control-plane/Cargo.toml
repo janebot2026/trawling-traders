@@ -56,10 +56,10 @@ rust_decimal = { version = "1.40", features = ["serde", "maths"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 
 # Cedros Pay integration - embedded payments with auto-migration
-cedros-pay = "1.1.15"
+cedros-pay = "1.1.16"
 
 # Cedros Login integration - embedded auth server with auto-migration
-cedros-login-server = { version = "0.0.17", features = ["postgres"] }
+cedros-login-server = { version = "0.0.18", features = ["postgres"] }
 
 # RSA key generation (shared JWT signing key for cedros-login + our auth middleware)
 rsa = "0.9"
