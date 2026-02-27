@@ -965,9 +965,9 @@ dependencies = [
 
 [[package]]
 name = "cedros-login-server"
-version = "0.0.18"
+version = "0.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e8c4acfe74968900f33270c1a5db522fed7923a7746cd3e188c9aaae44257f4"
+checksum = "e00843d8e844b121f80360fd5766ff5de49e04ced6086aa50fe434f6eb9d9ce9"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -982,6 +982,7 @@ dependencies = [
  "dotenvy",
  "ed25519-dalek 2.2.0",
  "hex",
+ "hkdf",
  "hmac 0.12.1",
  "jsonwebtoken",
  "metrics",
@@ -1014,9 +1015,9 @@ dependencies = [
 
 [[package]]
 name = "cedros-pay"
-version = "1.1.16"
+version = "1.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e32f48a921fd97336738f0cee74d1901737449d7a3d7f4d93372d97788ce77f"
+checksum = "3ba9f146e11e840685d87ac4122653a7683d586a0632b078915c618c7b612665"
 dependencies = [
  "aes-gcm",
  "anyhow",
