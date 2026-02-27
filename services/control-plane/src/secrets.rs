@@ -172,13 +172,13 @@ impl Default for SecretsManager {
 #[cfg(test)]
 impl SecretsManager {
     /// Create a SecretsManager with a specific key (for testing only)
-    fn with_key(key_hex: &str) -> Self {
+    pub(crate) fn with_key(key_hex: &str) -> Self {
         let encryption_key = hex::decode(key_hex).ok().filter(|k| k.len() == 32);
         Self { encryption_key }
     }
 
     /// Create a SecretsManager without encryption (for testing only)
-    fn without_encryption() -> Self {
+    pub(crate) fn without_encryption() -> Self {
         Self {
             encryption_key: None,
         }

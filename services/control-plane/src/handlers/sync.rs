@@ -364,7 +364,8 @@ pub async fn heartbeat(
             .increment(metrics::CONFIG_MISMATCH_COUNT, 1)
             .await;
         if let Some(alert) = state
-            .alerts
+            .alert_router
+            .alert_manager()
             .check_config_mismatch(
                 &bot_id.to_string(),
                 &bot.desired_version_id.to_string(),
@@ -375,8 +376,8 @@ pub async fn heartbeat(
             .await
         {
             state
-                .alerts
-                .fire_alert(&alert, crate::alerting::AlertSeverity::Warning)
+                .alert_router
+                .fire_alert_and_notify(&alert, crate::alerting::AlertSeverity::Warning)
                 .await;
         }
     }

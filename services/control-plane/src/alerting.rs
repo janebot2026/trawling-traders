@@ -80,6 +80,29 @@ pub enum AlertType {
     },
 }
 
+impl AlertType {
+    /// Classify where this alert should be routed.
+    pub(crate) fn routing(&self) -> crate::webhook::AlertRouting {
+        use crate::webhook::AlertRouting;
+        match self {
+            // Trader-facing: the bot owner should see these
+            AlertType::DailyLossLimit { bot_id, .. }
+            | AlertType::MaxDrawdown { bot_id, .. }
+            | AlertType::DrawdownBreach { bot_id, .. }
+            | AlertType::PositionSize { bot_id, .. }
+            | AlertType::BotOffline { bot_id, .. }
+            | AlertType::RepeatedTradeFailed { bot_id, .. }
+            | AlertType::ConfigMismatch { bot_id, .. } => AlertRouting::Trader {
+                bot_id: bot_id.clone(),
+            },
+            // Admin / platform-level
+            AlertType::ProvisionFailure { .. }
+            | AlertType::OrphanedBot { .. }
+            | AlertType::HighErrorRate { .. } => AlertRouting::Admin,
+        }
+    }
+}
+
 /// Alert configuration thresholds
 #[derive(Debug, Clone)]
 pub struct AlertConfig {
@@ -395,8 +418,8 @@ impl AlertManager {
             }
         }
 
-        // Note: For webhook/email notification, use fire_alert_with_webhook()
-        // from webhook.rs which combines logging with external notifications.
+        // Note: For webhook/email notification, use AlertRouter::fire_alert_and_notify()
+        // which combines logging with routed external notifications.
     }
 
     /// Record a trade failure and check for repeated failures
@@ -451,7 +474,11 @@ impl AlertManager {
 ///
 /// Wraps each tick in `catch_unwind` so a panic in bot-checking logic restarts
 /// the task rather than silently terminating the offline-alert system.
-pub fn spawn_offline_checker(pool: sqlx::PgPool, alert_manager: AlertManager) {
+pub fn spawn_offline_checker(
+    pool: sqlx::PgPool,
+    alert_manager: AlertManager,
+    alert_router: crate::webhook::AlertRouter,
+) {
     use futures::FutureExt as _;
 
     tokio::spawn(async move {
@@ -462,6 +489,7 @@ pub fn spawn_offline_checker(pool: sqlx::PgPool, alert_manager: AlertManager) {
 
             let pool_ref = &pool;
             let am_ref = &alert_manager;
+            let router_ref = &alert_router;
 
             let tick_result = std::panic::AssertUnwindSafe(async move {
                 // Find bots that haven't heartbeated recently
@@ -496,7 +524,9 @@ pub fn spawn_offline_checker(pool: sqlx::PgPool, alert_manager: AlertManager) {
                             };
 
                             if let Some(alert) = alert {
-                                am_ref.fire_alert(&alert, AlertSeverity::Warning).await;
+                                router_ref
+                                    .fire_alert_and_notify(&alert, AlertSeverity::Warning)
+                                    .await;
                             }
                         }
                     }
@@ -522,4 +552,67 @@ pub fn spawn_offline_checker(pool: sqlx::PgPool, alert_manager: AlertManager) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::webhook::AlertRouting;
+    use rust_decimal::Decimal;
+
+    #[test]
+    fn routing_trader_for_bot_offline() {
+        let alert = AlertType::BotOffline {
+            bot_id: "abc-123".to_string(),
+            last_heartbeat: None,
+        };
+        assert_eq!(
+            alert.routing(),
+            AlertRouting::Trader {
+                bot_id: "abc-123".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn routing_admin_for_provision_failure() {
+        let alert = AlertType::ProvisionFailure {
+            bot_id: "abc-123".to_string(),
+            attempt: 3,
+        };
+        assert_eq!(alert.routing(), AlertRouting::Admin);
+    }
+
+    #[test]
+    fn routing_trader_for_daily_loss() {
+        let alert = AlertType::DailyLossLimit {
+            bot_id: "bot-1".to_string(),
+            current_loss: Decimal::from(6),
+            limit: Decimal::from(5),
+        };
+        match alert.routing() {
+            AlertRouting::Trader { bot_id } => assert_eq!(bot_id, "bot-1"),
+            AlertRouting::Admin => panic!("Expected Trader routing"),
+        }
+    }
+
+    #[test]
+    fn routing_admin_for_high_error_rate() {
+        let alert = AlertType::HighErrorRate {
+            component: "api".to_string(),
+            error_rate: 10.0,
+            threshold: 5.0,
+        };
+        assert_eq!(alert.routing(), AlertRouting::Admin);
+    }
+
+    #[test]
+    fn routing_admin_for_orphaned_bot() {
+        let alert = AlertType::OrphanedBot {
+            bot_id: "orphan-1".to_string(),
+            status: "provisioning".to_string(),
+            duration_secs: 3600,
+        };
+        assert_eq!(alert.routing(), AlertRouting::Admin);
+    }
 }

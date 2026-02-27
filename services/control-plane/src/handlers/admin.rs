@@ -317,8 +317,8 @@ pub async fn test_webhook(
         }));
     }
 
-    // Decrypt if needed (currently unused, but validates the value can be decrypted)
-    let _webhook_url = if config.encrypted {
+    // Decrypt the URL from DB — this is the actual URL we want to test
+    let webhook_url = if config.encrypted {
         match state.secrets.decrypt(&config.value) {
             Ok(url) => url,
             Err(e) => {
@@ -332,8 +332,12 @@ pub async fn test_webhook(
         config.value
     };
 
-    // Test the webhook
-    match state.webhooks.test_connection().await {
+    // Test the decrypted DB URL (not the env-var URL)
+    match state
+        .alert_router
+        .test_webhook_url(&webhook_url, &request.webhook_type)
+        .await
+    {
         Ok(_) => Ok(Json(TestWebhookResponse {
             success: true,
             message: format!("{} webhook test successful", request.webhook_type),

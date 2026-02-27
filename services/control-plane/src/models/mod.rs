@@ -875,3 +875,36 @@ pub struct UpdateOpenClawConfigRequest {
     /// Pairing code received from Telegram bot (encrypted at rest)
     pub telegram_pairing_code: Option<String>,
 }
+
+// ============================================================================
+// Bot Notification Settings
+// ============================================================================
+
+/// Per-bot notification settings (webhook URLs encrypted at rest)
+#[derive(Debug, Clone, FromRow)]
+pub struct BotNotificationSettings {
+    pub bot_id: Uuid,
+    pub discord_webhook_url: Option<String>,
+    pub email_webhook_url: Option<String>,
+    pub notifications_enabled: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Request to update notification settings. `None` = keep existing; `Some("")` = clear.
+#[derive(Debug, Deserialize)]
+pub struct UpdateNotificationSettingsRequest {
+    pub discord_webhook_url: Option<String>,
+    pub email_webhook_url: Option<String>,
+    pub notifications_enabled: Option<bool>,
+}
+
+/// Response for notification settings (never exposes raw URLs)
+#[derive(Debug, Serialize)]
+pub struct NotificationSettingsResponse {
+    pub bot_id: Uuid,
+    pub discord_configured: bool,
+    pub email_configured: bool,
+    pub notifications_enabled: bool,
+    pub updated_at: DateTime<Utc>,
+}

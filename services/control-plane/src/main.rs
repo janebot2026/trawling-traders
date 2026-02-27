@@ -75,8 +75,12 @@ async fn main() -> anyhow::Result<()> {
     control_plane::provisioning::spawn_data_retention_task(db.clone());
     info!("✓ Data retention cleanup task spawned");
 
-    // Spawn offline bot checker (alerting)
-    control_plane::alerting::spawn_offline_checker(db.clone(), state.alerts.clone());
+    // Spawn offline bot checker (alerting + webhook routing)
+    control_plane::alerting::spawn_offline_checker(
+        db.clone(),
+        state.alerts.clone(),
+        state.alert_router.clone(),
+    );
     info!("✓ Offline bot checker spawned");
 
     // BUG-003: Spawn subscription cache cleanup (evicts stale entries every 5 min)
@@ -234,6 +238,14 @@ async fn build_router(
         .route(
             "/bots/{id}/openclaw-config",
             post(control_plane::handlers::openclaw_config::update_openclaw_config),
+        )
+        .route(
+            "/bots/{id}/notifications",
+            get(control_plane::handlers::notifications::get_notification_settings),
+        )
+        .route(
+            "/bots/{id}/notifications",
+            patch(control_plane::handlers::notifications::update_notification_settings),
         )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

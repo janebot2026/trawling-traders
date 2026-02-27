@@ -11,6 +11,7 @@ pub mod handlers {
     pub mod chat;
     pub mod docs;
     pub mod helpers;
+    pub mod notifications;
     pub mod openclaw_config;
     pub mod presets;
     pub mod reports;
@@ -38,7 +39,7 @@ pub use db::Db;
 pub use models::*;
 pub use observability::{Logger, MetricsCollector};
 pub use secrets::SecretsManager;
-pub use webhook::{WebhookConfig, WebhookNotifier};
+pub use webhook::{AlertRouter, WebhookConfig, WebhookNotifier};
 
 /// Cached subscription entry: (product_id, expires_at, bot_count, cached_at)
 ///
@@ -72,6 +73,8 @@ pub struct AppState {
     pub jwt_service: Option<cedros_login::services::JwtService>,
     /// Circuit breaker for DO provisioning API calls
     pub provision_cb: provisioning::CircuitBreaker,
+    /// Alert router: routes alerts to admin or per-trader webhook destinations
+    pub alert_router: AlertRouter,
     /// Shared outbound HTTP client for webhook/LLM calls
     pub http_client: reqwest::Client,
     /// In-memory subscription cache keyed by user_id (60 s TTL).
@@ -88,15 +91,26 @@ impl AppState {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
+        let secrets = SecretsManager::new();
+        let alerts = AlertManager::new(AlertConfig::default());
+        let webhooks = WebhookNotifier::new(WebhookConfig::default(), http_client.clone());
+        let alert_router = AlertRouter::new(
+            db.clone(),
+            alerts.clone(),
+            webhooks.clone(),
+            secrets.clone(),
+        );
+
         Self {
             db,
-            secrets: SecretsManager::new(),
+            secrets,
             metrics: MetricsCollector::new(),
             rate_limiter: middleware::rate_limit::RateLimiter::new(60, 100),
             bot_rate_limiter: middleware::rate_limit::RateLimiter::new(60, 120),
             droplet_semaphore: Arc::new(Semaphore::new(max_concurrent)),
-            alerts: AlertManager::new(AlertConfig::default()),
-            webhooks: WebhookNotifier::new(WebhookConfig::default(), http_client.clone()),
+            alerts,
+            webhooks,
+            alert_router,
             jwt_service: None,
             provision_cb: provisioning::create_provision_circuit_breaker(),
             http_client,
