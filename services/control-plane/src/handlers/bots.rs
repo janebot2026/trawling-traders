@@ -1236,6 +1236,40 @@ pub async fn get_events(
     }))
 }
 
+/// GET /bots/:id/wallet — Get bot wallet info with cached Solana balance
+pub async fn get_bot_wallet(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthContext>,
+    Path(bot_id): Path<Uuid>,
+) -> Result<Json<BotWalletResponse>, (StatusCode, String)> {
+    let bot = super::helpers::get_authorized_bot_for_auth(&state.db, &auth, bot_id).await?;
+
+    let balance_lamports = if let Some(ref pubkey) = bot.agent_wallet {
+        let rpc_url = crate::config::get_config_or(
+            &state.db,
+            crate::config::keys::SOLANA_RPC_URL,
+            "https://api.mainnet-beta.solana.com",
+        )
+        .await;
+        state
+            .wallet_cache
+            .get_or_fetch(bot_id, pubkey, &state.http_client, &rpc_url)
+            .await
+    } else {
+        None
+    };
+
+    let balance_sol = balance_lamports.map(|l| l as f64 / 1_000_000_000.0);
+
+    Ok(Json(BotWalletResponse {
+        bot_id,
+        agent_wallet: bot.agent_wallet,
+        embedded_wallet_id: bot.embedded_wallet_id,
+        balance_lamports,
+        balance_sol,
+    }))
+}
+
 use validator::Validate;
 
 /// GET /me - Get current user from JWT

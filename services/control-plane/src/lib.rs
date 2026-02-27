@@ -26,6 +26,7 @@ pub mod middleware;
 pub mod observability;
 pub mod provisioning;
 pub mod secrets;
+pub mod wallet;
 pub mod webhook;
 
 use std::collections::HashMap;
@@ -82,6 +83,8 @@ pub struct AppState {
     /// Avoids a DB round-trip on every authenticated request. Wrapped in
     /// `Arc<RwLock<…>>` so the `Clone` on `AppState` shares the same map.
     pub subscription_cache: Arc<RwLock<HashMap<Uuid, SubscriptionCacheEntry>>>,
+    /// Cached Solana balances for bot wallets (refreshed every 5 min).
+    pub wallet_cache: wallet::WalletBalanceCache,
 }
 
 impl AppState {
@@ -115,6 +118,7 @@ impl AppState {
             provision_cb: provisioning::create_provision_circuit_breaker(),
             http_client,
             subscription_cache: Arc::new(RwLock::new(HashMap::new())),
+            wallet_cache: wallet::WalletBalanceCache::new(),
         }
     }
 

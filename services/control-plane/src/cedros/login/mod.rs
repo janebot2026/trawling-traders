@@ -93,6 +93,12 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         .flatten()
         .or_else(|| std::env::var("WEBAUTHN_RP_ORIGIN").ok());
 
+    // Read wallet (SSS embedded wallet) config from platform_config
+    let wallet_enabled =
+        config::get_config_or(&pool, keys::WALLET_ENABLED, "false").await == "true";
+    let wallet_recovery_mode_str =
+        config::get_config_or(&pool, keys::WALLET_RECOVERY_MODE, "share_c_only").await;
+
     // Build config - database config not needed since we pass the pool directly
     let config = cedros_login::Config {
         server: cedros_login::config::ServerConfig {
@@ -151,7 +157,11 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         sso: cedros_login::config::SsoConfig {
             enabled: sso_enabled,
         },
-        wallet: Default::default(),
+        wallet: cedros_login::config::WalletConfig {
+            enabled: wallet_enabled,
+            recovery_mode: wallet_recovery_mode_str.parse().unwrap_or_default(),
+            ..Default::default()
+        },
         privacy: Default::default(),
     };
 
@@ -207,6 +217,9 @@ pub async fn discovery_handler(
     }
     if config::get_config_or(&pool, keys::WEBAUTHN_ENABLED, "false").await == "true" {
         providers.push("webauthn");
+    }
+    if config::get_config_or(&pool, keys::WALLET_ENABLED, "false").await == "true" {
+        providers.push("wallet");
     }
 
     axum::Json(serde_json::json!({ "providers": providers }))
@@ -272,6 +285,8 @@ const AUTH_SETTINGS_MAP: &[(&str, &str, &str)] = &[
         "auth_webauthn_rp_origin",
         "auth.webauthn",
     ),
+    (keys::WALLET_ENABLED, "feature_wallet_enabled", "features"),
+    (keys::WALLET_RECOVERY_MODE, "wallet_recovery_mode", "wallet"),
 ];
 
 /// Sync a single platform_config key to cedros-login's system_settings table.

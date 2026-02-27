@@ -169,6 +169,7 @@ pub struct Bot {
     pub region: String,
     pub ip_address: Option<String>,
     pub agent_wallet: Option<String>,
+    pub embedded_wallet_id: Option<String>,
     pub desired_version_id: Uuid,
     pub applied_version_id: Option<Uuid>,
     pub config_status: ConfigStatus,
@@ -322,6 +323,20 @@ pub struct ListBotsResponse {
 pub struct BotResponse {
     pub bot: Bot,
     pub config: Option<ConfigVersion>,
+}
+
+/// Wallet info for a bot (balance + wallet IDs)
+#[derive(Debug, Serialize)]
+pub struct BotWalletResponse {
+    pub bot_id: Uuid,
+    /// Solana public key (Base58), set by the bot agent at registration
+    pub agent_wallet: Option<String>,
+    /// Cedros-login embedded wallet ID (set once SSS wallets are live)
+    pub embedded_wallet_id: Option<String>,
+    /// Balance in lamports (cached, may be slightly stale)
+    pub balance_lamports: Option<u64>,
+    /// Balance in SOL (lamports / 1e9), convenience field
+    pub balance_sol: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]

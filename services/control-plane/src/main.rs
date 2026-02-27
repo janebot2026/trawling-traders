@@ -87,6 +87,21 @@ async fn main() -> anyhow::Result<()> {
     state.spawn_subscription_cache_cleanup();
     info!("✓ Subscription cache cleanup task spawned");
 
+    // Spawn wallet balance refresh task (batch-fetches Solana balances every 5 min)
+    let rpc_url = control_plane::config::get_config_or(
+        &db,
+        control_plane::config::keys::SOLANA_RPC_URL,
+        "https://api.mainnet-beta.solana.com",
+    )
+    .await;
+    control_plane::wallet::spawn_balance_refresh_task(
+        db.clone(),
+        state.wallet_cache.clone(),
+        state.http_client.clone(),
+        rpc_url,
+    );
+    info!("✓ Wallet balance refresh task spawned");
+
     // Build router
     let app = build_router(state, db.clone(), login_integration, login_error).await?;
 
@@ -246,6 +261,10 @@ async fn build_router(
         .route(
             "/bots/{id}/notifications",
             patch(control_plane::handlers::notifications::update_notification_settings),
+        )
+        .route(
+            "/bots/{id}/wallet",
+            get(control_plane::handlers::bots::get_bot_wallet),
         )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

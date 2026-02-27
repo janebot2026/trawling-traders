@@ -128,4 +128,8 @@ pub mod keys {
     pub const WEBAUTHN_RP_ID: &str = "webauthn_rp_id";
     pub const WEBAUTHN_RP_NAME: &str = "webauthn_rp_name";
     pub const WEBAUTHN_RP_ORIGIN: &str = "webauthn_rp_origin";
+
+    // Wallet (SSS embedded wallets)
+    pub const WALLET_ENABLED: &str = "wallet_enabled";
+    pub const WALLET_RECOVERY_MODE: &str = "wallet_recovery_mode";
 }
