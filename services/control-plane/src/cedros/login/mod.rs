@@ -120,7 +120,7 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         email: cedros_login::config::EmailConfig {
             enabled: email_enabled,
             block_disposable_emails: block_disposable,
-            require_verification: require_verification,
+            require_verification,
             ..Default::default()
         },
         google: cedros_login::config::GoogleConfig {
