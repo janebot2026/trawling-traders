@@ -292,19 +292,22 @@ pub async fn sync_auth_setting(pool: &PgPool, platform_key: &str, value: &str) -
     true
 }
 
-/// Sync all auth settings from platform_config to system_settings at startup.
+/// Seed auth settings from platform_config into system_settings at startup.
 ///
-/// Ensures cedros-login's runtime settings match our platform_config state.
+/// Uses `DO NOTHING` so existing values (set via admin UI) are preserved.
+/// Only inserts rows that don't exist yet — never overwrites.
+/// For live updates (admin changes platform_config), use `sync_auth_setting`
+/// which intentionally overwrites.
 pub async fn sync_all_auth_settings(pool: &PgPool) {
     for &(platform_key, ss_key, ss_category) in AUTH_SETTINGS_MAP {
         let value = config::get_config_or(pool, platform_key, "").await;
         if value.is_empty() {
-            continue; // Don't overwrite cedros-login defaults with empty strings
+            continue; // Don't seed empty strings
         }
         let result = sqlx::query(
             "INSERT INTO system_settings (key, value, category, is_secret, updated_at)
              VALUES ($1, $2, $3, false, NOW())
-             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+             ON CONFLICT (key) DO NOTHING",
         )
         .bind(ss_key)
         .bind(&value)
@@ -317,11 +320,11 @@ pub async fn sync_all_auth_settings(pool: &PgPool) {
                 platform_key,
                 system_settings_key = ss_key,
                 error = %e,
-                "Startup sync: failed to sync auth setting"
+                "Startup seed: failed to seed auth setting"
             );
         }
     }
-    tracing::info!("Synced auth settings from platform_config to system_settings");
+    tracing::info!("Seeded auth settings from platform_config to system_settings (existing values preserved)");
 }
 
 /// Simple placeholder routes (used when full integration fails)
