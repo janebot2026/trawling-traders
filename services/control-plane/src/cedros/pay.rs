@@ -62,6 +62,18 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<Router> {
     cfg.paywall.postgres_url = Some(database_url.clone());
     cfg.coupons.postgres_url = Some(database_url);
 
+    // Solana RPC — single source of truth from our platform_config.
+    // Feeds cedros-pay's x402 payment verification so we don't configure it in two places.
+    let solana_rpc_url = crate::config::get_config_or(
+        &pool,
+        crate::config::keys::SOLANA_RPC_URL,
+        "https://api.mainnet-beta.solana.com",
+    )
+    .await;
+    if cfg.x402.rpc_url.is_empty() && !solana_rpc_url.is_empty() {
+        cfg.x402.rpc_url = solana_rpc_url;
+    }
+
     // Cedros Login integration - allows cedros-pay to validate admin JWTs
     // by fetching JWKS from our embedded cedros-login instance
     let login_base = format!("http://127.0.0.1:{}/v1/auth", port);
