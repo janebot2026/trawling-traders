@@ -965,9 +965,9 @@ dependencies = [
 
 [[package]]
 name = "cedros-login-server"
-version = "0.0.19"
+version = "0.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e00843d8e844b121f80360fd5766ff5de49e04ced6086aa50fe434f6eb9d9ce9"
+checksum = "c780b574c668c5048f84a091da775ac62d6fc5e72c6f39ca912fa2588632a950"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1015,9 +1015,9 @@ dependencies = [
 
 [[package]]
 name = "cedros-pay"
-version = "1.1.17"
+version = "1.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ba9f146e11e840685d87ac4122653a7683d586a0632b078915c618c7b612665"
+checksum = "46180da2321eabff55786e5e0c55342dde91f0937e6aa85c8bc9e9aeb7ebe211"
 dependencies = [
  "aes-gcm",
  "anyhow",
