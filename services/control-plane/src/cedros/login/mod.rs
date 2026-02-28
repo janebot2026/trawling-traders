@@ -188,43 +188,6 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
     })
 }
 
-/// Dynamic auth discovery handler — reads enabled providers from platform_config.
-///
-/// Returns `{ "providers": ["email", ...] }`. Reads DB on every call so admin
-/// toggles take effect immediately without restart.
-pub async fn discovery_handler(
-    axum::extract::Extension(pool): axum::extract::Extension<PgPool>,
-) -> axum::Json<serde_json::Value> {
-    let mut providers = Vec::new();
-
-    if config::get_config_or(&pool, keys::EMAIL_AUTH_ENABLED, "true").await == "true" {
-        providers.push("email");
-    }
-    if config::get_config_or(&pool, keys::GOOGLE_AUTH_ENABLED, "false").await == "true" {
-        providers.push("google");
-    }
-    if config::get_config_or(&pool, keys::APPLE_AUTH_ENABLED, "false").await == "true" {
-        providers.push("apple");
-    }
-    if config::get_config_or(&pool, keys::SOLANA_AUTH_ENABLED, "false").await == "true" {
-        providers.push("solana");
-    }
-    if config::get_config_or(&pool, keys::INSTANT_LINK_ENABLED, "false").await == "true" {
-        providers.push("instantLink");
-    }
-    if config::get_config_or(&pool, keys::SSO_ENABLED, "false").await == "true" {
-        providers.push("sso");
-    }
-    if config::get_config_or(&pool, keys::WEBAUTHN_ENABLED, "false").await == "true" {
-        providers.push("webauthn");
-    }
-    if config::get_config_or(&pool, keys::WALLET_ENABLED, "false").await == "true" {
-        providers.push("wallet");
-    }
-
-    axum::Json(serde_json::json!({ "providers": providers }))
-}
-
 // ============================================================================
 // Runtime settings sync — platform_config → cedros-login system_settings
 // ============================================================================

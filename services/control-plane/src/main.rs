@@ -481,11 +481,8 @@ async fn build_router(
                 }
             },
         ))) // cedros-pay applies its own route prefix
-        .merge(
-            Router::new()
-                .route("/v1/auth/discovery", get(control_plane::cedros::login::discovery_handler))
-                .layer(axum::extract::Extension(pool.clone())),
-        )
+        // cedros-login v0.0.19+ provides its own /discovery endpoint.
+        // Our AUTH_SETTINGS_MAP sync ensures it returns the correct providers.
         .nest("/v1/auth", login_routes.layer(axum::middleware::from_fn(
             |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| async move {
                 let method = req.method().clone();
