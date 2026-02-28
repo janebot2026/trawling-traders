@@ -324,7 +324,9 @@ pub async fn sync_all_auth_settings(pool: &PgPool) {
             );
         }
     }
-    tracing::info!("Seeded auth settings from platform_config to system_settings (existing values preserved)");
+    tracing::info!(
+        "Seeded auth settings from platform_config to system_settings (existing values preserved)"
+    );
 }
 
 /// Simple placeholder routes (used when full integration fails)
