@@ -843,9 +843,9 @@ dependencies = [
 
 [[package]]
 name = "cedros-login-server"
-version = "0.0.30"
+version = "0.0.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "def48952fc9b8bb961a8f94ef32c8e6d10d0ae9d75a756f7d8308fe179bef480"
+checksum = "f4914b2583eacd1153f9a6aa0a64997f0085d26269de2f4be920e6e59d5a20e6"
 dependencies = [
  "aes-gcm",
  "anyhow",
