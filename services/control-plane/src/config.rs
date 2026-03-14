@@ -137,4 +137,7 @@ pub mod keys {
     pub const DEPOSIT_ENABLED: &str = "deposit_enabled";
     pub const DEPOSIT_COMPANY_WALLET: &str = "deposit_company_wallet";
     pub const DEPOSIT_COMPANY_CURRENCY: &str = "deposit_company_currency";
+    pub const SIDECAR_API_KEY: &str = "sidecar_api_key";
+    pub const NOTE_ENCRYPTION_KEY: &str = "note_encryption_key";
+    pub const SIDECAR_URL: &str = "sidecar_url";
 }

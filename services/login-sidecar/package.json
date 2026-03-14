@@ -1,0 +1,14 @@
+{
+  "name": "@trawling-traders/login-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node node_modules/@cedros/login-sidecar/dist/index.js"
+  },
+  "dependencies": {
+    "@cedros/login-sidecar": "0.0.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
