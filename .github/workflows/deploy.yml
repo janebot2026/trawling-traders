@@ -14,12 +14,15 @@ on:
           - "all"
           - "control-plane"
           - "data-retrieval"
+          - "login-sidecar"
 
 env:
   CONTROL_PLANE_IMAGE: hdbdocker/trawling-traders-control-plane:latest
   CONTROL_PLANE_IMAGE_SHA: hdbdocker/trawling-traders-control-plane:${{ github.sha }}
   DATA_RETRIEVAL_IMAGE: hdbdocker/trawling-traders-data-retrieval:latest
   DATA_RETRIEVAL_IMAGE_SHA: hdbdocker/trawling-traders-data-retrieval:${{ github.sha }}
+  LOGIN_SIDECAR_IMAGE: hdbdocker/trawling-traders-login-sidecar:latest
+  LOGIN_SIDECAR_IMAGE_SHA: hdbdocker/trawling-traders-login-sidecar:${{ github.sha }}
 
 jobs:
   check-changes:
@@ -27,6 +30,7 @@ jobs:
     outputs:
       control_plane_changed: ${{ steps.changes.outputs.control_plane }}
       data_retrieval_changed: ${{ steps.changes.outputs.data_retrieval }}
+      login_sidecar_changed: ${{ steps.changes.outputs.login_sidecar }}
       deploy_all: ${{ github.event.inputs.services == 'all' || github.event_name == 'push' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -51,6 +55,11 @@ jobs:
             echo "data_retrieval=true" >> $GITHUB_OUTPUT
           else
             echo "data_retrieval=false" >> $GITHUB_OUTPUT
+          fi
+          if git diff --name-only "$BASE" HEAD | grep -q "^services/login-sidecar/"; then
+            echo "login_sidecar=true" >> $GITHUB_OUTPUT
+          else
+            echo "login_sidecar=false" >> $GITHUB_OUTPUT
           fi
 
   lint-and-test:
@@ -181,8 +190,39 @@ jobs:
           cache-from: type=gha,scope=data-retrieval
           cache-to: type=gha,mode=max,scope=data-retrieval
 
+  build-login-sidecar:
+    needs: [check-changes]
+    if: |
+      needs.check-changes.outputs.deploy_all == 'true' ||
+      needs.check-changes.outputs.login_sidecar_changed == 'true' ||
+      github.event.inputs.services == 'login-sidecar'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca  # v3.9.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push login-sidecar
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75  # v6.9.0
+        with:
+          context: ./services/login-sidecar
+          file: ./services/login-sidecar/Dockerfile
+          push: true
+          tags: |
+            ${{ env.LOGIN_SIDECAR_IMAGE }}
+            ${{ env.LOGIN_SIDECAR_IMAGE_SHA }}
+          cache-from: type=gha,scope=login-sidecar
+          cache-to: type=gha,mode=max,scope=login-sidecar
+
   deploy:
-    needs: [check-changes, build-control-plane, build-data-retrieval]
+    needs: [check-changes, build-control-plane, build-data-retrieval, build-login-sidecar]
     # always() is required because build jobs may be skipped when their
     # service had no changes. The conditions ensure at least one build
     # succeeded and no build failed.
@@ -190,7 +230,8 @@ jobs:
       always() &&
       (needs.build-control-plane.result == 'success' || needs.build-control-plane.result == 'skipped') &&
       (needs.build-data-retrieval.result == 'success' || needs.build-data-retrieval.result == 'skipped') &&
-      (needs.build-control-plane.result == 'success' || needs.build-data-retrieval.result == 'success')
+      (needs.build-login-sidecar.result == 'success' || needs.build-login-sidecar.result == 'skipped') &&
+      (needs.build-control-plane.result == 'success' || needs.build-data-retrieval.result == 'success' || needs.build-login-sidecar.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to Server
@@ -266,6 +307,31 @@ jobs:
               echo "control-plane deployed successfully"
             fi
 
+            # Deploy login-sidecar only if its build job succeeded.
+            if [[ "${{ needs.build-login-sidecar.result }}" == "success" ]] && docker pull ${{ env.LOGIN_SIDECAR_IMAGE_SHA }} 2>/dev/null; then
+              echo "Deploying login-sidecar..."
+              docker stop trawling-traders-login-sidecar 2>/dev/null || true
+              docker rm trawling-traders-login-sidecar 2>/dev/null || true
+
+              SC_ENV_FILE="$(mktemp)"
+              printf 'DATABASE_URL=%s\nSIDECAR_API_KEY=%s\n' \
+                '${{ secrets.DATABASE_URL }}' \
+                '${{ secrets.SIDECAR_API_KEY }}' \
+                > "$SC_ENV_FILE"
+
+              docker run -d --restart unless-stopped \
+                --name trawling-traders-login-sidecar \
+                --network trawling-traders-network \
+                -p 127.0.0.1:3100:3100 \
+                --env HOST=0.0.0.0 \
+                --env PORT=3100 \
+                --env-file "$SC_ENV_FILE" \
+                ${{ env.LOGIN_SIDECAR_IMAGE_SHA }}
+
+              rm -f "$SC_ENV_FILE"
+              echo "login-sidecar deployed successfully"
+            fi
+
             # Show running containers
             echo ""
             echo "=== Running Trawling Traders containers ==="
@@ -296,6 +362,17 @@ jobs:
               fi
             else
               echo "data-retrieval: FAILED - check logs with: docker logs trawling-traders-data-retrieval"
+            fi
+
+            if docker ps --filter "name=trawling-traders-login-sidecar" --filter "status=running" -q | grep -q .; then
+              if curl -sf --max-time 5 http://127.0.0.1:3100/health > /dev/null 2>&1; then
+                echo "login-sidecar: Healthy (HTTP 200)"
+              else
+                echo "login-sidecar: WARNING - container running but HTTP health check failed"
+                docker logs --tail 20 trawling-traders-login-sidecar
+              fi
+            else
+              echo "login-sidecar: FAILED - check logs with: docker logs trawling-traders-login-sidecar"
             fi
 
   deployment-notification:
