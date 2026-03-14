@@ -132,4 +132,9 @@ pub mod keys {
     // Wallet (SSS embedded wallets)
     pub const WALLET_ENABLED: &str = "wallet_enabled";
     pub const WALLET_RECOVERY_MODE: &str = "wallet_recovery_mode";
+
+    // Deposits (Privacy Cash)
+    pub const DEPOSIT_ENABLED: &str = "deposit_enabled";
+    pub const DEPOSIT_COMPANY_WALLET: &str = "deposit_company_wallet";
+    pub const DEPOSIT_COMPANY_CURRENCY: &str = "deposit_company_currency";
 }

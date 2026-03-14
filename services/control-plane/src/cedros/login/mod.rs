@@ -99,6 +99,16 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
     let wallet_recovery_mode_str =
         config::get_config_or(&pool, keys::WALLET_RECOVERY_MODE, "share_c_only").await;
 
+    // Read deposit (Privacy Cash) config from platform_config
+    let deposit_enabled =
+        config::get_config_or(&pool, keys::DEPOSIT_ENABLED, "false").await == "true";
+    let deposit_company_wallet = config::get_config(&pool, keys::DEPOSIT_COMPANY_WALLET)
+        .await
+        .ok()
+        .flatten();
+    let deposit_company_currency =
+        config::get_config_or(&pool, keys::DEPOSIT_COMPANY_CURRENCY, "SOL").await;
+
     // Build config - database config not needed since we pass the pool directly
     let config = cedros_login::Config {
         server: cedros_login::config::ServerConfig {
@@ -162,7 +172,12 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
             recovery_mode: wallet_recovery_mode_str.parse().unwrap_or_default(),
             ..Default::default()
         },
-        privacy: Default::default(),
+        privacy: cedros_login::config::PrivacyConfig {
+            enabled: deposit_enabled,
+            company_wallet_address: deposit_company_wallet,
+            company_currency: deposit_company_currency,
+            ..Default::default()
+        },
     };
 
     // Create JwtService for token validation in our auth middleware
@@ -250,6 +265,17 @@ const AUTH_SETTINGS_MAP: &[(&str, &str, &str)] = &[
     ),
     (keys::WALLET_ENABLED, "feature_wallet_enabled", "features"),
     (keys::WALLET_RECOVERY_MODE, "wallet_recovery_mode", "wallet"),
+    (keys::DEPOSIT_ENABLED, "deposit_enabled", "deposit"),
+    (
+        keys::DEPOSIT_COMPANY_WALLET,
+        "deposit_company_wallet",
+        "deposit",
+    ),
+    (
+        keys::DEPOSIT_COMPANY_CURRENCY,
+        "deposit_company_token",
+        "deposit",
+    ),
 ];
 
 /// Sync a single platform_config key to cedros-login's system_settings table.
