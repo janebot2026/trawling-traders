@@ -289,12 +289,10 @@ jobs:
               # Stripe config is managed via cedros-pay admin at /v1/pay/admin/config
               # Write secrets to a temp env file so they are not visible in `docker inspect`
               CP_ENV_FILE="$(mktemp)"
-              printf 'DATABASE_URL=%s\nJWT_SECRET=%s\nSECRETS_ENCRYPTION_KEY=%s\nSIDECAR_API_KEY=%s\nNOTE_ENCRYPTION_KEY=%s\n' \
+              printf 'DATABASE_URL=%s\nJWT_SECRET=%s\nSECRETS_ENCRYPTION_KEY=%s\n' \
                 '${{ secrets.DATABASE_URL }}' \
                 '${{ secrets.JWT_SECRET }}' \
                 '${{ secrets.SECRETS_ENCRYPTION_KEY }}' \
-                '${{ secrets.SIDECAR_API_KEY }}' \
-                '${{ secrets.NOTE_ENCRYPTION_KEY }}' \
                 > "$CP_ENV_FILE"
 
               docker run -d --restart unless-stopped \
