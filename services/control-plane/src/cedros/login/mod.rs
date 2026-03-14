@@ -108,7 +108,8 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         .flatten();
     let deposit_company_currency =
         config::get_config_or(&pool, keys::DEPOSIT_COMPANY_CURRENCY, "SOL").await;
-    let sidecar_url = config::get_config_or(&pool, keys::SIDECAR_URL, "http://127.0.0.1:3100").await;
+    let sidecar_url =
+        config::get_config_or(&pool, keys::SIDECAR_URL, "http://127.0.0.1:3100").await;
     let sidecar_api_key = config::get_config(&pool, keys::SIDECAR_API_KEY)
         .await
         .ok()
