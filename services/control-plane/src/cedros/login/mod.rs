@@ -110,14 +110,19 @@ pub async fn full_router(pool: PgPool) -> anyhow::Result<LoginIntegration> {
         config::get_config_or(&pool, keys::DEPOSIT_COMPANY_CURRENCY, "SOL").await;
     let sidecar_url =
         config::get_config_or(&pool, keys::SIDECAR_URL, "http://127.0.0.1:3100").await;
-    let sidecar_api_key = config::get_config(&pool, keys::SIDECAR_API_KEY)
-        .await
+    let sidecar_api_key =
+        std::env::var("SIDECAR_API_KEY")
+            .ok()
+            .or(config::get_config(&pool, keys::SIDECAR_API_KEY)
+                .await
+                .ok()
+                .flatten());
+    let note_encryption_key = std::env::var("NOTE_ENCRYPTION_KEY")
         .ok()
-        .flatten();
-    let note_encryption_key = config::get_config(&pool, keys::NOTE_ENCRYPTION_KEY)
-        .await
-        .ok()
-        .flatten();
+        .or(config::get_config(&pool, keys::NOTE_ENCRYPTION_KEY)
+            .await
+            .ok()
+            .flatten());
 
     // Build config - database config not needed since we pass the pool directly
     let config = cedros_login::Config {
