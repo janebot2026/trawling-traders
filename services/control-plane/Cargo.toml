@@ -55,6 +55,9 @@ bs58 = "0.5"
 rust_decimal = { version = "1.40", features = ["serde", "maths"] }
 bigdecimal = { version = "0.4", features = ["serde"] }
 
+# Wilder ADX (TA-Lib-matched) for trend strength
+fin-primitives = { version = "4.0.1", default-features = false, features = ["ta-compat"] }
+
 # Cedros Pay integration - embedded payments with auto-migration
 cedros-pay = "1.1.21"
 

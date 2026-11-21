@@ -1237,6 +1237,7 @@ dependencies = [
  "chrono",
  "claw-spawn",
  "data-retrieval",
+ "fin-primitives",
  "futures",
  "hex",
  "rand 0.8.5",
@@ -1845,6 +1846,18 @@ name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
+
+[[package]]
+name = "fin-primitives"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ea881ed57c18c5e839ac4ea0b0d91b3f9e499412e5957e4608ac9efa62c716b"
+dependencies = [
+ "chrono",
+ "libm",
+ "rust_decimal",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "find-msvc-tools"

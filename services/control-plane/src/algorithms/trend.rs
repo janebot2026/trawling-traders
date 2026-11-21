@@ -7,7 +7,28 @@
 
 use super::{Algorithm, AlgorithmParams, Candle, MarketContext, Signal};
 use crate::models::AlgorithmMode;
+use fin_primitives::ta_compat::indicators::AverageDirectionalIndex;
+use fin_primitives::ta_compat::{Close, High, Low, Next};
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
+
+impl High for Candle {
+    fn high(&self) -> f64 {
+        self.high.to_f64().unwrap_or(f64::NAN)
+    }
+}
+
+impl Low for Candle {
+    fn low(&self) -> f64 {
+        self.low.to_f64().unwrap_or(f64::NAN)
+    }
+}
+
+impl Close for Candle {
+    fn close(&self) -> f64 {
+        self.close.to_f64().unwrap_or(f64::NAN)
+    }
+}
 
 /// Trend Following Algorithm
 /// Generates buy signals when fast EMA crosses above slow EMA
@@ -49,59 +70,11 @@ impl TrendFollowingAlgorithm {
     }
 
     /// Calculate Average Directional Index (ADX) for trend strength
+    /// (Wilder's ADX, matching TA-Lib: smoothed +DI/-DI, DX averaged into ADX)
     fn calculate_adx(&self, candles: &[Candle], period: usize) -> Option<Decimal> {
-        if candles.len() < period + 1 {
-            return None;
-        }
-
-        // Simplified ADX calculation
-        // In production, this would use full +DI/-DI calculation
-        let mut tr_sum = Decimal::ZERO;
-        let mut dm_plus_sum = Decimal::ZERO;
-        let mut dm_minus_sum = Decimal::ZERO;
-
-        for i in 1..=period {
-            let current = &candles[candles.len() - i];
-            let previous = &candles[candles.len() - i - 1];
-
-            // True Range
-            let tr1 = current.high - current.low;
-            let tr2 = (current.high - previous.close).abs();
-            let tr3 = (current.low - previous.close).abs();
-            let tr = tr1.max(tr2).max(tr3);
-            tr_sum += tr;
-
-            // Directional Movement
-            let dm_plus = if current.high - previous.high > previous.low - current.low {
-                (current.high - previous.high).max(Decimal::ZERO)
-            } else {
-                Decimal::ZERO
-            };
-
-            let dm_minus = if previous.low - current.low > current.high - previous.high {
-                (previous.low - current.low).max(Decimal::ZERO)
-            } else {
-                Decimal::ZERO
-            };
-
-            dm_plus_sum += dm_plus;
-            dm_minus_sum += dm_minus;
-        }
-
-        if tr_sum == Decimal::ZERO {
-            return None;
-        }
-
-        let di_plus = dm_plus_sum / tr_sum * Decimal::from(100);
-        let di_minus = dm_minus_sum / tr_sum * Decimal::from(100);
-
-        let dx = if di_plus + di_minus > Decimal::ZERO {
-            ((di_plus - di_minus).abs() / (di_plus + di_minus)) * Decimal::from(100)
-        } else {
-            Decimal::ZERO
-        };
-
-        Some(dx)
+        let mut adx = AverageDirectionalIndex::new(period).ok()?;
+        let last = candles.iter().map(|c| adx.next(c)).last()?;
+        Decimal::from_f64(last)
     }
 
     /// Check volume confirmation (current volume > average)
@@ -240,5 +213,38 @@ impl Algorithm for TrendFollowingAlgorithm {
 
     fn update_parameters(&mut self, params: AlgorithmParams) {
         self.params = params;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn candle(high: i64, low: i64, close: i64) -> Candle {
+        Candle {
+            timestamp: chrono::Utc::now(),
+            open: Decimal::from(close),
+            high: Decimal::from(high),
+            low: Decimal::from(low),
+            close: Decimal::from(close),
+            volume: Decimal::ONE,
+        }
+    }
+
+    #[test]
+    fn adx_is_smoothed_not_a_single_window_dx() {
+        let algo = TrendFollowingAlgorithm::new(AlgorithmParams::default());
+        // 40 bars up, then 14 bars down: a single 14-bar DX reads 100 here.
+        let mut candles: Vec<Candle> = (0..40).map(|i| candle(101 + i, 99 + i, 100 + i)).collect();
+        candles.extend((0..14).map(|i| candle(138 - i, 136 - i, 137 - i)));
+        let adx = algo.calculate_adx(&candles, 14).unwrap();
+        assert!(adx < Decimal::from(60), "adx = {adx}");
+    }
+
+    #[test]
+    fn adx_needs_warmup() {
+        let algo = TrendFollowingAlgorithm::new(AlgorithmParams::default());
+        let candles: Vec<Candle> = (0..20).map(|i| candle(101 + i, 99 + i, 100 + i)).collect();
+        assert_eq!(algo.calculate_adx(&candles, 14), None);
     }
 }
